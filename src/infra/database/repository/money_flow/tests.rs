@@ -82,8 +82,8 @@ async fn money_flow_repository_pairs_member_values_with_previous_day() {
     // 以種入的會員市值取代重算結果，驗證對照：前一日 100、當日 120。
     cleanup().await;
     sqlx::query(
-        "INSERT INTO daily_money_history_member (date, member_id, market_value)
-         VALUES ($1, $3, 100), ($2, $3, 120)",
+        "INSERT INTO daily_money_history_member (household_id, date, member_id, market_value)
+         VALUES (1, $1, $3, 100), (1, $2, $3, 120)",
     )
     .bind(previous)
     .bind(current)
@@ -133,6 +133,13 @@ async fn settlement_output_matches_snapshot() {
 
     {
         let conn = tx.as_mut().expect("交易已開啟");
+        // 新結算必須從會員取得家庭，快照夾具明確建立兩位預設家庭會員。
+        for member in [MEMBER_A, MEMBER_B] {
+            sqlx::query(r#"INSERT INTO "Member" ("Id", "Account", "Name", household_id, "CreateTime")
+                VALUES ($1, $2, $2, 1, '1987-01-01') ON CONFLICT ("Id") DO UPDATE SET household_id=1, deleted_at=NULL"#)
+                .bind(member).bind(format!("__snapshot_{member}__"))
+                .execute(&mut **conn).await.expect("建立快照會員");
+        }
         for (date, symbol, price) in [
             ("1987-07-15", "79979SA", "10"),
             ("1987-07-16", "79979SA", "12"),
@@ -215,7 +222,7 @@ async fn settlement_output_matches_snapshot() {
     let members: Vec<String> = sqlx::query_scalar(
         "SELECT concat_ws('|', household_id, member_id, market_value)
          FROM daily_money_history_member
-         WHERE date = $1 AND member_id IN (0, $2, $3)
+         WHERE date = $1 AND household_id = 1 AND member_id IN (0, $2, $3)
          ORDER BY household_id, member_id",
     )
     .bind(current)
@@ -290,51 +297,3 @@ const SNAPSHOT_LOTS: [&str; 6] = [
     "1|979801|1987-04-02|79979SB|19.0000|500|19.0000|-9500.0000|9500.0000|0.0000|0.0000",
     "1|979802|1987-04-03|79979SA|12.0000|2000|11.0000|-22000.0000|24000.0000|2000.0000|9.0909",
 ];
-
-/// 過渡唯一索引：舊版程式的 `ON CONFLICT (date, member_id)` 與
-/// `ON CONFLICT (date, security_code, member_id)` 在新主鍵下仍可執行（L1 後可退版）。
-/// Phase 7 移除過渡索引時一併刪除這個測試。
-#[tokio::test]
-#[cfg_attr(
-    not(feature = "integration-tests"),
-    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
-)]
-async fn legacy_on_conflict_targets_still_work() {
-    dotenvy::dotenv().ok();
-    if database::ping().await.is_err() {
-        println!("跳過 legacy_on_conflict_targets_still_work：無資料庫連接");
-        return;
-    }
-    let date = NaiveDate::from_ymd_opt(1987, 7, 17).expect("固定日期合法");
-    let mut tx = database::get_tx().await.expect("開啟交易");
-    for _ in 0..2 {
-        sqlx::query(
-            "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ($1, 979801, 1)
-             ON CONFLICT (date, member_id) DO UPDATE SET market_value = EXCLUDED.market_value + 1",
-        )
-        .bind(date)
-        .execute(&mut *tx)
-        .await
-        .expect("舊寫法寫入會員市值");
-        sqlx::query(
-            "INSERT INTO daily_money_history_detail (date, security_code, member_id) VALUES ($1, '79979SA', 979801)
-             ON CONFLICT (date, security_code, member_id) DO UPDATE SET total_shares = daily_money_history_detail.total_shares + 1",
-        )
-        .bind(date)
-        .execute(&mut *tx)
-        .await
-        .expect("舊寫法寫入明細");
-    }
-    let (value, shares): (rust_decimal::Decimal, i64) = sqlx::query_as(
-        "SELECT m.market_value, d.total_shares
-         FROM daily_money_history_member m
-         JOIN daily_money_history_detail d ON d.date = m.date AND d.member_id = m.member_id
-         WHERE m.date = $1 AND m.member_id = 979801 AND m.household_id = 1 AND d.household_id = 1",
-    )
-    .bind(date)
-    .fetch_one(&mut *tx)
-    .await
-    .expect("讀回");
-    tx.rollback().await.expect("回滾測試資料");
-    assert_eq!((value, shares), (rust_decimal::Decimal::from(2), 1));
-}

@@ -43,6 +43,7 @@ impl From<TableDailyMoneyHistoryMemberWithPreviousTradingDay>
     fn from(table: TableDailyMoneyHistoryMemberWithPreviousTradingDay) -> Self {
         // 將資料庫對照表結構模型轉換為領域實體，以便應用層處理
         DomainMoneyFlowMemberWithPreviousDay {
+            household_id: table.household_id,
             date: table.date,
             previous_date: table.previous_date,
             member_id: table.member_id,

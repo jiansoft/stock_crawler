@@ -229,7 +229,7 @@ async fn portfolio_history_endpoint_db_semantics() {
     assert_eq!(json["months"], serde_json::json!([]));
 
     for sql in [
-        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2099-01-31', $1, 100), ('2099-02-01', $1, 110), ('2099-02-02', $1, 210), ('2099-03-01', $1, 99)",
+        "INSERT INTO daily_money_history_member (household_id, date, member_id, market_value) VALUES (1, '2099-01-31', $1, 100), (1, '2099-02-01', $1, 110), (1, '2099-02-02', $1, 210), (1, '2099-03-01', $1, 99)",
         // 交易日 01-15（期間前）但 02-01 才補登：記在 02-01。
         "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, date, created_time) VALUES ($1, '79979DA', 1, -10, '2099-01-15', '2099-02-01 10:00+08'), ($1, '79979DA', 1, -100, '2099-02-02', '2099-02-02 10:00+08')",
         "INSERT INTO sell_history (member_id, security_code, date, amount, create_time, is_reverted) VALUES ($1, '79979DA', '2099-03-01', 100, '2099-03-01 10:00+08', false), ($1, '79979DA', '2099-03-01', 999, '2099-03-01 10:00+08', true)",
@@ -285,8 +285,8 @@ async fn portfolio_history_endpoint_db_semantics() {
     // 全部會員：另一位會員 02-02 才開始記錄（市值 50），合計當天多出的 50 視為投入。
     // 02-02：(260 − 100 − 50) ÷ 110；03-01：(149 + 100) ÷ 260。
     for sql in [
-        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2099-02-02', $1 + 1, 50), ('2099-03-01', $1 + 1, 50)",
-        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2099-01-31', 0, 100), ('2099-02-01', 0, 110), ('2099-02-02', 0, 260), ('2099-03-01', 0, 149)",
+        "INSERT INTO daily_money_history_member (household_id, date, member_id, market_value) VALUES (1, '2099-02-02', $1 + 1, 50), (1, '2099-03-01', $1 + 1, 50)",
+        "INSERT INTO daily_money_history_member (household_id, date, member_id, market_value) VALUES (1, '2099-01-31', 0, 100), (1, '2099-02-01', 0, 110), (1, '2099-02-02', 0, 260), (1, '2099-03-01', 0, 149)",
     ] {
         sqlx::query(sql)
             .bind(MEMBER)

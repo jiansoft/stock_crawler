@@ -117,45 +117,24 @@ async fn test_pg_trace_repository_contract() {
         .unwrap();
 }
 
-/// 過渡唯一索引 `idx_trace_legacy_symbol`：舊版 stock_go 的 `/trace set`
-/// （`ON CONFLICT (stock_symbol)`，不帶 member_id、預設歸 #1）在新主鍵下仍可執行。
-/// 上線程序 L2 移除過渡索引時一併刪除這個測試。全部在交易內完成並回滾。
+/// 移除預設值後，省略擁有者的舊追蹤寫法必須失敗，不能默默寫到會員 #1。
 #[tokio::test]
-#[cfg_attr(
-    not(feature = "integration-tests"),
-    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
-)]
-async fn legacy_trace_upsert_by_symbol_still_works() {
-    dotenvy::dotenv().ok();
-    if database::ping().await.is_err() {
-        println!("跳過 legacy_trace_upsert_by_symbol_still_works：無資料庫連接");
-        return;
-    }
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+async fn trace_requires_explicit_member_id() {
     let mut tx = database::get_tx().await.expect("開啟交易");
-    // 舊寫法不帶 member_id，預設歸會員 #1；測試庫可能沒有 #1，在交易內補一筆
-    sqlx::query(
-        r#"INSERT INTO "Member" ("Id", "Account", "Name", household_id)
-           VALUES (1, '__legacy_trace__', '__legacy_trace__', 1) ON CONFLICT ("Id") DO NOTHING"#,
+    let error = sqlx::query(
+        r#"INSERT INTO trace (stock_symbol, floor, ceiling) VALUES ('__TEST_NO_OWNER__', 10, 20)"#,
     )
     .execute(&mut *tx)
     .await
-    .expect("確保會員 #1 存在");
-    for floor in [dec!(10), dec!(11)] {
-        sqlx::query(
-            r#"INSERT INTO "trace" (stock_symbol, floor, ceiling) VALUES ('__TEST_LEGACY__', $1, 20)
-               ON CONFLICT (stock_symbol) DO UPDATE SET floor = EXCLUDED.floor"#,
-        )
-        .bind(floor)
-        .execute(&mut *tx)
-        .await
-        .expect("舊寫法寫入追蹤條件");
-    }
-    let rows: Vec<(i64, rust_decimal::Decimal)> = sqlx::query_as(
-        r#"SELECT member_id, floor FROM "trace" WHERE stock_symbol = '__TEST_LEGACY__'"#,
-    )
-    .fetch_all(&mut *tx)
-    .await
-    .expect("讀回");
+    .expect_err("未指定會員必須失敗");
+    assert_eq!(
+        error
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
+        Some("23502"),
+        "必須由 NOT NULL 約束拒絕缺少會員的寫入"
+    );
     tx.rollback().await.expect("回滾測試資料");
-    assert_eq!(rows, [(1, dec!(11))]);
 }

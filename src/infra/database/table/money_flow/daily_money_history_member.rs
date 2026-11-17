@@ -7,13 +7,15 @@ use crate::infra::database;
 
 /// 每日市值垂直化總覽資料。
 ///
-/// 一筆資料代表特定 `date` 與 `member_id` 的市值總額。
-/// `member_id = 0` 保留為全體總和，其餘值對應實際會員。
+/// 一筆資料代表特定 `date`、`household_id` 與 `member_id` 的市值總額。
+/// `member_id = 0` 保留為該家庭總和，其餘值對應實際會員。
 #[derive(sqlx::FromRow, Debug)]
 pub struct DailyMoneyHistoryMember {
     /// 交易日期。
     pub date: NaiveDate,
-    /// 會員編號；0 代表全體總和。
+    /// 所屬家庭，用於區別各家庭的合計列。
+    pub household_id: i64,
+    /// 會員編號；0 代表該家庭總和。
     pub member_id: i64,
     /// 當日收盤市值總額。
     pub market_value: Decimal,
@@ -30,13 +32,45 @@ pub struct DailyMoneyHistoryMemberWithPreviousTradingDay {
     pub date: NaiveDate,
     /// 前一個交易日日期。
     pub previous_date: Option<NaiveDate>,
-    /// 會員編號；0 代表全體總和。
+    /// 所屬家庭，用於區別各家庭的合計列。
+    pub household_id: i64,
+    /// 會員編號；0 代表該家庭總和。
     pub member_id: i64,
     /// 當日收盤市值總額。
     pub market_value: Decimal,
     /// 前一交易日收盤市值總額。
     pub previous_market_value: Decimal,
 }
+
+/// 逐家庭找最近兩個交易日，合計列必須以家庭與會員的複合鍵配對。
+const PREVIOUS_TRADING_DAY_SQL: &str = r#"
+WITH ranked_dates AS (
+    SELECT household_id, date, ROW_NUMBER() OVER (PARTITION BY household_id ORDER BY date DESC) AS rn
+    FROM (SELECT DISTINCT household_id, date FROM daily_money_history_member WHERE date <= $1) dates
+),
+current_rows AS (
+    SELECT dmh.* FROM daily_money_history_member dmh
+    JOIN ranked_dates rd ON rd.household_id = dmh.household_id AND rd.date = dmh.date AND rd.rn = 1
+),
+previous_rows AS (
+    SELECT dmh.* FROM daily_money_history_member dmh
+    JOIN ranked_dates rd ON rd.household_id = dmh.household_id AND rd.date = dmh.date AND rd.rn = 2
+),
+member_scope AS (
+    SELECT household_id, member_id FROM current_rows
+    UNION
+    SELECT household_id, member_id FROM previous_rows
+)
+SELECT rd.date, pd.date AS previous_date, ms.household_id, ms.member_id,
+       COALESCE(cr.market_value, 0) AS market_value,
+       COALESCE(pr.market_value, 0) AS previous_market_value
+FROM member_scope ms
+JOIN ranked_dates rd ON rd.household_id = ms.household_id AND rd.rn = 1
+LEFT JOIN ranked_dates pd ON pd.household_id = ms.household_id AND pd.rn = 2
+LEFT JOIN current_rows cr ON ms.household_id = cr.household_id AND ms.member_id = cr.member_id
+LEFT JOIN previous_rows pr ON ms.household_id = pr.household_id AND ms.member_id = pr.member_id
+ORDER BY ms.household_id, ms.member_id;
+"#;
 
 impl DailyMoneyHistoryMember {
     /// 依指定日期重算並寫入每日市值垂直總覽。
@@ -45,66 +79,48 @@ impl DailyMoneyHistoryMember {
     /// 1. 保持舊 `daily_money_history` 扁平表不變。
     /// 2. 新增可擴充的新表，避免新增會員時必須再加欄位。
     /// 3. 同一日同時寫入家庭合計 (`member_id = 0`) 與所有未刪除的會員（含已停用，
-    ///    自建立當天起），以及當日前出現過持股的會員；當日無持股也保留 0 值資料列。
+    ///    自建立當天起），以及當日前出現過持股的未刪除會員；當日無持股也保留 0 值資料列。
+    ///
+    /// # Errors
+    /// 會員、持股或報價查詢與寫入失敗時回傳錯誤，由呼叫者決定交易回滾。
     pub async fn upsert(
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO daily_money_history_member (date, household_id, member_id, market_value)
-WITH base_calc AS (
-    SELECT
-        od.member_id,
-        (od.share_quantity * dq."ClosingPrice") AS market_value
-    FROM stock_ownership_details od
-    INNER JOIN "DailyQuotes" dq ON od.security_code = dq."stock_symbol"
-    WHERE od.is_sold = FALSE
-      AND od.date <= $1
-      AND dq."Date" = $1
-),
-member_scope AS (
-    -- 結算對象：所有未刪除的會員（含已停用；is_active 只管登入與通知，不管資產算不算），
-    -- 從建立當天起每天都有一筆 summary 列，沒有持股也落成 0。
-    SELECT m."Id" AS member_id
+WITH member_scope AS (
+    -- 停用會員的資產仍屬家庭；建立前的既有持股也保留，刪除者不參與結算。
+    SELECT m."Id" AS member_id, m.household_id
     FROM "Member" m
     WHERE m.deleted_at IS NULL
-      AND (m."CreateTime" AT TIME ZONE 'Asia/Taipei')::date <= $1
-    UNION
-    -- 當日前出現過持股的會員也保留（會員列建立前就有的持股、沒有會員列的資料）；已刪除的會員除外
-    SELECT od.member_id
+      AND ((m."CreateTime" AT TIME ZONE 'Asia/Taipei')::date <= $1
+           OR EXISTS (SELECT 1 FROM stock_ownership_details od WHERE od.member_id = m."Id" AND od.date <= $1))
+),
+base_calc AS (
+    SELECT ms.household_id, od.member_id,
+           od.share_quantity * dq."ClosingPrice" AS market_value
     FROM stock_ownership_details od
-    WHERE od.date <= $1
-      AND od.member_id > 0
-      AND NOT EXISTS (
-          SELECT 1 FROM "Member" dm WHERE dm."Id" = od.member_id AND dm.deleted_at IS NOT NULL
-      )
+    JOIN member_scope ms ON ms.member_id = od.member_id
+    JOIN "DailyQuotes" dq ON od.security_code = dq.stock_symbol AND dq."Date" = $1
+    WHERE od.is_sold = FALSE AND od.date <= $1
 ),
 member_agg AS (
-    SELECT
-        bc.member_id,
-        COALESCE(SUM(bc.market_value), 0) AS market_value
-    FROM base_calc bc
-    GROUP BY bc.member_id
+    SELECT ms.household_id, ms.member_id, COALESCE(SUM(bc.market_value), 0) AS market_value
+    FROM member_scope ms
+    LEFT JOIN base_calc bc ON bc.member_id = ms.member_id AND bc.household_id = ms.household_id
+    GROUP BY ms.household_id, ms.member_id
 ),
 final_rows AS (
-    SELECT
-        0::bigint AS member_id,
-        COALESCE((SELECT SUM(bc.market_value) FROM base_calc bc), 0) AS market_value
-
+    -- 以家庭列為起點，沒有持股或會員的家庭也保留零合計。
+    SELECT h.id AS household_id, 0::bigint AS member_id, COALESCE(SUM(ma.market_value), 0) AS market_value
+    FROM member_household h
+    LEFT JOIN member_agg ma ON ma.household_id = h.id
+    GROUP BY h.id
     UNION ALL
-
-    SELECT
-        ms.member_id,
-        COALESCE(ma.market_value, 0) AS market_value
-    FROM member_scope ms
-    LEFT JOIN member_agg ma ON ms.member_id = ma.member_id
+    SELECT household_id, member_id, market_value FROM member_agg
 )
-SELECT
-    $1 AS date,
-    -- 會員系統 Phase 1：只有家庭 #1，member_id = 0 即該家庭的合計；Phase 7 才依家庭分組結算
-    1::bigint AS household_id,
-    fr.member_id,
-    fr.market_value
+SELECT $1 AS date, fr.household_id, fr.member_id, fr.market_value
 FROM final_rows fr
 ON CONFLICT (date, household_id, member_id) DO UPDATE SET
     market_value = EXCLUDED.market_value,
@@ -129,53 +145,11 @@ ON CONFLICT (date, household_id, member_id) DO UPDATE SET
     /// 取得指定日期與前一交易日的會員市值對照資料。
     ///
     /// 會保留 `member_id = 0` 的合計列，並同時回傳所有會員，
-    /// 供通知訊息直接逐行組裝。
+    /// 家庭編號會一路帶入比較與通知，不讓不同家庭的合計互相配對。
     pub async fn fetch_with_previous_trading_day(
         date: NaiveDate,
     ) -> Result<Vec<DailyMoneyHistoryMemberWithPreviousTradingDay>> {
-        let sql = r#"
-WITH recent_dates AS (
-    SELECT dmh.date
-    FROM daily_money_history_member dmh
-    WHERE dmh.date <= $1
-    GROUP BY dmh.date
-    ORDER BY dmh.date DESC
-    LIMIT 2
-),
-ranked_dates AS (
-    SELECT
-        rd.date,
-        ROW_NUMBER() OVER (ORDER BY rd.date DESC) AS rn
-    FROM recent_dates rd
-),
-current_rows AS (
-    SELECT dmh.member_id, dmh.market_value
-    FROM daily_money_history_member dmh
-    WHERE dmh.date = (SELECT date FROM ranked_dates WHERE rn = 1)
-),
-previous_rows AS (
-    SELECT dmh.member_id, dmh.market_value
-    FROM daily_money_history_member dmh
-    WHERE dmh.date = (SELECT date FROM ranked_dates WHERE rn = 2)
-),
-member_scope AS (
-    SELECT member_id FROM current_rows
-    UNION
-    SELECT member_id FROM previous_rows
-)
-SELECT
-    COALESCE((SELECT date FROM ranked_dates WHERE rn = 1), $1) AS date,
-    (SELECT date FROM ranked_dates WHERE rn = 2) AS previous_date,
-    ms.member_id,
-    COALESCE(cr.market_value, 0) AS market_value,
-    COALESCE(pr.market_value, 0) AS previous_market_value
-FROM member_scope ms
-LEFT JOIN current_rows cr ON ms.member_id = cr.member_id
-LEFT JOIN previous_rows pr ON ms.member_id = pr.member_id
-ORDER BY ms.member_id;
-"#;
-
-        sqlx::query_as::<_, DailyMoneyHistoryMemberWithPreviousTradingDay>(sql)
+        sqlx::query_as::<_, DailyMoneyHistoryMemberWithPreviousTradingDay>(PREVIOUS_TRADING_DAY_SQL)
             .bind(date)
             .fetch_all(database::get_connection())
             .await

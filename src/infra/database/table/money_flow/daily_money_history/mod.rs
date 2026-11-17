@@ -39,7 +39,7 @@ impl DailyMoneyHistory {
     /// 依指定日期重算並寫入每日市值總覽。
     ///
     /// 會彙總 `stock_ownership_details` 與當日 `DailyQuotes` 的收盤價，
-    /// 寫入 `sum`、`eddie`（`member_id = 1`）與 `unice`（其餘 member）。
+    /// 僅彙總預設家庭中未刪除會員的持股，寫入 `sum`、`eddie`（`member_id = 1`）與 `unice`（其餘 member）。
     ///
     /// # Errors
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端傳入 transaction，
@@ -56,6 +56,7 @@ WITH base_calc AS (
         od.member_id,
         (od.share_quantity * dq."ClosingPrice") AS market_value
     FROM stock_ownership_details od
+    INNER JOIN "Member" m ON m."Id" = od.member_id AND m.household_id = 1 AND m.deleted_at IS NULL
     INNER JOIN "DailyQuotes" dq ON od.security_code = dq."stock_symbol"
     WHERE od.is_sold = FALSE 
       AND od.date <= $1

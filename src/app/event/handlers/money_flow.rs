@@ -12,7 +12,6 @@ use crate::app::event::taiwan_stock::{
 // app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
 use crate::app::notify;
 use crate::core::{alert, util::text};
-use crate::domain::household::DEFAULT_HOUSEHOLD_ID;
 use crate::domain::money_flow::{
     entity::MoneyFlowMemberWithPreviousDay, repository::MoneyFlowRepository,
 };
@@ -116,19 +115,17 @@ impl EventDispatcher {
 
 /// 範圍內的市值列：只含本人時只有本人那一列；含家庭成員時為家庭成員與家庭合計（`member_id = 0`）。
 ///
-/// 合計列目前只有預設家庭（結算依家庭分組在 Phase 7，2.7），其他家庭的範圍不列合計。
+/// 個人與合計列都須符合收件者家庭，避免同為 member_id = 0 的其他家庭混入。
 fn rows_in_view(
     rows: &[MoneyFlowMemberWithPreviousDay],
     view: &HoldingView,
     members: &[i64],
 ) -> Vec<MoneyFlowMemberWithPreviousDay> {
     rows.iter()
+        .filter(|row| row.household_id == view.household_id())
         .filter(|row| match view.member_id() {
             Some(member_id) => row.member_id == member_id,
-            None => {
-                members.contains(&row.member_id)
-                    || (row.member_id == 0 && view.household_id() == DEFAULT_HOUSEHOLD_ID)
-            }
+            None => members.contains(&row.member_id) || row.member_id == 0,
         })
         .cloned()
         .collect()

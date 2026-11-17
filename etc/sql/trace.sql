@@ -1,8 +1,8 @@
 -- 價格追蹤：每位會員各一份清單（會員系統）。指向 "Member" 的外來鍵由 member_rbac_and_mcp_token.sql 加上
--- （本檔在 CI 載入順序中早於 member.sql）；member_id 預設 1 保留到 Phase 7。
+-- （本檔在 CI 載入順序中早於 member.sql）；member_id 必須明確指定。
 create table public.trace
 (
-    member_id    bigint         default 1                     not null,
+    member_id    bigint         not null,
     stock_symbol varchar(24)    default ''::character varying not null,
     floor        numeric(18, 4) default 0                     not null,
     ceiling      numeric(18, 4) default 0                     not null,

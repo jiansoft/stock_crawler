@@ -77,9 +77,9 @@ impl DailyMoneyHistoryDetail {
     /// 重建指定日期的持股層級市值明細。
     ///
     /// 此流程會：
-    /// 1. 聚合未賣出庫存（個人與全局）  
-    /// 2. 取當日與前一日收盤價  
-    /// 3. 計算市值、成本、占比、損益與前日對照欄位  
+    /// 1. 聚合未賣出庫存（個人與所屬家庭）
+    /// 2. 取當日與前一日收盤價
+    /// 3. 計算市值、成本、占比、損益與前日對照欄位
     /// 4. 以 `(date, security_code, household_id, member_id)` 做 upsert
     ///
     /// # Errors
@@ -92,19 +92,22 @@ impl DailyMoneyHistoryDetail {
         let one_month_ago = date - TimeDelta::try_days(30).unwrap();
         let sql = r#"
 WITH ownership_data AS (
-    -- 一次性計算個人與全局(member_id=0)的持有股數與成本，避免多次掃描
-    SELECT 
-        security_code,
-        member_id,
+    -- 一次性計算個人與所屬家庭(member_id=0)的持有股數與成本，避免多次掃描
+    SELECT
+        od.security_code,
+        m.household_id,
+        od.member_id,
         SUM(share_quantity) AS total_share,
         SUM(holding_cost) AS total_cost
-    FROM stock_ownership_details
-    WHERE is_sold = FALSE AND date <= $1
-    GROUP BY GROUPING SETS ((security_code, member_id), (security_code))
+    FROM stock_ownership_details od
+    JOIN "Member" m ON m."Id" = od.member_id AND m.deleted_at IS NULL
+    WHERE od.is_sold = FALSE AND od.date <= $1
+    GROUP BY GROUPING SETS ((od.security_code, m.household_id, od.member_id), (od.security_code, m.household_id))
 ),
 normalized_ownership AS (
-    SELECT 
+    SELECT
         security_code,
+        household_id,
         COALESCE(member_id, 0) as member_id,
         total_share,
         total_cost
@@ -112,7 +115,7 @@ normalized_ownership AS (
 ),
 quote_data AS (
     -- 使用視窗函數取得當日與前一日報價，rn=1 代表最新一筆
-    SELECT 
+    SELECT
         stock_symbol,
         "ClosingPrice" as today_price,
         LAG("ClosingPrice") OVER (PARTITION BY stock_symbol ORDER BY "Date") as yesterday_price,
@@ -127,6 +130,7 @@ latest_quotes AS (
 ),
 calc_base AS (
     SELECT
+        od.household_id,
         od.member_id,
         $1 as date,
         od.security_code,
@@ -139,8 +143,8 @@ calc_base AS (
     JOIN latest_quotes lq ON od.security_code = lq.stock_symbol
 ),
 member_totals AS (
-    SELECT member_id, SUM(market_value) as total_mkt_val
-    FROM calc_base GROUP BY member_id
+    SELECT household_id, member_id, SUM(market_value) as total_mkt_val
+    FROM calc_base GROUP BY household_id, member_id
 )
 INSERT INTO daily_money_history_detail (
     household_id, member_id, date, security_code, closing_price, total_shares, cost,
@@ -149,23 +153,22 @@ INSERT INTO daily_money_history_detail (
     previous_day_market_value, previous_day_profit_and_loss, previous_day_profit_and_loss_percentage
 )
 SELECT
-    -- 會員系統 Phase 1：只有家庭 #1，member_id = 0 即該家庭的合計；Phase 7 才依家庭分組結算
-    1::bigint, cb.member_id, cb.date, cb.security_code, cb.closing_price, cb.total_share, cb.cost,
+    cb.household_id, cb.member_id, cb.date, cb.security_code, cb.closing_price, cb.total_share, cb.cost,
     ROUND(CAST(-cb.cost / cb.total_share AS numeric), 4),
     cb.market_value,
     ROUND(CAST(cb.market_value / NULLIF(mt.total_mkt_val, 0) * 100 AS numeric), 4),
     cb.market_value * 0.003,
     cb.market_value + cb.cost,
-    CASE 
-        WHEN cb.cost != 0 THEN ROUND(CAST((cb.market_value + cb.cost) / ABS(cb.cost) * 100 AS numeric), 4) 
-        ELSE 100 
+    CASE
+        WHEN cb.cost != 0 THEN ROUND(CAST((cb.market_value + cb.cost) / ABS(cb.cost) * 100 AS numeric), 4)
+        ELSE 100
     END,
     NOW(), NOW(),
     cb.prev_market_value,
     cb.market_value - cb.prev_market_value,
     ROUND(CAST((cb.market_value - cb.prev_market_value) / NULLIF(cb.prev_market_value, 0) * 100 AS numeric), 4)
 FROM calc_base cb
-JOIN member_totals mt ON cb.member_id = mt.member_id
+JOIN member_totals mt ON cb.household_id = mt.household_id AND cb.member_id = mt.member_id
 ON CONFLICT (date, security_code, household_id, member_id) DO UPDATE SET
     closing_price = EXCLUDED.closing_price,
     total_shares = EXCLUDED.total_shares,

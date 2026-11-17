@@ -527,13 +527,7 @@ CREATE TABLE IF NOT EXISTS public.member_data_request (
 );
 
 -- 既有市值表加上家庭（2.7「家庭合計的儲存」）：member_id = 0 改為「該家庭合計」。
--- 預設值 1 保留到 Phase 7；Phase 7 移除預設值並依家庭分組結算。
--- 只留預設值不夠。舊版 stock_rust 的寫入是
---   ON CONFLICT (date, member_id)（daily_money_history_member.rs:98）與
---   ON CONFLICT (date, security_code, member_id)（daily_money_history_detail.rs:168），
--- 主鍵一改就找不到對應的唯一限制而失敗。所以下方另建兩個「舊欄位組合」的過渡唯一索引：
--- DDL 之後舊版程式仍可結算，退回舊版程式也不必還原 schema。只有一個家庭時它們不會誤擋；Phase 7 移除。
--- 這三張表的 etc/sql 檔案也直接改成最終結構；以下 ALTER 對已是最終結構的表不做事。
+-- 既有列補到家庭 #1；新程式依家庭結算，新增資料不可依賴隱含的家庭。
 ALTER TABLE public.daily_money_history_member
     ADD COLUMN IF NOT EXISTS household_id bigint NOT NULL DEFAULT 1;
 ALTER TABLE public.daily_money_history_detail
@@ -566,13 +560,14 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_daily_money_history_detail_more_household
     ON public.daily_money_history_detail_more (household_id, date, member_id);
 
--- 過渡唯一索引（Phase 7 依家庭分組結算前移除）
-CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_money_history_member_legacy_key
-    ON public.daily_money_history_member (date, member_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_money_history_detail_legacy_key
-    ON public.daily_money_history_detail (date, security_code, member_id);
+-- 依家庭結算後，舊欄位的唯一索引會誤擋不同家庭的合計，必須移除。
+DROP INDEX IF EXISTS public.idx_daily_money_history_member_legacy_key;
+DROP INDEX IF EXISTS public.idx_daily_money_history_detail_legacy_key;
+ALTER TABLE public.daily_money_history_member ALTER COLUMN household_id DROP DEFAULT;
+ALTER TABLE public.daily_money_history_detail ALTER COLUMN household_id DROP DEFAULT;
+ALTER TABLE public.daily_money_history_detail_more ALTER COLUMN household_id DROP DEFAULT;
 
--- 價格追蹤改為每人一份（2.3）：現有列歸 #1；預設值 1 保留到 Phase 7，讓 DDL 與新程式部署之間的舊程式仍可讀取。
+-- 價格追蹤改為每人一份（2.3）：現有列補到 #1；新寫入必須指定會員。
 -- etc/sql/trace.sql 在 CI 載入順序中早於 member.sql，所以外來鍵在這裡加，不寫進 trace.sql。
 ALTER TABLE public.trace
     ADD COLUMN IF NOT EXISTS member_id bigint NOT NULL DEFAULT 1;
@@ -595,6 +590,7 @@ BEGIN
             REFERENCES public."Member"("Id") ON DELETE CASCADE;
     END IF;
 END $$;
+ALTER TABLE public.trace ALTER COLUMN member_id DROP DEFAULT;
 -- 盤中比對以代號查所有追蹤者
 CREATE INDEX IF NOT EXISTS idx_trace_stock_symbol ON public.trace (stock_symbol);
 COMMENT ON COLUMN public.trace.member_id IS '設定這筆追蹤條件的會員';

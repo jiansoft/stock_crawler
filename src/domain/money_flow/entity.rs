@@ -168,6 +168,8 @@ pub struct MoneyFlowMember {
 /// 封裝會員在當前交易日與前一交易日的市值，以便發送通知時快速比較市值增減幅度。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoneyFlowMemberWithPreviousDay {
+    /// 所屬家庭，讓合計與前日比較維持相同家庭邊界。
+    pub household_id: i64,
     /// 當日資料日期
     pub date: NaiveDate,
     /// 前一個交易日日期

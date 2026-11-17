@@ -12,28 +12,28 @@ fn test_build_money_change_message_includes_hugo() {
     let previous_date = NaiveDate::parse_from_str("2026-04-01", "%Y-%m-%d").unwrap();
     let rows = vec![
         MoneyFlowMemberWithPreviousDay {
-            date,
+            household_id: 1,            date,
             previous_date: Some(previous_date),
             member_id: 0,
             market_value: dec!(4273187.20),
             previous_market_value: dec!(4053774.55),
         },
         MoneyFlowMemberWithPreviousDay {
-            date,
+            household_id: 1,            date,
             previous_date: Some(previous_date),
             member_id: 1,
             market_value: dec!(2195395.10),
             previous_market_value: dec!(2207807.70),
         },
         MoneyFlowMemberWithPreviousDay {
-            date,
+            household_id: 1,            date,
             previous_date: Some(previous_date),
             member_id: 2,
             market_value: dec!(1500000.00),
             previous_market_value: dec!(1400000.00),
         },
         MoneyFlowMemberWithPreviousDay {
-            date,
+            household_id: 1,            date,
             previous_date: Some(previous_date),
             member_id: 3,
             market_value: dec!(577792.10),
@@ -56,13 +56,17 @@ fn test_build_money_change_message_includes_hugo() {
 #[test]
 fn rows_in_view_follows_recipient_scope() {
     let row = |member_id: i64| MoneyFlowMemberWithPreviousDay {
-        date: chrono::NaiveDate::from_ymd_opt(2026, 11, 17).expect("合法日期"),
+            household_id: 1,        date: chrono::NaiveDate::from_ymd_opt(2026, 11, 17).expect("合法日期"),
         previous_date: None,
         member_id,
         market_value: rust_decimal::Decimal::ONE,
         previous_market_value: rust_decimal::Decimal::ONE,
     };
-    let rows = vec![row(0), row(1), row(2), row(9)];
+    let mut other_total = row(0);
+    other_total.household_id = 2;
+    let mut other_member = row(9);
+    other_member.household_id = 2;
+    let rows = vec![row(0), row(1), row(2), other_total, other_member];
     let ids = |rows: Vec<MoneyFlowMemberWithPreviousDay>| -> Vec<i64> {
         rows.into_iter().map(|row| row.member_id).collect()
     };
@@ -71,5 +75,5 @@ fn rows_in_view_follows_recipient_scope() {
         ids(rows_in_view(&rows, &HoldingView::household(1), &[1, 2])),
         [0, 1, 2]
     );
-    assert_eq!(ids(rows_in_view(&rows, &HoldingView::household(2), &[9])), [9]);
+    assert_eq!(ids(rows_in_view(&rows, &HoldingView::household(2), &[9])), [0, 9]);
 }

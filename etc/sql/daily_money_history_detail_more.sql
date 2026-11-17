@@ -2,7 +2,7 @@ create table public.daily_money_history_detail_more
 (
     serial                     bigserial
         primary key,
-    household_id               bigint                   default 1                                       not null,
+    household_id               bigint                   not null,
     member_id                  bigint                   default 0                                       not null,
     date                       date                     default CURRENT_DATE                            not null,
     transaction_date           date                     default CURRENT_DATE                            not null,
@@ -18,7 +18,7 @@ create table public.daily_money_history_detail_more
     updated_time               timestamp with time zone default ('now'::text)::timestamp with time zone not null
 );
 
-comment on column public.daily_money_history_detail_more.household_id is '所屬家庭；Phase 7 前只有家庭 #1（預設值保留到 Phase 7）';
+comment on column public.daily_money_history_detail_more.household_id is '所屬家庭；所有寫入必須明確指定';
 comment on column public.daily_money_history_detail_more.member_id is '資料屬於那一個會員；0 代表該家庭的合計';
 comment on column public.daily_money_history_detail_more.date is '記錄所屬日期';
 comment on column public.daily_money_history_detail_more.transaction_date is '成交日期';
