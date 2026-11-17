@@ -3,6 +3,50 @@
 use super::*;
 use rust_decimal_macros::dec;
 
+/// 本人只讀本人、家庭只讀同家未刪除會員；偽造家庭／會員配對無法取得擁有者名稱。
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離的 PostgreSQL")]
+async fn trace_notification_owners_enforce_household_and_member_boundaries() {
+    dotenvy::dotenv().ok();
+    let mut tx = database::get_tx().await.expect("開啟測試交易");
+    let household: i64 = sqlx::query_scalar(
+        "INSERT INTO member_household (name) VALUES ('__trace_owner_test__') RETURNING id",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("建立測試家庭");
+    let mut ids = Vec::new();
+    for (name, deleted) in [("甲_[家人]", false), ("乙", false), ("已刪除", true)] {
+        let id: i64 = sqlx::query_scalar(
+            r#"INSERT INTO "Member" ("Account", "Name", household_id, deleted_at)
+               VALUES ($1, $1, $2, CASE WHEN $3 THEN now() END) RETURNING "Id""#,
+        )
+        .bind(name)
+        .bind(household)
+        .bind(deleted)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("建立測試會員");
+        ids.push(id);
+    }
+    let family = fetch_visible_owners_from(&mut *tx, HoldingView::household(household))
+        .await
+        .expect("家庭範圍");
+    assert_eq!(
+        family,
+        [(ids[0], "甲_[家人]".into()), (ids[1], "乙".into())]
+    );
+    let own = fetch_visible_owners_from(&mut *tx, HoldingView::member(household, ids[0]))
+        .await
+        .expect("本人範圍");
+    assert_eq!(own, [(ids[0], "甲_[家人]".into())]);
+    let foreign = fetch_visible_owners_from(&mut *tx, HoldingView::member(1, ids[0]))
+        .await
+        .expect("不同家庭");
+    assert!(foreign.is_empty());
+    tx.rollback().await.expect("回滾測試資料");
+}
+
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),

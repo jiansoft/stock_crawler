@@ -1,3 +1,4 @@
+use crate::domain::portfolio::view::HoldingView;
 use crate::domain::trace::entity::PriceTrace;
 use crate::domain::trace::repository::TraceRepository;
 use crate::infra::database;
@@ -52,6 +53,29 @@ impl TraceRepository for PgTraceRepository {
 
         Ok(rows.into_iter().map(PriceTrace::from).collect())
     }
+}
+
+/// 批次載入可見範圍內的追蹤擁有者名稱，同時以家庭邊界排除外部會員與已刪除會員。
+pub async fn fetch_visible_owners(view: HoldingView) -> Result<Vec<(i64, String)>> {
+    fetch_visible_owners_from(database::get_connection(), view).await
+}
+
+/// 可注入交易的查詢本體，讓家庭邊界測試在交易內建立會員並完整回滾。
+async fn fetch_visible_owners_from<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+    view: HoldingView,
+) -> Result<Vec<(i64, String)>> {
+    sqlx::query_as(
+        r#"SELECT "Id", "Name" FROM "Member"
+           WHERE household_id = $1 AND deleted_at IS NULL
+             AND ($2::bigint IS NULL OR "Id" = $2)
+           ORDER BY "Id""#,
+    )
+    .bind(view.household_id())
+    .bind(view.member_id())
+    .fetch_all(executor)
+    .await
+    .context("讀取價格追蹤擁有者失敗")
 }
 
 #[cfg(test)]

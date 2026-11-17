@@ -43,7 +43,7 @@ mod reference;
 /// 追蹤條件快取。
 mod targets;
 
-use alert::alert_on_price_boundary;
+use alert::alert_on_price_boundaries;
 use reference::load_reference_prices;
 #[cfg(test)]
 pub(super) use targets::set_trace_targets_for_test;
@@ -246,12 +246,10 @@ async fn process_cached_targets(
             let current_price = snapshot.price;
             let source_site =
                 (!snapshot.source_site.trim().is_empty()).then_some(snapshot.source_site.as_str());
-            for target in targets {
-                if let Err(why) =
-                    alert_on_price_boundary(target, current_price, source, source_site).await
-                {
-                    tracing::error!("Error alerting for {}: {:?}", symbol, why);
-                }
+            if let Err(why) =
+                alert_on_price_boundaries(&targets, current_price, source, source_site).await
+            {
+                tracing::error!("Error alerting for {}: {:?}", symbol, why);
             }
         }
         Some(_) => {

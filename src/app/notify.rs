@@ -5,6 +5,8 @@
 //! - 主題已切換（列在 `NOTIFY_ROUTED_TOPICS`）：讀出該主題的路由，把收件者依範圍分組（同一家庭都選
 //!   「含家庭成員」的人共用一份內容），每個不同的範圍呼叫一次 `build`，再送給該組的每個聊天室。
 //!   範圍內沒有相關持股（`build` 回 `None`）就不發送。
+//!   個人價格追蹤另經 [`notify_holdings_per_recipient`] 走相同流程，但不能合併不同會員的
+//!   極端價格狀態；只合併同一收件會員的聊天室。
 //! - 尚未切換：以「預設家庭、全體成員」呼叫一次 `build`，照舊送設定檔內的聊天室（N3 之前的行為）。
 //!
 //! `dedup_key` 是這一次事件的識別（例如 `holdings.payable:2026-11-10`）；送達紀錄的先佔位與重跑去重
@@ -69,7 +71,7 @@ impl HoldingsSender for AlertSender {
 /// 一次分送的結果（記錄與測試用）。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchSummary {
-    /// 呼叫 `build` 的次數（不同範圍的數量）。
+    /// 呼叫 `build` 的次數（不同範圍，個人類則是不同收件會員）。
     pub built: usize,
     /// 送出的訊息數（每個聊天室一則）。
     pub sent: usize,
@@ -101,10 +103,52 @@ where
     F: Fn(HoldingView) -> Fut,
     Fut: Future<Output = Result<Option<String>>>,
 {
+    dispatch_for_recipient(
+        topic,
+        dedup_key,
+        |view, _| build(view),
+        routes,
+        sender,
+        false,
+    )
+    .await
+}
+
+/// 個人類通知沿用持股分送入口，但各收件會員獨立建立內容，以隔離極端價格去重狀態。
+///
+/// `None` 收件會員代表尚未切換的舊聊天室；同一會員的多個聊天室仍共用一次內容判斷。
+pub async fn notify_holdings_per_recipient<F, Fut>(
+    topic: Topic,
+    event_key: &str,
+    build: F,
+) -> DispatchSummary
+where
+    F: Fn(HoldingView, Option<i64>) -> Fut,
+    Fut: Future<Output = Result<Option<String>>>,
+{
+    let setting = std::env::var(ROUTED_TOPICS_ENV).unwrap_or_default();
+    let routes = is_routed(topic, &setting)
+        .then_some(&PgNotifyRouteRepository as &dyn NotifyRouteRepository);
+    dispatch_for_recipient(topic, event_key, build, routes, &AlertSender, true).await
+}
+
+/// 共用分送流程；個人類按收件會員分組，其餘依可見範圍共用內容。
+pub(crate) async fn dispatch_for_recipient<F, Fut>(
+    topic: Topic,
+    dedup_key: &str,
+    build: F,
+    routes: Option<&dyn NotifyRouteRepository>,
+    sender: &dyn HoldingsSender,
+    per_recipient: bool,
+) -> DispatchSummary
+where
+    F: Fn(HoldingView, Option<i64>) -> Fut,
+    Fut: Future<Output = Result<Option<String>>>,
+{
     let mut summary = DispatchSummary::default();
     let Some(routes) = routes else {
         summary.built = 1;
-        match build(HoldingView::default_household()).await {
+        match build(HoldingView::default_household(), None).await {
             Ok(Some(message)) => {
                 sender.send_legacy(topic, &message).await;
                 summary.sent = 1;
@@ -125,9 +169,9 @@ where
             return summary;
         }
     };
-    for (view, chats) in group_by_view(&routes) {
+    for (view, recipient, chats) in group_by_recipient(&routes, per_recipient) {
         summary.built += 1;
-        let message = match build(view).await {
+        let message = match build(view, recipient).await {
             Ok(Some(message)) => message,
             Ok(None) => continue,
             Err(error) => {
@@ -154,18 +198,25 @@ where
     summary
 }
 
-/// 收件者依範圍分組（保留路由順序）；同一個聊天室只送一次。
-fn group_by_view(routes: &[NotifyRoute]) -> Vec<(HoldingView, Vec<i64>)> {
-    let mut groups: Vec<(HoldingView, Vec<i64>)> = Vec::new();
+/// 收件者依範圍分組（保留路由順序）；個人類再按會員分組，每組的聊天室只送一次。
+fn group_by_recipient(
+    routes: &[NotifyRoute],
+    per_recipient: bool,
+) -> Vec<(HoldingView, Option<i64>, Vec<i64>)> {
+    let mut groups: Vec<(HoldingView, Option<i64>, Vec<i64>)> = Vec::new();
     for route in routes {
         let view = route.view();
-        match groups.iter_mut().find(|(existing, _)| *existing == view) {
-            Some((_, chats)) => {
+        let recipient = per_recipient.then_some(route.member_id);
+        match groups
+            .iter_mut()
+            .find(|(existing, member, _)| *existing == view && *member == recipient)
+        {
+            Some((_, _, chats)) => {
                 if !chats.contains(&route.chat_id) {
                     chats.push(route.chat_id);
                 }
             }
-            None => groups.push((view, vec![route.chat_id])),
+            None => groups.push((view, recipient, vec![route.chat_id])),
         }
     }
     groups

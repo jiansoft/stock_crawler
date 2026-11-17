@@ -20,7 +20,6 @@
 //! 每一種推送都必須帶 [`Topic`]，依受眾分三個入口：[`notify_system`]（系統類，以警報格式送出）、
 //! [`notify_market`]（市場類，所有訂閱者內容相同）、持股與個人類的 `app::notify::notify_holdings`
 //! （依收件者範圍各自產生內容，經 [`send_to_chat`] 送到各收件者的聊天室）。
-//! [`notify_holdings_all`] 是搬遷期的「全體內容」版本，只剩價格追蹤使用（5-07 移除）。
 
 use std::sync::{Arc, OnceLock};
 
@@ -31,7 +30,7 @@ pub use crate::core::notify_topic::Topic;
 /// 告警發送介面（port）。
 ///
 /// 由外層（interfaces）提供實作並於啟動時註冊；core/infra 透過 [`notify_system`]、[`notify_system_text`]、
-/// [`notify_market`]、[`notify_holdings_all`] 間接使用，不需知道訊息實際送往何處。
+/// [`notify_market`] 間接使用，不需知道訊息實際送往何處。
 #[async_trait]
 pub trait AlertSink: Send + Sync {
     /// 以警報格式發送（標題＋詳情）。
@@ -85,14 +84,6 @@ pub async fn notify_system_text(topic: Topic, message: &str) {
 ///
 /// 尚未註冊 sink 時的行為同 [`notify_system`]：降級為 warning log。
 pub async fn notify_market(topic: Topic, message: &str) {
-    send_message(topic, message).await;
-}
-
-/// 持股與個人類通知的搬遷期入口：訊息是「預設家庭、全體成員」的內容，照舊送設定檔內的聊天室。
-///
-/// 依收件者範圍各自產生內容的 `notify_holdings` 在 N4（7.7）取代它；在那之前，持股類的發送點
-/// 先以這個入口標上 Topic。
-pub async fn notify_holdings_all(topic: Topic, message: &str) {
     send_message(topic, message).await;
 }
 

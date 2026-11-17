@@ -164,3 +164,48 @@ async fn legacy_build_error_is_logged_not_sent() {
     .await;
     assert_eq!(summary, DispatchSummary { built: 1, sent: 0 });
 }
+
+/// 個人類的家庭訂閱不能按家庭合併去重；同一會員兩個聊天室則共用一次價格判斷。
+#[tokio::test]
+async fn personal_topic_builds_per_member_and_fans_out_to_all_their_chats() {
+    let routes = FixedRoutes(vec![
+        route(1, 1, "household", 101),
+        route(1, 1, "household", -102),
+        route(2, 1, "household", 201),
+        route(3, 1, "own", 301),
+    ]);
+    let calls = Mutex::new(Vec::new());
+    let sender = RecordingSender::default();
+    let summary = dispatch_for_recipient(
+        Topic::PersonalPriceTrace,
+        "價格事件（只供日誌，不用於去重）",
+        |view, recipient| {
+            calls.lock().expect("測試鎖").push((view, recipient));
+            async move {
+                Ok((recipient != Some(3))
+                    .then(|| format!("收件會員{}", recipient.expect("會員路由"))))
+            }
+        },
+        Some(&routes),
+        &sender,
+        true,
+    )
+    .await;
+    assert_eq!(summary, DispatchSummary { built: 3, sent: 3 });
+    assert_eq!(
+        *calls.lock().expect("測試鎖"),
+        [
+            (HoldingView::household(1), Some(1)),
+            (HoldingView::household(1), Some(2)),
+            (HoldingView::member(1, 3), Some(3)),
+        ]
+    );
+    assert_eq!(
+        *sender.sent.lock().expect("測試鎖"),
+        [
+            "101:personal.price_trace:收件會員1",
+            "-102:personal.price_trace:收件會員1",
+            "201:personal.price_trace:收件會員2",
+        ]
+    );
+}

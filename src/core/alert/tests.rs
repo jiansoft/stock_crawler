@@ -50,7 +50,7 @@ async fn registered_sink_receives_messages_and_duplicate_registration_is_ignored
     register_alert_sink(Arc::new(RecordingSink {
         received: Mutex::new(Vec::new()),
     }));
-    notify_holdings_all(Topic::HoldingsPayable, "第二則").await;
+    send_legacy(Topic::HoldingsPayable, "第二則").await;
 
     let received = sink.received.lock().unwrap();
     assert_eq!(
