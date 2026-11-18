@@ -2,6 +2,7 @@ create table if not exists public.daily_money_history_member
 (
     date         date                     default CURRENT_DATE                            not null,
     household_id bigint                   not null,
+    settlement_household_id bigint not null,
     member_id    bigint                   default 0                                       not null,
     market_value numeric(18, 4)           default 0                                       not null,
     created_time timestamp with time zone default ('now'::text)::timestamp with time zone not null,
@@ -18,3 +19,5 @@ comment on column public.daily_money_history_member.updated_time is '資料最�
 
 create index if not exists "daily_money_history_member-member_id-date-idx"
     on public.daily_money_history_member (member_id, date desc);
+
+comment on column public.daily_money_history_member.settlement_household_id is '結算時家庭；轉換家庭不改此欄位，用於刪除時重算歷史合計';

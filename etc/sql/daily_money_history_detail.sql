@@ -2,6 +2,7 @@ create table if not exists public.daily_money_history_detail
 (
     serial                                  bigserial,
     household_id                            bigint                   not null,
+    settlement_household_id bigint not null,
     member_id                               bigint                   default 0                                       not null,
     date                                    date                     default CURRENT_DATE                            not null,
     security_code                           varchar(24)              default ''::character varying                   not null,
@@ -41,3 +42,5 @@ comment on column public.daily_money_history_detail.previous_day_profit_and_loss
 create index if not exists "daily_money_history_detail-security_code-idx"
     on public.daily_money_history_detail (security_code);
 
+
+comment on column public.daily_money_history_detail.settlement_household_id is '結算時家庭；轉換家庭不改此欄位，用於刪除時重算歷史合計';

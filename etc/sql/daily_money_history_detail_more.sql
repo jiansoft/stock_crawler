@@ -3,6 +3,7 @@ create table public.daily_money_history_detail_more
     serial                     bigserial
         primary key,
     household_id               bigint                   not null,
+    settlement_household_id bigint not null,
     member_id                  bigint                   default 0                                       not null,
     date                       date                     default CURRENT_DATE                            not null,
     transaction_date           date                     default CURRENT_DATE                            not null,
@@ -37,3 +38,5 @@ create index "daily_money_history_detail_more-date-member_id"
 create index if not exists idx_daily_money_history_detail_more_household
     on public.daily_money_history_detail_more (household_id, date, member_id);
 
+
+comment on column public.daily_money_history_detail_more.settlement_household_id is '結算時家庭；轉換家庭不改此欄位，用於刪除時重算歷史合計';

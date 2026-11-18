@@ -651,3 +651,114 @@ CREATE TABLE IF NOT EXISTS public.member_mfa_recovery_code (
     used_at   timestamptz,
     PRIMARY KEY (member_id, code_hash)
 );
+
+-- 結算時家庭保留當時事實；轉家只改 household_id，刪除才能重建原家庭合計。
+ALTER TABLE public.daily_money_history_member ADD COLUMN IF NOT EXISTS settlement_household_id bigint;
+UPDATE public.daily_money_history_member SET settlement_household_id = household_id WHERE settlement_household_id IS NULL;
+ALTER TABLE public.daily_money_history_member ALTER COLUMN settlement_household_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_daily_money_history_member_settlement ON public.daily_money_history_member (settlement_household_id, date, member_id);
+ALTER TABLE public.daily_money_history_detail ADD COLUMN IF NOT EXISTS settlement_household_id bigint;
+UPDATE public.daily_money_history_detail SET settlement_household_id = household_id WHERE settlement_household_id IS NULL;
+ALTER TABLE public.daily_money_history_detail ALTER COLUMN settlement_household_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_daily_money_history_detail_settlement ON public.daily_money_history_detail (settlement_household_id, date, member_id);
+ALTER TABLE public.daily_money_history_detail_more ADD COLUMN IF NOT EXISTS settlement_household_id bigint;
+UPDATE public.daily_money_history_detail_more SET settlement_household_id = household_id WHERE settlement_household_id IS NULL;
+ALTER TABLE public.daily_money_history_detail_more ALTER COLUMN settlement_household_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_daily_money_history_detail_more_settlement ON public.daily_money_history_detail_more (settlement_household_id, date, member_id);
+
+-- 三表共同的交易鎖：每日結算、轉家及資料刪除必須遵守相同鎖定順序。
+CREATE OR REPLACE FUNCTION public.member_money_history_lock() RETURNS void
+LANGUAGE sql VOLATILE SECURITY INVOKER SET search_path = pg_catalog, public
+AS $$ SELECT pg_advisory_xact_lock(7320261107::bigint) $$;
+
+-- 只搬本人可見範圍，保留結算歸屬及當時的家庭合計。會員與授權異動由 Go 同交易處理。
+CREATE OR REPLACE FUNCTION public.member_money_history_move(p_member bigint, p_household bigint) RETURNS void
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, public AS $$
+BEGIN
+    IF p_member <= 0 OR p_household <= 0 THEN
+        RAISE EXCEPTION 'member and household must be positive' USING ERRCODE = '23514';
+    END IF;
+    PERFORM public.member_money_history_lock();
+    UPDATE public.daily_money_history_member SET household_id = p_household WHERE member_id = p_member;
+    UPDATE public.daily_money_history_detail SET household_id = p_household WHERE member_id = p_member;
+    UPDATE public.daily_money_history_detail_more SET household_id = p_household WHERE member_id = p_member;
+END $$;
+
+-- 僅處理市值資料；呼叫者須在核准刪除的同一交易內處理其他業務表、身分與稽核。
+CREATE OR REPLACE FUNCTION public.member_money_history_delete(p_member bigint) RETURNS void
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, public AS $$
+DECLARE affected jsonb;
+BEGIN
+    IF p_member <= 0 THEN
+        RAISE EXCEPTION 'member must be positive' USING ERRCODE = '23514';
+    END IF;
+    PERFORM public.member_money_history_lock();
+    SELECT COALESCE(jsonb_agg(to_jsonb(a)), '[]'::jsonb) INTO affected FROM (
+        SELECT settlement_household_id AS household_id, date FROM public.daily_money_history_member WHERE member_id = p_member
+        UNION
+        SELECT settlement_household_id, date FROM public.daily_money_history_detail WHERE member_id = p_member
+        UNION
+        SELECT settlement_household_id, date FROM public.daily_money_history_detail_more WHERE member_id = p_member
+    ) a;
+
+    DELETE FROM public.daily_money_history_member WHERE member_id = p_member;
+    DELETE FROM public.daily_money_history_detail WHERE member_id = p_member;
+    DELETE FROM public.daily_money_history_detail_more WHERE member_id = p_member;
+
+    -- 只重建曾包含被刪除者的家庭及日期；目前已搬走的其他會員仍按原結算歸屬貢獻。
+    DELETE FROM public.daily_money_history_member t USING jsonb_to_recordset(affected) AS a(household_id bigint, date date)
+    WHERE t.household_id = a.household_id AND t.date = a.date AND t.member_id = 0;
+    DELETE FROM public.daily_money_history_detail t USING jsonb_to_recordset(affected) AS a(household_id bigint, date date)
+    WHERE t.household_id = a.household_id AND t.date = a.date AND t.member_id = 0;
+    DELETE FROM public.daily_money_history_detail_more t USING jsonb_to_recordset(affected) AS a(household_id bigint, date date)
+    WHERE t.household_id = a.household_id AND t.date = a.date AND t.member_id = 0;
+
+    INSERT INTO public.daily_money_history_member (date, household_id, settlement_household_id, member_id, market_value)
+    SELECT a.date, a.household_id, a.household_id, 0, COALESCE(sum(m.market_value), 0)
+    FROM jsonb_to_recordset(affected) AS a(household_id bigint, date date)
+    LEFT JOIN public.daily_money_history_member m ON m.settlement_household_id = a.household_id AND m.date = a.date AND m.member_id > 0
+    GROUP BY a.household_id, a.date;
+
+    WITH base AS (
+        SELECT a.household_id, a.date, d.security_code, max(d.closing_price) AS closing_price,
+               sum(d.total_shares) AS shares, sum(d.cost) AS cost, sum(d.market_value) AS value,
+               sum(d.previous_day_market_value) AS previous_value
+        FROM jsonb_to_recordset(affected) AS a(household_id bigint, date date)
+        JOIN public.daily_money_history_detail d ON d.settlement_household_id = a.household_id AND d.date = a.date AND d.member_id > 0
+        GROUP BY a.household_id, a.date, d.security_code
+    ), totals AS (
+        SELECT *, sum(value) OVER (PARTITION BY household_id, date) AS total_value FROM base
+    )
+    INSERT INTO public.daily_money_history_detail (
+        date, household_id, settlement_household_id, member_id, security_code, closing_price, total_shares, cost,
+        average_unit_price_per_share, market_value, ratio, transfer_tax, profit_and_loss, profit_and_loss_percentage,
+        previous_day_market_value, previous_day_profit_and_loss, previous_day_profit_and_loss_percentage
+    )
+    SELECT date, household_id, household_id, 0, security_code, closing_price, shares, cost,
+           COALESCE(round(-cost / NULLIF(shares, 0), 4), 0), value,
+           COALESCE(round(value / NULLIF(total_value, 0) * 100, 4), 0), value * 0.003, value + cost,
+           CASE WHEN cost = 0 THEN 100 ELSE round((value + cost) / abs(cost) * 100, 4) END,
+           previous_value, value - previous_value,
+           COALESCE(round((value - previous_value) / NULLIF(previous_value, 0) * 100, 4), 0)
+    FROM totals;
+
+    INSERT INTO public.daily_money_history_detail_more (
+        household_id, settlement_household_id, member_id, date, transaction_date, security_code, closing_price,
+        number_of_shares_held, unit_price_per_share, cost, market_value, profit_and_loss, profit_and_loss_percentage
+    )
+    SELECT a.household_id, a.household_id, 0, d.date, d.transaction_date, d.security_code, d.closing_price,
+           d.number_of_shares_held, d.unit_price_per_share, d.cost, d.market_value, d.profit_and_loss, d.profit_and_loss_percentage
+    FROM jsonb_to_recordset(affected) AS a(household_id bigint, date date)
+    JOIN public.daily_money_history_detail_more d ON d.settlement_household_id = a.household_id AND d.date = a.date AND d.member_id > 0;
+
+    -- 凍結寬表只屬家庭 #1，也不能留下可反推已刪除者的舊合計。
+    UPDATE public.daily_money_history old SET sum = value.total, eddie = value.eddie, unice = value.unice, updated_time = now()
+    FROM (
+        SELECT a.date, COALESCE(sum(m.market_value), 0) AS total,
+               COALESCE(sum(m.market_value) FILTER (WHERE m.member_id = 1), 0) AS eddie,
+               COALESCE(sum(m.market_value) FILTER (WHERE m.member_id <> 1), 0) AS unice
+        FROM jsonb_to_recordset(affected) AS a(household_id bigint, date date)
+        LEFT JOIN public.daily_money_history_member m ON m.settlement_household_id = 1 AND m.date = a.date AND m.member_id > 0
+        WHERE a.household_id = 1 GROUP BY a.date
+    ) value WHERE old.date = value.date;
+END $$;

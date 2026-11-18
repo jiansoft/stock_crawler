@@ -55,9 +55,14 @@ impl From<TableDailyMoneyHistoryMemberWithPreviousTradingDay>
 
 #[async_trait]
 impl MoneyFlowRepository for PgMoneyFlowRepository {
+    /// 每日結算與轉家／刪除共用交易鎖，三張市值表不能讀到不同家庭歸屬。
     async fn recalculate_and_save_money_flow(&self, date: NaiveDate) -> Result<()> {
         // 1. 初始化資料庫事務，確保跨表寫入的一致性
-        let mut tx_option = Some(crate::infra::database::get_tx().await?);
+        let mut tx = crate::infra::database::get_tx().await?;
+        sqlx::query("SELECT public.member_money_history_lock()")
+            .execute(&mut *tx)
+            .await?;
+        let mut tx_option = Some(tx);
 
         // 2. 寫入當日市值總覽 (扁平表)
         if let Err(why) = TableDailyMoneyHistory::upsert(date, &mut tx_option).await {

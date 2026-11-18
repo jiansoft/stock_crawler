@@ -82,7 +82,7 @@ impl DailyMoneyHistoryDetailMore {
     ) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO daily_money_history_detail_more (
-    household_id, member_id, "date", transaction_date, security_code, closing_price,
+    household_id, settlement_household_id, member_id, "date", transaction_date, security_code, closing_price,
     number_of_shares_held, unit_price_per_share, cost, market_value,
     profit_and_loss, profit_and_loss_percentage
 )
@@ -116,6 +116,7 @@ aggregated_data AS (
     FROM raw_data
 )
 SELECT
+    household_id,
     household_id,
     member_id,
     date,

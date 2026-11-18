@@ -82,8 +82,8 @@ async fn money_flow_repository_pairs_member_values_with_previous_day() {
     // 以種入的會員市值取代重算結果，驗證對照：前一日 100、當日 120。
     cleanup().await;
     sqlx::query(
-        "INSERT INTO daily_money_history_member (household_id, date, member_id, market_value)
-         VALUES (1, $1, $3, 100), (1, $2, $3, 120)",
+        "INSERT INTO daily_money_history_member (household_id, settlement_household_id, date, member_id, market_value)
+         VALUES (1, 1, $1, $3, 100), (1, 1, $2, $3, 120)",
     )
     .bind(previous)
     .bind(current)

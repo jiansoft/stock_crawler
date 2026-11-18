@@ -88,7 +88,7 @@ impl DailyMoneyHistoryMember {
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
-INSERT INTO daily_money_history_member (date, household_id, member_id, market_value)
+INSERT INTO daily_money_history_member (date, household_id, settlement_household_id, member_id, market_value)
 WITH member_scope AS (
     -- 停用會員的資產仍屬家庭；建立前的既有持股也保留，刪除者不參與結算。
     SELECT m."Id" AS member_id, m.household_id
@@ -120,9 +120,10 @@ final_rows AS (
     UNION ALL
     SELECT household_id, member_id, market_value FROM member_agg
 )
-SELECT $1 AS date, fr.household_id, fr.member_id, fr.market_value
+SELECT $1 AS date, fr.household_id, fr.household_id, fr.member_id, fr.market_value
 FROM final_rows fr
 ON CONFLICT (date, household_id, member_id) DO UPDATE SET
+    settlement_household_id = EXCLUDED.settlement_household_id,
     market_value = EXCLUDED.market_value,
     updated_time = NOW();
 "#;

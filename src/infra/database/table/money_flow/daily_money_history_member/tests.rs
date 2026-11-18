@@ -109,6 +109,44 @@ async fn household_settlement_isolated_postgres() {
     .await
     .expect("確認刪除者無結算");
     assert_eq!(deleted_rows, 0);
+    // 新結算明確保存結算家庭；搬家後可見家庭改變，原合計及歸屬仍須保留。
+    let mismatch: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM (
+            SELECT household_id, settlement_household_id FROM daily_money_history_member WHERE date=$1
+            UNION ALL SELECT household_id, settlement_household_id FROM daily_money_history_detail WHERE date=$1
+            UNION ALL SELECT household_id, settlement_household_id FROM daily_money_history_detail_more WHERE date=$1
+         ) rows WHERE household_id<>settlement_household_id"
+    ).bind(date).fetch_one(&mut **conn).await.expect("確認新結算歸屬");
+    assert_eq!(mismatch, 0, "新結算的三張市值表必須保存原家庭");
+    sqlx::query("SELECT public.member_money_history_move($1, $2)")
+        .bind(members[0])
+        .bind(other)
+        .execute(&mut **conn)
+        .await
+        .expect("搬移本人歷史");
+    let moved: (i64, i64) = sqlx::query_as("SELECT household_id, settlement_household_id FROM daily_money_history_member WHERE date=$1 AND member_id=$2")
+        .bind(date).bind(members[0]).fetch_one(&mut **conn).await.expect("讀取搬移後歸屬");
+    assert_eq!(moved, (other, 1));
+    let original: Decimal = sqlx::query_scalar("SELECT market_value FROM daily_money_history_member WHERE date=$1 AND household_id=1 AND member_id=0")
+        .bind(date).fetch_one(&mut **conn).await.expect("原家庭歷史合計");
+    assert_eq!(original, dec!(200), "搬家不重算歷史合計");
+    sqlx::query("SELECT public.member_money_history_delete($1)")
+        .bind(members[0])
+        .execute(&mut **conn)
+        .await
+        .expect("刪除後重建原結算家庭");
+    let removed_total: Decimal = sqlx::query_scalar("SELECT market_value FROM daily_money_history_member WHERE date=$1 AND household_id=1 AND member_id=0")
+        .bind(date).fetch_one(&mut **conn).await.expect("刪除後原家庭合計");
+    let removed_legacy: Decimal =
+        sqlx::query_scalar("SELECT sum FROM daily_money_history WHERE date=$1")
+            .bind(date)
+            .fetch_one(&mut **conn)
+            .await
+            .expect("刪除後凍結寬表合計");
+    assert_eq!(
+        (removed_total, removed_legacy),
+        (Decimal::ZERO, Decimal::ZERO)
+    );
     let implicit_defaults: i64 = sqlx::query_scalar("SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND ((table_name IN ('daily_money_history_member','daily_money_history_detail','daily_money_history_detail_more') AND column_name='household_id') OR (table_name='trace' AND column_name='member_id')) AND column_default IS NOT NULL")
         .fetch_one(&mut **conn).await.expect("確認隱含擁有者預設值移除");
     assert_eq!(implicit_defaults, 0);

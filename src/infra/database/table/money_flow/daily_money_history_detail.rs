@@ -147,13 +147,13 @@ member_totals AS (
     FROM calc_base GROUP BY household_id, member_id
 )
 INSERT INTO daily_money_history_detail (
-    household_id, member_id, date, security_code, closing_price, total_shares, cost,
+    household_id, settlement_household_id, member_id, date, security_code, closing_price, total_shares, cost,
     average_unit_price_per_share, market_value, ratio, transfer_tax,
     profit_and_loss, profit_and_loss_percentage, created_time, updated_time,
     previous_day_market_value, previous_day_profit_and_loss, previous_day_profit_and_loss_percentage
 )
 SELECT
-    cb.household_id, cb.member_id, cb.date, cb.security_code, cb.closing_price, cb.total_share, cb.cost,
+    cb.household_id, cb.household_id, cb.member_id, cb.date, cb.security_code, cb.closing_price, cb.total_share, cb.cost,
     ROUND(CAST(-cb.cost / cb.total_share AS numeric), 4),
     cb.market_value,
     ROUND(CAST(cb.market_value / NULLIF(mt.total_mkt_val, 0) * 100 AS numeric), 4),
@@ -170,6 +170,7 @@ SELECT
 FROM calc_base cb
 JOIN member_totals mt ON cb.household_id = mt.household_id AND cb.member_id = mt.member_id
 ON CONFLICT (date, security_code, household_id, member_id) DO UPDATE SET
+    settlement_household_id = EXCLUDED.settlement_household_id,
     closing_price = EXCLUDED.closing_price,
     total_shares = EXCLUDED.total_shares,
     cost = EXCLUDED.cost,
