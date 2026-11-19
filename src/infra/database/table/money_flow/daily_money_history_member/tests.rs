@@ -67,13 +67,27 @@ async fn household_settlement_isolated_postgres() {
         ("__settlement_b__", other, false, false, 30),
         ("__settlement_deleted__", other, true, true, 100),
     ] {
-        let member: i64 = sqlx::query_scalar(r#"INSERT INTO "Member" ("Account", "Name", household_id, is_active, deleted_at, "CreateTime")
-            VALUES ($1, $1, $2, $3, CASE WHEN $4 THEN now() END, '1987-07-01') RETURNING "Id""#)
-            .bind(account).bind(household).bind(active).bind(deleted)
-            .fetch_one(&mut **conn).await.expect("新增測試會員");
+        let member: i64 = sqlx::query_scalar(
+            r#"INSERT INTO "Member" ("Account", "Name", household_id, is_active, "CreateTime")
+            VALUES ($1, $1, $2, $3, '1987-07-01') RETURNING "Id""#,
+        )
+        .bind(account)
+        .bind(household)
+        .bind(active)
+        .fetch_one(&mut **conn)
+        .await
+        .expect("新增測試會員");
         members.push(member);
         sqlx::query("INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, date) VALUES ($1, 'IAM7SET', $2, -100, '1987-07-01')")
             .bind(member).bind(shares).execute(&mut **conn).await.expect("新增持股");
+        if deleted {
+            // 模擬早於刪除守門的殘留持股；已刪除會員現在無法直接新增持股。
+            sqlx::query(r#"UPDATE "Member" SET deleted_at=now() WHERE "Id"=$1"#)
+                .bind(member)
+                .execute(&mut **conn)
+                .await
+                .expect("標記舊會員已刪除");
+        }
     }
     sqlx::query(r#"INSERT INTO "DailyQuotes" (stock_symbol, "Date", "ClosingPrice") VALUES ('IAM7SET', $1, 20), ('IAM7SET', $2, 10)"#)
         .bind(date).bind(previous).execute(&mut **conn).await.expect("新增測試報價");

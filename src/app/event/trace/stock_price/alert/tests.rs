@@ -139,23 +139,13 @@ impl crate::app::notify::HoldingsSender for TraceSender {
     }
 }
 
-/// 提供兩位本人範圍訂閱者的固定路由。
-struct TraceRoutes;
+/// 提供固定的測試通知路由。
+struct TraceRoutes(Vec<crate::domain::notify::NotifyRoute>);
 
 #[async_trait::async_trait]
 impl crate::domain::notify::NotifyRouteRepository for TraceRoutes {
     async fn fetch_routes(&self, _: &str) -> Result<Vec<crate::domain::notify::NotifyRoute>> {
-        Ok([79731, 79732]
-            .into_iter()
-            .map(|id| crate::domain::notify::NotifyRoute {
-                member_id: id,
-                household_id: 1,
-                channel_id: id,
-                announce_new_topic: false,
-                holdings_view: "own".into(),
-                chat_id: id + 100,
-            })
-            .collect())
+        Ok(self.0.clone())
     }
 }
 
@@ -168,6 +158,12 @@ async fn personal_trace_dispatches_only_to_triggered_subscribers() {
     ];
     let owners = [(79731, "甲".into()), (79732, "乙".into())];
     let sender = TraceSender::default();
+    let routes = TraceRoutes(
+        [79731, 79732]
+            .into_iter()
+            .map(|id| trace_route(1, id, "own"))
+            .collect(),
+    );
     for (price, expected) in [(dec!(90), 1), (dec!(79), 2), (dec!(79), 0)] {
         let event = PriceAlert {
             targets: &targets,
@@ -178,7 +174,7 @@ async fn personal_trace_dispatches_only_to_triggered_subscribers() {
             alert::Topic::PersonalPriceTrace,
             "同一事件識別不控制個人通知去重",
             |view, recipient| event.build(view, recipient, &owners, &MemoryPriceDedup),
-            Some(&TraceRoutes),
+            Some(&routes),
             &sender,
             true,
         )
@@ -192,6 +188,107 @@ async fn personal_trace_dispatches_only_to_triggered_subscribers() {
     );
     assert!(messages[0].1.contains("低於最低價:100"));
     assert!(messages[2].1.contains("低於最低價:80"));
+}
+
+fn trace_route(
+    household_id: i64,
+    member_id: i64,
+    holdings_view: &str,
+) -> crate::domain::notify::NotifyRoute {
+    crate::domain::notify::NotifyRoute {
+        member_id,
+        household_id,
+        channel_id: member_id,
+        announce_new_topic: false,
+        holdings_view: holdings_view.into(),
+        chat_id: member_id + 100,
+    }
+}
+
+/// 同一報價觸及兩個家庭的條件；以 PostgreSQL 解析擁有者並驗證實際訊息內容。
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+async fn trace_notifications_keep_two_households_separate() {
+    use crate::infra::database;
+    use crate::infra::database::repository::member;
+
+    let mut tx = database::get_tx().await.expect("開啟隔離測試交易");
+    let household_b: i64 = sqlx::query_scalar(
+        "INSERT INTO member_household (name) VALUES ('__trace_712_b__') RETURNING id",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("建立第二家庭");
+    let mut routes = Vec::new();
+    let mut targets = Vec::new();
+    for (household, account, floor) in [
+        (1, "通知甲員", dec!(101)),
+        (household_b, "通知乙員", dec!(87)),
+    ] {
+        let member_id: i64 = sqlx::query_scalar(
+            r#"INSERT INTO "Member" ("Account", "Name", household_id) VALUES ($1,$1,$2) RETURNING "Id""#,
+        )
+        .bind(account)
+        .bind(household)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("建立家庭會員");
+        routes.push(trace_route(household, member_id, "household"));
+        targets.push(PriceTrace::new(
+            member_id,
+            "IAM712TRACE".into(),
+            floor,
+            dec!(300),
+        ));
+    }
+    let routes = TraceRoutes(routes);
+    let sender = TraceSender::default();
+    let event = PriceAlert {
+        targets: &targets,
+        current_price: dec!(50),
+        source_site: None,
+    };
+    let tx = tokio::sync::Mutex::new(tx);
+    let summary = crate::app::notify::dispatch_for_recipient(
+        alert::Topic::PersonalPriceTrace,
+        "兩家收到同一筆報價",
+        |view, recipient| {
+            let (event, tx) = (&event, &tx);
+            async move {
+                let owners = {
+                    let mut tx = tx.lock().await;
+                    member::fetch_names_from(&mut **tx, &view)
+                        .await?
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                };
+                event
+                    .build(view, recipient, &owners, &MemoryPriceDedup)
+                    .await
+            }
+        },
+        Some(&routes),
+        &sender,
+        true,
+    )
+    .await;
+    assert_eq!(summary.sent, 2);
+    for (route, own, other) in [
+        (&routes.0[0], "通知甲員", "通知乙員"),
+        (&routes.0[1], "通知乙員", "通知甲員"),
+    ] {
+        let messages = sender.0.lock().expect("測試鎖");
+        let (_, message) = messages
+            .iter()
+            .find(|(chat_id, _)| *chat_id == route.chat_id)
+            .expect("送到該家庭的聊天室");
+        assert!(message.contains(own), "應標明本人家庭的觸發條件：{message}");
+        assert!(
+            !message.contains(other),
+            "應排除另一家庭的觸發條件：{message}"
+        );
+    }
+    tx.into_inner().rollback().await.expect("回滾測試資料");
 }
 
 /// 報價只跌破甲的條件，乙本人範圍與其他家庭都沒有內容；家庭通知註明並跳脫條件擁有者。
