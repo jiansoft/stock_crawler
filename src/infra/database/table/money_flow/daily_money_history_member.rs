@@ -93,7 +93,7 @@ WITH member_scope AS (
     -- 停用會員的資產仍屬家庭；建立前的既有持股也保留，刪除者不參與結算。
     SELECT m."Id" AS member_id, m.household_id
     FROM "Member" m
-    WHERE m.deleted_at IS NULL
+    WHERE m.deleted_at IS NULL AND m.activated_at IS NOT NULL
       AND ((m."CreateTime" AT TIME ZONE 'Asia/Taipei')::date <= $1
            OR EXISTS (SELECT 1 FROM stock_ownership_details od WHERE od.member_id = m."Id" AND od.date <= $1))
 ),
@@ -116,6 +116,7 @@ final_rows AS (
     SELECT h.id AS household_id, 0::bigint AS member_id, COALESCE(SUM(ma.market_value), 0) AS market_value
     FROM member_household h
     LEFT JOIN member_agg ma ON ma.household_id = h.id
+    WHERE NOT h.registration_pending
     GROUP BY h.id
     UNION ALL
     SELECT household_id, member_id, market_value FROM member_agg

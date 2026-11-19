@@ -2,6 +2,44 @@
 
 use super::*;
 
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+async fn pending_registration_has_no_settlement_rows() {
+    let date = NaiveDate::from_ymd_opt(1987, 7, 23).expect("固定日期合法");
+    let mut tx = Some(database::get_tx().await.expect("開啟隔離測試交易"));
+    let conn = tx.as_mut().expect("交易存在");
+    let household: i64 = sqlx::query_scalar(
+        "INSERT INTO member_household (name, registration_pending)
+         VALUES ('__settlement_pending__', true) RETURNING id",
+    )
+    .fetch_one(&mut **conn)
+    .await
+    .expect("建立待驗證的新家庭");
+    sqlx::query(
+        r#"INSERT INTO "Member" ("Account", household_id, is_active, activated_at, "CreateTime")
+           VALUES ('__settlement_pending__', $1, false, NULL, '1987-07-01')"#,
+    )
+    .bind(household)
+    .execute(&mut **conn)
+    .await
+    .expect("建立待驗證的會員");
+
+    DailyMoneyHistoryMember::upsert(date, &mut tx)
+        .await
+        .expect("執行每日市值結算");
+
+    let conn = tx.as_mut().expect("交易存在");
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM daily_money_history_member WHERE date=$1 AND household_id=$2",
+    )
+    .bind(date)
+    .bind(household)
+    .fetch_one(&mut **conn)
+    .await
+    .expect("查詢暫存家庭是否產生合計或會員列");
+    assert_eq!(count, 0);
+}
+
 /// 兩個家庭共持同股票時，三張表、損益占比與前日合計都不可交叉；停用仍計入，刪除不計入。
 #[tokio::test]
 #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]

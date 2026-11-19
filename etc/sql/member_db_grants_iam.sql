@@ -63,7 +63,7 @@ REVOKE ALL ON SEQUENCE public."Member_Id_seq" FROM stock_rust_app, stock_go_app,
 -- 3. stock_rust_app：只讀分送所需的欄位；不碰密碼雜湊、Email、MFA、Session、Token、群組、稽核與訂閱
 -- =============================================================================
 -- "CreateTime"：每日結算只為建立日不晚於結算日的會員產生市值列（daily_money_history_member.rs）
-GRANT SELECT ("Id", "Name", "CreateTime", household_id, is_active, deleted_at, must_change_password)
+GRANT SELECT ("Id", "Name", "CreateTime", household_id, is_active, deleted_at, must_change_password, activated_at)
     ON public."Member" TO stock_rust_app;
 GRANT SELECT ON public.member_household TO stock_rust_app;
 -- 視圖以擁有者權限讀底層表，不必開放 member_notify_subscription／member_notify_channel 的讀取
@@ -118,6 +118,8 @@ GRANT SELECT, DELETE ON public.member_email_challenge TO stock_go_maint;
 GRANT SELECT, DELETE ON public.member_data_request TO stock_go_maint;
 -- 已撤銷或過期的 Token 保留 1 年後清除
 GRANT SELECT, DELETE ON public.member_mcp_token TO stock_go_maint;
--- 完全公開註冊後 48 小時未啟用的帳號（activated_at IS NULL）
-GRANT SELECT ("Id", activated_at, "CreateTime"), DELETE ON public."Member" TO stock_go_maint;
+-- 只允許執行有範圍的公開註冊清理，不能直接刪除會員或家庭。
+REVOKE DELETE ON public."Member" FROM stock_go_maint;
+REVOKE SELECT ("Id", activated_at, "CreateTime") ON public."Member" FROM stock_go_maint;
+GRANT EXECUTE ON FUNCTION public.member_cleanup_unactivated_registrations(timestamptz) TO stock_go_maint;
 -- 資料權利執行工具（4.6，Phase 7）另需的權限在 Phase 7 補上，這裡只涵蓋到期清理

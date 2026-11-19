@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS public.member_household (
 );
 
 COMMENT ON TABLE public.member_household IS '家庭：合計與跨成員檢視只涵蓋同一個家庭；每位會員恰屬一個家庭';
+ALTER TABLE public.member_household
+    ADD COLUMN IF NOT EXISTS registration_pending boolean NOT NULL DEFAULT false;
 
 -- 預設家庭 #1：不依賴任何會員列，所以空資料庫也能建立；家長在資料遷移檔指定
 INSERT INTO public.member_household (id, name)
@@ -527,6 +529,39 @@ CREATE INDEX IF NOT EXISTS idx_member_email_challenge_member
     ON public.member_email_challenge (member_id, purpose) WHERE used_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_member_email_challenge_expires
     ON public.member_email_challenge (expires_at);
+
+-- 公開註冊清理只限逾 48 小時、尚未啟用的會員及其仍空的暫存家庭。
+-- 驗證與清理共用會員列鎖；不授權維護角色直接刪除家庭。
+CREATE OR REPLACE FUNCTION public.member_cleanup_unactivated_registrations(cutoff timestamptz)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    households bigint[];
+    removed bigint;
+BEGIN
+    WITH expired AS (
+        SELECT m."Id"
+        FROM public."Member" m
+        WHERE m.activated_at IS NULL
+          AND m."CreateTime" < LEAST(cutoff, clock_timestamp() - interval '48 hours')
+        ORDER BY m."Id" LIMIT 5000 FOR UPDATE SKIP LOCKED
+    ), deleted AS (
+        DELETE FROM public."Member" m USING expired e
+        WHERE m."Id" = e."Id"
+        RETURNING m.household_id
+    )
+    SELECT array_agg(DISTINCT household_id), count(*) INTO households, removed FROM deleted;
+
+    DELETE FROM public.member_household h
+    WHERE h.id = ANY(households) AND h.registration_pending AND h.owner_member_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM public."Member" m WHERE m.household_id = h.id);
+    RETURN removed;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.member_cleanup_unactivated_registrations(timestamptz) FROM PUBLIC;
 
 -- 資料權利請求（4.6）：請求編號不含姓名；result 只有資料類別與筆數
 CREATE TABLE IF NOT EXISTS public.member_data_request (
