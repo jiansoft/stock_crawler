@@ -814,3 +814,286 @@ BEGIN
         WHERE a.household_id = 1 GROUP BY a.date
     ) value WHERE old.date = value.date;
 END $$;
+
+-- 7-10：主機維護工具的資料刪除與重放。已刪會員保留不可登入的識別殼。
+CREATE TABLE IF NOT EXISTS public.member_privacy_epoch (
+    singleton boolean PRIMARY KEY CHECK (singleton),
+    revision bigint NOT NULL
+);
+INSERT INTO public.member_privacy_epoch (singleton, revision) VALUES (true, 0) ON CONFLICT DO NOTHING;
+
+-- 先鎖住同一會員，避免刪除期間舊請求或 MCP 快取重新寫入已刪除的本人資料。
+CREATE OR REPLACE FUNCTION public.member_guard_deleted_personal_data()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
+DECLARE
+    owner_id bigint;
+    owner_text text;
+    removed timestamptz;
+BEGIN
+    IF TG_TABLE_NAME IN ('dividend_record_detail','dividend_record_detail_more') THEN
+        SELECT o.member_id INTO owner_id FROM public.stock_ownership_details o
+        WHERE o.serial=NEW.stock_ownership_details_serial;
+        IF NOT FOUND AND NEW.stock_ownership_details_serial<>0 THEN
+            RAISE EXCEPTION 'privacy_holding_missing' USING ERRCODE='23503';
+        END IF;
+    ELSE
+        owner_text := NEW.member_id::text;
+        -- 配置的 '0' 及其他表的 0 是家庭／全市場資料；保持既有文字值的相容性。
+        IF owner_text !~ '^[1-9][0-9]{0,18}$' THEN
+            RETURN NEW;
+        END IF;
+        IF owner_text::numeric>9223372036854775807 THEN
+            RETURN NEW;
+        END IF;
+        owner_id := owner_text::bigint;
+    END IF;
+    SELECT deleted_at INTO removed FROM public."Member" WHERE "Id"=owner_id FOR SHARE;
+    IF removed IS NOT NULL THEN
+        RAISE EXCEPTION 'privacy_member_deleted' USING ERRCODE='23514';
+    END IF;
+    RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.member_guard_deleted_personal_data() FROM PUBLIC;
+
+DO $$
+DECLARE
+    table_name text;
+    identity_column text;
+BEGIN
+    FOREACH table_name IN ARRAY ARRAY[
+        'stock_ownership_details','dividend_record_detail','dividend_record_detail_more','sell_history',
+        'daily_money_history_member','daily_money_history_detail','daily_money_history_detail_more',
+        'dividend_forecast_snapshot','portfolio_target','portfolio_target_dimension','portfolio_target_revision','trace'
+    ] LOOP
+        identity_column := CASE WHEN table_name IN ('dividend_record_detail','dividend_record_detail_more')
+            THEN 'stock_ownership_details_serial' ELSE 'member_id' END;
+        IF to_regclass('public.'||table_name) IS NOT NULL THEN
+            EXECUTE format('DROP TRIGGER IF EXISTS trg_member_deleted_data ON public.%I',table_name);
+            EXECUTE format('CREATE TRIGGER trg_member_deleted_data BEFORE INSERT OR UPDATE OF %I ON public.%I
+                FOR EACH ROW EXECUTE FUNCTION public.member_guard_deleted_personal_data()',identity_column,table_name);
+        END IF;
+    END LOOP;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.member_assert_privacy_deletable(p_member bigint, p_created timestamptz)
+RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog AS $$
+DECLARE
+    subject public."Member"%ROWTYPE;
+    earliest date;
+BEGIN
+    PERFORM public.member_money_history_lock();
+    SELECT * INTO subject FROM public."Member" WHERE "Id"=p_member FOR UPDATE;
+    IF NOT FOUND THEN RETURN false; END IF;
+    IF subject."CreateTime" IS DISTINCT FROM p_created THEN
+        RAISE EXCEPTION 'privacy_restore_identity_mismatch';
+    END IF;
+    IF subject.deleted_at IS NOT NULL THEN RETURN false; END IF;
+    IF EXISTS (SELECT 1 FROM public.member_household WHERE owner_member_id=p_member) THEN
+        RAISE EXCEPTION 'privacy_household_owner_transfer_required';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.member_group_mapping gm JOIN public.member_group g ON g.id=gm.group_id
+               WHERE gm.member_id=p_member AND g.is_root) THEN
+        PERFORM id FROM public.member_group WHERE is_root FOR UPDATE;
+        IF NOT EXISTS (
+            SELECT 1 FROM public.member_group_mapping gm
+            JOIN public.member_group g ON g.id=gm.group_id AND g.is_root
+            JOIN public."Member" m ON m."Id"=gm.member_id
+            WHERE gm.member_id<>p_member AND m.is_active AND m.deleted_at IS NULL AND m.activated_at IS NOT NULL
+        ) THEN
+            RAISE EXCEPTION 'privacy_last_root';
+        END IF;
+    END IF;
+    -- 舊寬表的非 Eddie 欄可能聚合多人。只要同日個人列無法對帳，保留整筆申請供人工核對。
+    SELECT least((subject."CreateTime" AT TIME ZONE 'Asia/Taipei')::date,
+        (SELECT min(date) FROM public.stock_ownership_details WHERE member_id=p_member),
+        (SELECT min(date) FROM public.daily_money_history_member WHERE member_id=p_member)) INTO earliest;
+    IF EXISTS (
+        SELECT 1 FROM public.daily_money_history old
+        LEFT JOIN LATERAL (
+            SELECT count(*) AS contributors, sum(m.market_value) AS total,
+                   sum(m.market_value) FILTER (WHERE m.member_id=1) AS eddie,
+                   sum(m.market_value) FILTER (WHERE m.member_id<>1) AS others
+            FROM public.daily_money_history_member m
+            WHERE m.date=old.date AND m.settlement_household_id=1 AND m.member_id>0
+        ) breakdown ON true
+        WHERE old.date>=earliest AND (
+            breakdown.contributors=0 OR old.sum<>coalesce(breakdown.total,0)
+            OR old.eddie<>coalesce(breakdown.eddie,0) OR old.unice<>coalesce(breakdown.others,0))
+    ) THEN
+        RAISE EXCEPTION 'privacy_legacy_history_review_required';
+    END IF;
+    RETURN true;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.member_prepare_data_delete(p_request uuid)
+RETURNS TABLE(member_id bigint, member_created_at timestamptz)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
+DECLARE
+    target bigint;
+    created timestamptz;
+BEGIN
+    SELECT r.member_id INTO target FROM public.member_data_request r
+    WHERE r.id=p_request AND r.kind='delete' AND r.status='approved' FOR UPDATE;
+    IF target IS NULL THEN RAISE EXCEPTION 'privacy_approved_request_required'; END IF;
+    SELECT "CreateTime" INTO created FROM public."Member" WHERE "Id"=target;
+    IF NOT public.member_assert_privacy_deletable(target, created) THEN
+        RAISE EXCEPTION 'privacy_approved_request_required';
+    END IF;
+    RETURN QUERY SELECT target, created;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.member_execute_data_delete(
+    p_request uuid, p_member bigint, p_created timestamptz, p_replay boolean
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
+DECLARE
+    subject public."Member"%ROWTYPE;
+    table_name text;
+    holdings bigint[];
+    tokens text[];
+    channels text[];
+    requests text[];
+    invites text[];
+    legacy_dates date[];
+    identifiers text[];
+    count_deleted bigint;
+    results jsonb := '{}'::jsonb;
+BEGIN
+    IF p_request IS NULL OR p_member IS NULL OR p_member<=0 OR p_created IS NULL OR p_replay IS NULL THEN
+        RAISE EXCEPTION 'privacy_deletion_reference_invalid';
+    END IF;
+    IF NOT p_replay THEN
+        PERFORM id FROM public.member_data_request
+        WHERE id=p_request AND kind='delete' AND status='approved' AND member_id=p_member FOR UPDATE;
+        IF NOT FOUND THEN RAISE EXCEPTION 'privacy_approved_request_required'; END IF;
+    END IF;
+    IF NOT public.member_assert_privacy_deletable(p_member, p_created) THEN
+        IF p_replay AND coalesce(pg_sequence_last_value('public."Member_Id_seq"'::regclass),0)<p_member THEN
+            PERFORM setval('public."Member_Id_seq"'::regclass,p_member,true);
+        END IF;
+        RETURN jsonb_build_object('already_absent',true);
+    END IF;
+    SELECT * INTO subject FROM public."Member" WHERE "Id"=p_member;
+    SELECT array_agg(serial) INTO holdings FROM public.stock_ownership_details WHERE member_id=p_member;
+    SELECT array_agg(id::text) INTO tokens FROM public.member_mcp_token WHERE member_id=p_member;
+    SELECT array_agg(address) INTO channels FROM public.member_notify_channel WHERE member_id=p_member;
+    SELECT array_agg(id::text) INTO requests FROM public.member_data_request WHERE member_id=p_member;
+    SELECT array_agg(id::text) INTO invites FROM public.member_invitation WHERE created_by=p_member OR used_by=p_member;
+    identifiers := array_remove(ARRAY[subject."Account",subject."Name",subject.email] || channels || tokens, '');
+
+    UPDATE public."Member" SET is_active=false,deleted_at=clock_timestamp(),session_version=session_version+1,
+        "Account"='', "Name"='', "Password"='',password_hash='',email=NULL,email_verified_at=NULL,last_login_at=NULL,
+        password_changed_at=NULL,must_change_password=false,temp_password_expires_at=NULL,created_by=NULL,
+        terms_version=NULL,terms_accepted_at=NULL,updated_at=clock_timestamp()
+    WHERE "Id"=p_member;
+    DELETE FROM public.member_session WHERE member_id=p_member;
+    UPDATE public.member_mcp_token SET rotated_from_id=NULL WHERE rotated_from_id::text=ANY(tokens) AND member_id<>p_member;
+    DELETE FROM public.member_mcp_token WHERE member_id=p_member;
+    DELETE FROM public.member_notify_delivery WHERE member_id=p_member
+        OR channel_id IN (SELECT id FROM public.member_notify_channel WHERE member_id=p_member);
+    DELETE FROM public.member_notify_subscription WHERE member_id=p_member;
+    DELETE FROM public.member_notify_channel WHERE member_id=p_member;
+    DELETE FROM public.member_mfa WHERE member_id=p_member;
+    DELETE FROM public.member_email_challenge WHERE member_id=p_member;
+    DELETE FROM public.member_analysis_lease WHERE member_id=p_member;
+    DELETE FROM public.member_analysis_usage WHERE member_id=p_member;
+    DELETE FROM public.member_group_mapping WHERE member_id=p_member;
+    UPDATE public.member_group_mapping SET assigned_by=NULL WHERE assigned_by=p_member;
+    UPDATE public."Member" SET created_by=NULL WHERE created_by=p_member;
+    DELETE FROM public.member_invitation WHERE created_by=p_member;
+    UPDATE public.member_invitation SET used_by=NULL WHERE used_by=p_member;
+
+    -- 4.0 第 ⑦ 區的 13 張表。先記錄歸屬用的持股 serial，再處理配息和持股。
+    FOREACH table_name IN ARRAY ARRAY['dividend_record_detail','dividend_record_detail_more'] LOOP
+        EXECUTE format('DELETE FROM public.%I WHERE stock_ownership_details_serial=ANY($1)',table_name) USING holdings;
+        GET DIAGNOSTICS count_deleted = ROW_COUNT;
+        results := results || jsonb_build_object(table_name,count_deleted);
+    END LOOP;
+    FOREACH table_name IN ARRAY ARRAY['stock_ownership_details','sell_history','dividend_forecast_snapshot','trace'] LOOP
+        EXECUTE format('DELETE FROM public.%I WHERE member_id=$1',table_name) USING p_member;
+        GET DIAGNOSTICS count_deleted = ROW_COUNT;
+        results := results || jsonb_build_object(table_name,count_deleted);
+    END LOOP;
+    FOREACH table_name IN ARRAY ARRAY['portfolio_target','portfolio_target_dimension','portfolio_target_revision'] LOOP
+        EXECUTE format('DELETE FROM public.%I WHERE member_id=$1',table_name) USING p_member::text;
+        GET DIAGNOSTICS count_deleted = ROW_COUNT;
+        results := results || jsonb_build_object(table_name,count_deleted);
+    END LOOP;
+    UPDATE public.portfolio_target_revision SET actor_ref=''
+    WHERE (actor_source='web' AND actor_ref=p_member::text) OR (actor_source='mcp' AND actor_ref=ANY(tokens));
+    FOREACH table_name IN ARRAY ARRAY['daily_money_history_member','daily_money_history_detail','daily_money_history_detail_more'] LOOP
+        EXECUTE format('SELECT count(*) FROM public.%I WHERE member_id=$1',table_name) INTO count_deleted USING p_member;
+        results := results || jsonb_build_object(table_name,count_deleted);
+    END LOOP;
+    SELECT array_agg(old.date) INTO legacy_dates FROM public.daily_money_history old WHERE EXISTS (
+        SELECT 1 FROM public.daily_money_history_member m
+        WHERE m.member_id=p_member AND m.date=old.date AND m.settlement_household_id=1
+        UNION ALL SELECT 1 FROM public.daily_money_history_detail d
+        WHERE d.member_id=p_member AND d.date=old.date AND d.settlement_household_id=1
+        UNION ALL SELECT 1 FROM public.daily_money_history_detail_more d
+        WHERE d.member_id=p_member AND d.date=old.date AND d.settlement_household_id=1
+    );
+    results := results || jsonb_build_object('daily_money_history',coalesce(cardinality(legacy_dates),0));
+    PERFORM public.member_money_history_delete(p_member);
+
+    FOREACH table_name IN ARRAY ARRAY['dividend_record_detail','dividend_record_detail_more'] LOOP
+        EXECUTE format('SELECT count(*) FROM public.%I WHERE stock_ownership_details_serial=ANY($1)',table_name)
+            INTO count_deleted USING holdings;
+        IF count_deleted<>0 THEN RAISE EXCEPTION 'privacy_business_data_remaining'; END IF;
+    END LOOP;
+    FOREACH table_name IN ARRAY ARRAY['stock_ownership_details','sell_history','dividend_forecast_snapshot','trace',
+        'daily_money_history_member','daily_money_history_detail','daily_money_history_detail_more'] LOOP
+        EXECUTE format('SELECT count(*) FROM public.%I WHERE member_id=$1',table_name) INTO count_deleted USING p_member;
+        IF count_deleted<>0 THEN RAISE EXCEPTION 'privacy_business_data_remaining'; END IF;
+    END LOOP;
+    FOREACH table_name IN ARRAY ARRAY['portfolio_target','portfolio_target_dimension','portfolio_target_revision'] LOOP
+        EXECUTE format('SELECT count(*) FROM public.%I WHERE member_id=$1',table_name) INTO count_deleted USING p_member::text;
+        IF count_deleted<>0 THEN RAISE EXCEPTION 'privacy_business_data_remaining'; END IF;
+    END LOOP;
+    IF EXISTS (
+        SELECT 1 FROM public.daily_money_history old
+        LEFT JOIN LATERAL (
+            SELECT sum(m.market_value) AS total,
+                   sum(m.market_value) FILTER (WHERE m.member_id=1) AS eddie,
+                   sum(m.market_value) FILTER (WHERE m.member_id<>1) AS others
+            FROM public.daily_money_history_member m
+            WHERE m.date=old.date AND m.settlement_household_id=1 AND m.member_id>0
+        ) breakdown ON true
+        WHERE old.date=ANY(legacy_dates) AND (old.sum<>coalesce(breakdown.total,0)
+            OR old.eddie<>coalesce(breakdown.eddie,0) OR old.unice<>coalesce(breakdown.others,0))
+    ) THEN
+        RAISE EXCEPTION 'privacy_business_data_remaining';
+    END IF;
+
+    UPDATE public.member_audit_log a SET
+        actor_member_id=CASE WHEN a.actor_member_id=p_member THEN NULL ELSE a.actor_member_id END,
+        target_id=CASE WHEN (a.target_type='member' AND a.target_id=p_member::text)
+            OR (a.target_type='mcp_token' AND a.target_id=ANY(tokens))
+            OR (a.target_type='invitation' AND a.target_id=ANY(invites))
+            OR (a.target_type='data_request' AND a.target_id=ANY(requests)) THEN '' ELSE a.target_id END,
+        ip=NULL,user_agent='',detail='{}'::jsonb
+    WHERE a.actor_member_id=p_member OR (a.target_type='member' AND a.target_id=p_member::text)
+       OR (a.target_type='mcp_token' AND a.target_id=ANY(tokens))
+       OR (a.target_type='invitation' AND a.target_id=ANY(invites))
+       OR (a.target_type='data_request' AND a.target_id=ANY(requests))
+       OR (a.action='iam.household_owner_changed' AND (a.detail->>'before'=p_member::text OR a.detail->>'after'=p_member::text))
+       OR a.detail @> jsonb_build_object('member_id',p_member)
+       OR a.detail @> jsonb_build_object('member_ids',jsonb_build_array(p_member))
+       OR EXISTS (SELECT 1 FROM unnest(identifiers) v
+                  WHERE v IS NOT NULL AND jsonb_path_exists(a.detail,'$.** ? (@ == $value)',jsonb_build_object('value',v)));
+
+    UPDATE public.member_data_request SET member_id=NULL, status='done',closed_at=clock_timestamp(),result=results
+    WHERE id=p_request AND kind='delete';
+    UPDATE public.member_data_request SET member_id=NULL,
+        status=CASE WHEN status IN ('received','verified','approved') THEN 'rejected' ELSE status END,
+        reason_code=CASE WHEN status IN ('received','verified','approved') THEN 'account_deleted' ELSE reason_code END,
+        closed_at=coalesce(closed_at,clock_timestamp())
+    WHERE member_id=p_member;
+    INSERT INTO public.member_audit_log (action,target_type,target_id,detail)
+    VALUES ('privacy.deletion_executed','data_request',p_request::text,results);
+    UPDATE public.member_privacy_epoch SET revision=revision+1 WHERE singleton;
+    RETURN results;
+END $$;
+
+REVOKE ALL ON FUNCTION public.member_assert_privacy_deletable(bigint,timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.member_prepare_data_delete(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.member_execute_data_delete(uuid,bigint,timestamptz,boolean) FROM PUBLIC;

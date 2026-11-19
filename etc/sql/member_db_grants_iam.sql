@@ -122,4 +122,8 @@ GRANT SELECT, DELETE ON public.member_mcp_token TO stock_go_maint;
 REVOKE DELETE ON public."Member" FROM stock_go_maint;
 REVOKE SELECT ("Id", activated_at, "CreateTime") ON public."Member" FROM stock_go_maint;
 GRANT EXECUTE ON FUNCTION public.member_cleanup_unactivated_registrations(timestamptz) TO stock_go_maint;
+-- 資料權利執行與重放使用獨立維護角色，只透過固定範圍的函式寫入。
+REVOKE INSERT, UPDATE, DELETE ON public.member_privacy_epoch FROM stock_go_app;
+GRANT EXECUTE ON FUNCTION public.member_prepare_data_delete(uuid) TO stock_go_maint;
+GRANT EXECUTE ON FUNCTION public.member_execute_data_delete(uuid,bigint,timestamptz,boolean) TO stock_go_maint;
 -- 資料權利執行工具（4.6，Phase 7）另需的權限在 Phase 7 補上，這裡只涵蓋到期清理
