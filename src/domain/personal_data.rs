@@ -28,7 +28,7 @@ pub const PERSONAL_BUSINESS_TABLES: [&str; 13] = [
 
 /// 會員系統本身的表（帳號、群組、Session、Token、通知、配額等）。含 `member_id` 但不是業務資料，
 /// 由 IAM 流程（stock_go）自行處理刪除與清理，不列入個人業務表。
-pub const IAM_TABLES: [&str; 18] = [
+pub const IAM_TABLES: [&str; 19] = [
     "Member",
     "member_household",
     "member_group",
@@ -44,6 +44,7 @@ pub const IAM_TABLES: [&str; 18] = [
     "member_analysis_usage",
     "member_analysis_lease",
     "member_invitation",
+    "member_email_challenge",
     "member_data_request",
     "member_mfa",
     "member_mfa_recovery_code",

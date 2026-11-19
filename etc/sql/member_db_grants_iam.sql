@@ -114,6 +114,7 @@ GRANT SELECT, DELETE ON public.member_session TO stock_go_maint;
 GRANT SELECT, DELETE ON public.member_analysis_lease TO stock_go_maint;
 GRANT SELECT, DELETE ON public.member_analysis_usage TO stock_go_maint;
 GRANT SELECT, DELETE ON public.member_invitation TO stock_go_maint;
+GRANT SELECT, DELETE ON public.member_email_challenge TO stock_go_maint;
 GRANT SELECT, DELETE ON public.member_data_request TO stock_go_maint;
 -- 已撤銷或過期的 Token 保留 1 年後清除
 GRANT SELECT, DELETE ON public.member_mcp_token TO stock_go_maint;

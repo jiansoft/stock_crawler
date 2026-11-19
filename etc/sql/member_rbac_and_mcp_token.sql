@@ -511,6 +511,23 @@ CREATE TABLE IF NOT EXISTS public.member_invitation (
     CHECK (expires_at <= created_at + interval '7 days')
 );
 
+-- Email 驗證與自助重設（7-08）：權杖只存 SHA-256；核銷與帳號更新同一交易。
+CREATE TABLE IF NOT EXISTS public.member_email_challenge (
+    token_hash      bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
+    member_id       bigint NOT NULL REFERENCES public."Member"("Id") ON DELETE CASCADE,
+    purpose         text NOT NULL CHECK (purpose IN ('verify_email', 'reset_password')),
+    email           character varying(254) NOT NULL,
+    session_version integer NOT NULL,
+    created_at      timestamp with time zone NOT NULL DEFAULT now(),
+    expires_at      timestamp with time zone NOT NULL,
+    used_at         timestamp with time zone,
+    CHECK (expires_at > created_at AND expires_at <= created_at + interval '30 minutes')
+);
+CREATE INDEX IF NOT EXISTS idx_member_email_challenge_member
+    ON public.member_email_challenge (member_id, purpose) WHERE used_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_member_email_challenge_expires
+    ON public.member_email_challenge (expires_at);
+
 -- 資料權利請求（4.6）：請求編號不含姓名；result 只有資料類別與筆數
 CREATE TABLE IF NOT EXISTS public.member_data_request (
     id          uuid PRIMARY KEY,
