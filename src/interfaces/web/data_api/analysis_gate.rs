@@ -21,6 +21,22 @@ pub(crate) const QUEUE_MAX_ENV: &str = "ANALYSIS_QUEUE_MAX";
 /// 未設定 [`MAX_CONCURRENT_ENV`] 時的名額。計畫要求不得以無上限預設值開放，正式值在 L8 於 pi 實測後填入；
 /// pi 為 4 核心，回測以資料庫查詢為主，先保守取 2。
 pub(crate) const DEFAULT_MAX_CONCURRENT: usize = 2;
+const MAX_TRACKED_SYMBOLS_ENV: &str = "TRACE_MAX_TRACKED_SYMBOLS";
+
+pub(super) fn validate_open_limits(read: impl Fn(&str) -> Option<usize>) -> Result<()> {
+    if !read(MAX_CONCURRENT_ENV).is_some_and(|value| (1..=Semaphore::MAX_PERMITS).contains(&value))
+    {
+        anyhow::bail!("開放註冊前須設定有效的 {MAX_CONCURRENT_ENV}");
+    }
+    if read(QUEUE_MAX_ENV).is_none() {
+        anyhow::bail!("開放註冊前須明確設定 {QUEUE_MAX_ENV}（可為 0）");
+    }
+    if !read(MAX_TRACKED_SYMBOLS_ENV).is_some_and(|value| (1..=i32::MAX as usize).contains(&value))
+    {
+        anyhow::bail!("開放註冊前須設定有效的 {MAX_TRACKED_SYMBOLS_ENV}");
+    }
+    Ok(())
+}
 
 /// 全服務共用的重運算名額。
 pub(crate) static GATE: Lazy<Arc<AnalysisGate>> = Lazy::new(|| Arc::new(AnalysisGate::from_env()));

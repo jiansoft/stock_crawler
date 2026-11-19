@@ -4,6 +4,37 @@ use std::time::Duration;
 
 use super::*;
 
+#[test]
+fn open_registration_requires_explicit_valid_limits() {
+    let values = [
+        (MAX_CONCURRENT_ENV, 2),
+        (QUEUE_MAX_ENV, 0),
+        (MAX_TRACKED_SYMBOLS_ENV, 12),
+    ];
+    let read = |key: &str| {
+        values
+            .iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, n)| *n)
+    };
+    assert!(validate_open_limits(read).is_ok());
+    for (missing, _) in values {
+        let error = validate_open_limits(|key| if key == missing { None } else { read(key) })
+            .expect_err("缺少必要的上限");
+        assert!(error.to_string().contains(missing));
+    }
+    assert!(
+        validate_open_limits(|key| {
+            if key == MAX_TRACKED_SYMBOLS_ENV {
+                Some(0)
+            } else {
+                read(key)
+            }
+        })
+        .is_err()
+    );
+}
+
 /// 滿載且不允許排隊時立刻拒絕；名額歸還後又可取得。
 #[tokio::test]
 async fn external_is_rejected_when_full_without_queue() {

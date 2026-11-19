@@ -1097,3 +1097,12 @@ END $$;
 REVOKE ALL ON FUNCTION public.member_assert_privacy_deletable(bigint,timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.member_prepare_data_delete(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.member_execute_data_delete(uuid,bigint,timestamptz,boolean) FROM PUBLIC;
+
+-- 7-11：所有新增追蹤的交易串行檢查全站去重代號數。既有代號的共用與修改可在滿額時進行。
+CREATE OR REPLACE FUNCTION public.member_trace_symbol_available(p_symbol text,p_limit integer)
+RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog AS $$
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('stock_trace_global_capacity'),0);
+    RETURN EXISTS (SELECT 1 FROM public.trace WHERE stock_symbol=p_symbol)
+        OR (SELECT count(DISTINCT stock_symbol) FROM public.trace)<p_limit;
+END $$;

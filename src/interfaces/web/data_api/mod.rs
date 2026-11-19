@@ -23,12 +23,21 @@ pub use handlers::BacktestStrategyGateway;
 pub(crate) use handlers::validate_strategy_query;
 pub(super) use routes::router;
 
-/// 啟動檢查：開放註冊時持股類端點必須是嚴格模式（[`scope::validate_startup`]）。
+/// 啟動檢查：開放註冊時需要嚴格持股範圍，以及實測後設定的採集與重運算上限。
 ///
 /// # Errors
 ///
-/// `REGISTRATION_MODE` 不是 `closed` 而 `DATA_API_STRICT_SCOPE` 未開啟時回錯誤。
+/// 開放註冊缺少嚴格範圍或有效上限時回錯誤。
 pub(super) fn check_startup() -> anyhow::Result<()> {
     let registration_mode = std::env::var(scope::REGISTRATION_MODE_ENV).ok();
-    scope::validate_startup(registration_mode.as_deref(), scope::strict_scope_enabled())
+    scope::validate_startup(registration_mode.as_deref(), scope::strict_scope_enabled())?;
+    let mode = registration_mode.as_deref().map(str::trim).unwrap_or("");
+    if !mode.is_empty() && !mode.eq_ignore_ascii_case("closed") {
+        analysis_gate::validate_open_limits(|name| {
+            std::env::var(name)
+                .ok()
+                .and_then(|value| value.trim().parse().ok())
+        })?;
+    }
+    Ok(())
 }
