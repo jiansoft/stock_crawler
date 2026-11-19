@@ -213,6 +213,9 @@ CREATE INDEX IF NOT EXISTS idx_member_audit_log_actor
 --   (b) 並行時防不住：兩個交易各移除一位 root，各自檢查時看不到對方尚未提交的刪除，兩邊都通過。
 -- 作法：只有「這次異動確實拿走一位啟用中的 root」才檢查；檢查前先鎖住 root 群組那一列，
 -- 讓第二個交易等第一個提交後再檢查。READ COMMITTED 下鎖到之後的 SELECT 會取新快照，看得到對方的刪除。
+-- SECURITY DEFINER：觸發器延遲到提交時才執行。舊版 PostgreSQL（實測 16）以「提交當下」的角色執行，
+-- 維護角色經 SECURITY DEFINER 函式刪除會員時，提交時已換回 stock_go_maint，讀 member_group 會被拒；
+-- 新版（實測 19）改以「排入事件時」的角色執行。以擁有者身分執行讓各版本行為一致，呼叫者也不必另外授權。
 CREATE OR REPLACE FUNCTION public.member_assert_root_exists() RETURNS trigger AS $$
 DECLARE
     root_group_id bigint;
@@ -256,7 +259,7 @@ BEGIN
     END IF;
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 
 DROP TRIGGER IF EXISTS trg_member_group_mapping_root ON public.member_group_mapping;
 CREATE CONSTRAINT TRIGGER trg_member_group_mapping_root
