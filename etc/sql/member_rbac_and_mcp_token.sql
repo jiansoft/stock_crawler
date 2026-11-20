@@ -582,7 +582,12 @@ CREATE TABLE IF NOT EXISTS public.member_data_request (
 );
 
 -- 既有市值表加上家庭（2.7「家庭合計的儲存」）：member_id = 0 改為「該家庭合計」。
--- 既有列補到家庭 #1；新程式依家庭結算，新增資料不可依賴隱含的家庭。
+-- 既有列補到家庭 #1。預設值 1 與下方兩個過渡唯一索引是給舊版程式用的：舊版 stock_rust 的寫入是
+--   ON CONFLICT (date, member_id)（daily_money_history_member.rs）與
+--   ON CONFLICT (date, security_code, member_id)（daily_money_history_detail.rs），
+-- 主鍵一改就找不到對應的唯一限制而失敗，也不會帶 household_id。保留這兩項，結構檔執行後
+-- 舊版程式仍可結算，退回舊版程式不必還原 schema。新程式一律明確寫入家庭。
+-- 兩者在收尾檔 member_rbac_finalize.sql 移除（上線程序 L3 確認後、建立第二個家庭之前）。
 ALTER TABLE public.daily_money_history_member
     ADD COLUMN IF NOT EXISTS household_id bigint NOT NULL DEFAULT 1;
 ALTER TABLE public.daily_money_history_detail
@@ -615,14 +620,14 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_daily_money_history_detail_more_household
     ON public.daily_money_history_detail_more (household_id, date, member_id);
 
--- 依家庭結算後，舊欄位的唯一索引會誤擋不同家庭的合計，必須移除。
-DROP INDEX IF EXISTS public.idx_daily_money_history_member_legacy_key;
-DROP INDEX IF EXISTS public.idx_daily_money_history_detail_legacy_key;
-ALTER TABLE public.daily_money_history_member ALTER COLUMN household_id DROP DEFAULT;
-ALTER TABLE public.daily_money_history_detail ALTER COLUMN household_id DROP DEFAULT;
-ALTER TABLE public.daily_money_history_detail_more ALTER COLUMN household_id DROP DEFAULT;
+-- 過渡唯一索引（只有一個家庭時不會誤擋；第二個家庭出現前由收尾檔移除）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_money_history_member_legacy_key
+    ON public.daily_money_history_member (date, member_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_money_history_detail_legacy_key
+    ON public.daily_money_history_detail (date, security_code, member_id);
 
--- 價格追蹤改為每人一份（2.3）：現有列補到 #1；新寫入必須指定會員。
+-- 價格追蹤改為每人一份（2.3）：現有列補到 #1。預設值 1 讓舊版 stock_go 的寫入仍可執行，
+-- 新程式一律明確指定會員；預設值在收尾檔移除。
 -- etc/sql/trace.sql 在 CI 載入順序中早於 member.sql，所以外來鍵在這裡加，不寫進 trace.sql。
 ALTER TABLE public.trace
     ADD COLUMN IF NOT EXISTS member_id bigint NOT NULL DEFAULT 1;
@@ -645,7 +650,6 @@ BEGIN
             REFERENCES public."Member"("Id") ON DELETE CASCADE;
     END IF;
 END $$;
-ALTER TABLE public.trace ALTER COLUMN member_id DROP DEFAULT;
 -- 盤中比對以代號查所有追蹤者
 CREATE INDEX IF NOT EXISTS idx_trace_stock_symbol ON public.trace (stock_symbol);
 COMMENT ON COLUMN public.trace.member_id IS '設定這筆追蹤條件的會員';
@@ -689,7 +693,8 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_target_revision_household
     ON public.portfolio_target_revision (household_id, member_id, dimension, saved_time DESC);
 -- 過渡唯一索引：舊版 stock_rust 寫入配置維度時用 ON CONFLICT (member_id, dimension)
 -- （infra/database/repository/portfolio_target.rs），主鍵改成含 household_id 後找不到對應的唯一限制。
--- 與上面三個過渡索引同一個目的：DDL 之後舊版程式仍可寫入、退版不必還原 schema。Phase 7 依家庭分組前移除。
+-- 與上面三個過渡索引同一個目的：DDL 之後舊版程式仍可寫入、退版不必還原 schema。由收尾檔 member_rbac_finalize.sql 移除
+-- （兩個家庭各有全家目標 member_id = '0' 時會互相衝突）。
 -- portfolio_target 本身是「先刪再寫」、沒有 ON CONFLICT，不需要過渡索引。
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portfolio_target_dimension_legacy_key
     ON public.portfolio_target_dimension (member_id, dimension);
@@ -708,17 +713,21 @@ CREATE TABLE IF NOT EXISTS public.member_mfa_recovery_code (
 );
 
 -- 結算時家庭保留當時事實；轉家只改 household_id，刪除才能重建原家庭合計。
+-- 預設值 1 只給舊版程式（不會寫這個欄位）用；收尾檔 member_rbac_finalize.sql 移除。
 ALTER TABLE public.daily_money_history_member ADD COLUMN IF NOT EXISTS settlement_household_id bigint;
 UPDATE public.daily_money_history_member SET settlement_household_id = household_id WHERE settlement_household_id IS NULL;
-ALTER TABLE public.daily_money_history_member ALTER COLUMN settlement_household_id SET NOT NULL;
+ALTER TABLE public.daily_money_history_member ALTER COLUMN settlement_household_id SET NOT NULL,
+    ALTER COLUMN settlement_household_id SET DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_daily_money_history_member_settlement ON public.daily_money_history_member (settlement_household_id, date, member_id);
 ALTER TABLE public.daily_money_history_detail ADD COLUMN IF NOT EXISTS settlement_household_id bigint;
 UPDATE public.daily_money_history_detail SET settlement_household_id = household_id WHERE settlement_household_id IS NULL;
-ALTER TABLE public.daily_money_history_detail ALTER COLUMN settlement_household_id SET NOT NULL;
+ALTER TABLE public.daily_money_history_detail ALTER COLUMN settlement_household_id SET NOT NULL,
+    ALTER COLUMN settlement_household_id SET DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_daily_money_history_detail_settlement ON public.daily_money_history_detail (settlement_household_id, date, member_id);
 ALTER TABLE public.daily_money_history_detail_more ADD COLUMN IF NOT EXISTS settlement_household_id bigint;
 UPDATE public.daily_money_history_detail_more SET settlement_household_id = household_id WHERE settlement_household_id IS NULL;
-ALTER TABLE public.daily_money_history_detail_more ALTER COLUMN settlement_household_id SET NOT NULL;
+ALTER TABLE public.daily_money_history_detail_more ALTER COLUMN settlement_household_id SET NOT NULL,
+    ALTER COLUMN settlement_household_id SET DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_daily_money_history_detail_more_settlement ON public.daily_money_history_detail_more (settlement_household_id, date, member_id);
 
 -- 三表共同的交易鎖：每日結算、轉家及資料刪除必須遵守相同鎖定順序。
