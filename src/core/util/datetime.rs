@@ -1,6 +1,11 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeDelta, Weekday};
 
 use crate::core::declare::Quarter;
+
+mod taipei_time;
+
+pub use self::taipei_time::{TaipeiDateTime, taipei, today, ymd};
+
 /// 提供「是否為週末」判斷能力的 trait。
 ///
 /// 目前專門實作於 [`DateTime<Local>`]，用來統一專案內

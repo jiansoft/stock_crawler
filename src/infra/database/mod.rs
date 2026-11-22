@@ -19,6 +19,9 @@ pub mod repository;
 /// 資料庫伺服器的啟動時間與統計重置時間（停機／重啟監控用）。
 pub mod server_status;
 
+/// jiff 日期時間與 sqlx 的型別對應。
+pub mod jiff_types;
+
 mod query_budget;
 
 pub use self::query_budget::{QueryBudget, current_query_budget, with_query_budget};
