@@ -1,6 +1,8 @@
 //! 年化報酬率資料表的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 fn sample_outcome() -> SimulationOutcome {
@@ -15,17 +17,17 @@ fn sample_outcome() -> SimulationOutcome {
 
 fn sample_domain() -> DomainStockCagr {
     DomainStockCagr {
-        date: NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
+        date: date(2026, 6, 30),
         stock_symbol: "2330".to_string(),
         period: CagrPeriod::Y3,
-        base_date: NaiveDate::from_ymd_opt(2023, 6, 30),
+        base_date: ymd(2023, 6, 30),
         base_price: Some(dec!(560.0)),
         end_price: Some(dec!(1000.0)),
         years: Some(dec!(3.001)),
         price: Some(sample_outcome()),
         total: Some(sample_outcome()),
         reinvested: None,
-        first_quote_date: NaiveDate::from_ymd_opt(2000, 1, 4),
+        first_quote_date: ymd(2000, 1, 4),
         shortfall_days: Some(0),
         data_complete: true,
         has_anomaly: false,

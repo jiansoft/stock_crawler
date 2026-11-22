@@ -3,7 +3,8 @@
 //! [`PortfolioRepository::fetch_payout_allocations`]: crate::domain::portfolio::repository::PortfolioRepository::fetch_payout_allocations
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use crate::domain::portfolio::payout::PayoutAllocation;
@@ -97,10 +98,14 @@ struct PayoutRow {
     quarter: String,
     cash_dividend: Decimal,
     stock_dividend: Decimal,
-    cash_payable: Option<NaiveDate>,
-    stock_payable: Option<NaiveDate>,
-    cash_ex: Option<NaiveDate>,
-    stock_ex: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    cash_payable: Option<Date>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    stock_payable: Option<Date>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    cash_ex: Option<Date>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    stock_ex: Option<Date>,
     shares: i64,
     cash_amount: Decimal,
     stock_shares: Decimal,
@@ -133,16 +138,16 @@ impl From<PayoutRow> for PayoutAllocation {
 /// [`PortfolioRepository::fetch_payout_allocations`]: crate::domain::portfolio::repository::PortfolioRepository::fetch_payout_allocations
 pub(super) async fn fetch(
     view: &HoldingView,
-    from: NaiveDate,
-    to: NaiveDate,
-    today: NaiveDate,
+    from: Date,
+    to: Date,
+    today: Date,
 ) -> Result<Vec<PayoutAllocation>> {
     let members = holding_view::member_ids(view).await?;
     let rows: Vec<PayoutRow> = sqlx::query_as(PAYOUTS_SQL)
         .bind(&members)
-        .bind(from)
-        .bind(to)
-        .bind(today)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
+        .bind(today.to_sqlx())
         .fetch_all(database::get_connection())
         .await
         .with_context(|| format!("查詢股利入帳失敗: view={view:?}, from={from}, to={to}"))?;

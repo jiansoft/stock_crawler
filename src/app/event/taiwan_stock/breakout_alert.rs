@@ -13,11 +13,13 @@
 //!
 //! 「持股」標記依收件者範圍（會員系統計畫 7.6）：每個範圍各自產生一份，只標範圍內的持股。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use chrono::{Days, Local, NaiveDate};
 
 use super::technical_alert::MIN_OUTCOME_SAMPLES;
 use crate::{
@@ -34,7 +36,7 @@ use crate::{
 const LISTED: i64 = 15;
 
 /// 歷史表現統計的回看天數（日曆天）。
-const OUTCOME_LOOKBACK_DAYS: u64 = 364;
+const OUTCOME_LOOKBACK_DAYS: i64 = 364;
 
 /// 突破後續看前幾個交易日的突破。
 const FOLLOW_UP_DAYS: i64 = 5;
@@ -45,7 +47,7 @@ const FOLLOW_UP_DAYS: i64 = 5;
 ///
 /// 查詢訊號失敗只記錄（不發）；持股或歷史表現讀取失敗只記錄警告，照常通知。
 pub async fn execute() -> Result<()> {
-    let date = Local::now().date_naive();
+    let date = today();
     let dedup_key = format!("{}:{date}", Topic::HoldingsBreakout.code());
     notify::notify_holdings(Topic::HoldingsBreakout, &dedup_key, |view| async move {
         let held: BTreeSet<String> = match holdings::active_holding_symbols(&view).await {
@@ -62,7 +64,7 @@ pub async fn execute() -> Result<()> {
 }
 
 /// 讀取當天的區間突破與歷史表現並組出通知；沒有訊號時回 `None`。
-async fn run<R>(repo: &R, date: NaiveDate, holdings: &BTreeSet<String>) -> Result<Option<String>>
+async fn run<R>(repo: &R, date: Date, holdings: &BTreeSet<String>) -> Result<Option<String>>
 where
     R: RankedSignalQuery + TechnicalSignalQuery + BreakoutFollowUpQuery,
 {
@@ -74,7 +76,7 @@ where
     if signals.is_empty() {
         return Ok(None);
     }
-    let from = date - Days::new(OUTCOME_LOOKBACK_DAYS);
+    let from = date - OUTCOME_LOOKBACK_DAYS.days();
     let outcome = repo
         .fetch_signal_outcomes(from, date, &[RANGE_BREAKOUT_INDICATOR])
         .await
@@ -139,7 +141,7 @@ fn follow_up_lines(follow_ups: &[BreakoutFollowUp], holdings: &BTreeSet<String>)
 
 /// 組出通知內容（MarkdownV2 已跳脫）。
 fn build_message(
-    date: NaiveDate,
+    date: Date,
     signals: &[RankedSignal],
     total: i64,
     outcome: Option<&SignalOutcome>,

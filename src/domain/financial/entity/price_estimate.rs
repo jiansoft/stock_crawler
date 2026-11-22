@@ -1,6 +1,7 @@
 //! 便宜、合理、昂貴價的估價實體。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 /// 個股估值領域實體。
 ///
@@ -8,7 +9,7 @@ use chrono::NaiveDate;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PriceEstimate {
     /// 估值日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 參考的最後一筆日報價日期
     pub last_daily_quote_date: String,
     /// 股票代號
@@ -58,7 +59,7 @@ pub struct PriceEstimate {
 impl Default for PriceEstimate {
     fn default() -> Self {
         PriceEstimate {
-            date: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            date: date(1970, 1, 1),
             last_daily_quote_date: String::new(),
             security_code: String::new(),
             name: String::new(),
@@ -87,7 +88,7 @@ impl Default for PriceEstimate {
 
 impl PriceEstimate {
     /// 建立個股估值實體。
-    pub fn new(security_code: String, date: NaiveDate) -> Self {
+    pub fn new(security_code: String, date: Date) -> Self {
         PriceEstimate {
             security_code,
             date,

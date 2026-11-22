@@ -1,5 +1,8 @@
 //! TPEx 上櫃除權除息計算結果表採集器的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -13,11 +16,11 @@ fn fixture() -> ExDailyQResponse {
 #[test]
 fn parse_references_reads_open_base_of_every_row() {
     let references = parse_references(&fixture()).expect("解析成功");
-    let rows: Vec<(&str, NaiveDate, Decimal)> = references
+    let rows: Vec<(&str, Date, Decimal)> = references
         .iter()
         .map(|r| (r.stock_symbol.as_str(), r.date, r.reference_price))
         .collect();
-    let day = |d| NaiveDate::from_ymd_opt(2023, 7, d).expect("有效日期");
+    let day = |d| ymd(2023, 7, d).expect("有效日期");
     assert_eq!(
         rows,
         [
@@ -49,7 +52,7 @@ fn parse_results_splits_cash_and_stock_dividends() {
 
     let both = &results[0];
     assert_eq!(both.stock_symbol, "4175");
-    assert_eq!(both.ex_date, NaiveDate::from_ymd_opt(2023, 7, 20).unwrap());
+    assert_eq!(both.ex_date, date(2023, 7, 20));
     assert!(both.is_cash && both.is_stock);
     assert_eq!(both.cash_dividend, Some(dec!(2.7452)));
     assert_eq!(both.stock_dividend(), Some(dec!(0.9632195232)));

@@ -6,7 +6,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::HORIZONS;
 use super::benchmark::{Benchmark, benchmark_output, fetch_benchmark};
@@ -78,14 +79,16 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
     }
 
     let pool = database::get_connection();
-    let latest: Option<NaiveDate> = match sqlx::query_scalar(LATEST_SIGNAL_DATE_SQL)
-        .bind(to)
-        .fetch_one(pool)
-        .await
-    {
-        Ok(value) => value,
-        Err(error) => return database_error(error),
-    };
+    let latest: Option<Date> =
+        match sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(LATEST_SIGNAL_DATE_SQL)
+            .bind(to.map(ToSqlx::to_sqlx))
+            .fetch_one(pool)
+            .await
+            .map(crate::infra::database::jiff_types::from_wire)
+        {
+            Ok(value) => value,
+            Err(error) => return database_error(error),
+        };
     let Some(to) = latest else {
         return error_response(StatusCode::NOT_FOUND, "查無技術訊號資料");
     };
@@ -188,8 +191,8 @@ pub(in crate::interfaces::web::data_api::handlers) fn horizon_stats(
 
 /// 組成回應：項目依來源、種類的固定順序；平均與中位數四捨五入到小數兩位、比例到四位。
 pub(super) fn build_performance(
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     market: &str,
     params: &SignalPerformanceParams,
     rows: Vec<PerformanceRow>,

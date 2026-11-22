@@ -1,11 +1,12 @@
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 use crate::domain::portfolio::chip::HoldingBroker;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("固定日期合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("固定日期合法")
 }
 
 fn chip() -> HoldingChip {
@@ -133,19 +134,19 @@ fn share_of_volume_needs_positive_volume() {
 }
 
 /// 回傳固定主力交易日的假倉儲；期間合計檢查收到的起訖日，並對每個代號回一筆。
-struct FakeBrokers(Vec<NaiveDate>);
+struct FakeBrokers(Vec<Date>);
 
 #[async_trait::async_trait]
 impl HoldingBrokerQuery for FakeBrokers {
-    async fn fetch_broker_dates(&self, until: NaiveDate, limit: usize) -> Result<Vec<NaiveDate>> {
+    async fn fetch_broker_dates(&self, until: Date, limit: usize) -> Result<Vec<Date>> {
         assert_eq!((until, limit), (day(20), BROKER_RECENT_DAYS));
         Ok(self.0.clone())
     }
 
     async fn fetch_broker_period(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         symbols: &[String],
     ) -> Result<Vec<BrokerPeriodNet>> {
         assert_eq!((from, to), (day(14), day(20)));

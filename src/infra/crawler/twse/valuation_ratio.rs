@@ -9,7 +9,7 @@
 //! 非交易日 `stat` 不是 `OK`，視為沒有資料。
 
 use anyhow::{Result, anyhow};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::{
@@ -34,11 +34,11 @@ struct BwibbuResponse {
 /// # Errors
 ///
 /// 請求失敗、回應不是預期的 JSON，或缺少「證券代號」欄位時回傳錯誤。
-pub async fn visit(date: NaiveDate) -> Result<Vec<OfficialRatio>> {
+pub async fn visit(date: Date) -> Result<Vec<OfficialRatio>> {
     let url = format!(
         "https://www.{host}/exchangeReport/BWIBBU_d?response=json&date={date}&selectType=ALL",
         host = twse::HOST,
-        date = date.format("%Y%m%d")
+        date = date.strftime("%Y%m%d")
     );
     let response = util::http::get_json::<BwibbuResponse>(&url).await?;
     parse(response)

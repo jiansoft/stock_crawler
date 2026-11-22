@@ -1,5 +1,6 @@
 //! 全市場填息基準：依現金殖利率分組的填息率與填息天數的測試。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -72,14 +73,8 @@ fn bucket_stats_uses_mature_events_only() {
 /// 5 年期間與持股填息的近 5 年歷史一致（5 × 365 + 1 天）。
 #[test]
 fn stats_window_spans_whole_years() {
-    let today = NaiveDate::from_ymd_opt(2026, 10, 31).expect("日期應合法");
-    assert_eq!(
-        stats_window(today, 5),
-        (
-            NaiveDate::from_ymd_opt(2021, 10, 31).expect("日期應合法"),
-            today
-        )
-    );
+    let today = date(2026, 10, 31);
+    assert_eq!(stats_window(today, 5), (date(2021, 10, 31), today));
 }
 
 /// 沒有樣本的組次數為 0、比例與中位數為 None；偶數筆中位數取中間兩筆平均。

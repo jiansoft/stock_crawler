@@ -1,12 +1,14 @@
 //! 公司行動（分割／減資）的 PostgreSQL 倉儲實作的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 const FAKE_SYMBOL: &str = "79979CA";
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("測試日期應合法")
 }
 
 async fn cleanup() {

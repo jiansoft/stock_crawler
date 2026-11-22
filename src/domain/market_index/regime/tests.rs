@@ -1,9 +1,12 @@
 //! 加權指數趨勢狀態的均線、排列、站在均線同側天數、52 週高低點與穿越測試。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 /// 由新到舊的收盤序列；日期從 2026-10-15 往前每天一筆（測試只看順序）。
-fn series(closes: &[f64]) -> Vec<(NaiveDate, f64)> {
+fn series(closes: &[f64]) -> Vec<(Date, f64)> {
     closes
         .iter()
         .enumerate()
@@ -12,8 +15,8 @@ fn series(closes: &[f64]) -> Vec<(NaiveDate, f64)> {
 }
 
 /// 2026-10-15 往前 `offset` 天。
-fn day(offset: usize) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 15).expect("固定日期合法") - chrono::Days::new(offset as u64)
+fn day(offset: usize) -> Date {
+    date(2026, 10, 15) - (offset as i64).days()
 }
 
 /// 均線：從 offset 起取 days 筆平均，資料不足為 None。
@@ -165,9 +168,9 @@ async fn load_taiex_reads_lookback() {
         async fn fetch_index_closes(
             &self,
             category: &str,
-            until: Option<NaiveDate>,
+            until: Option<Date>,
             limit: usize,
-        ) -> Result<Vec<(NaiveDate, f64)>> {
+        ) -> Result<Vec<(Date, f64)>> {
             assert_eq!((category, limit), (TAIEX, LOOKBACK));
             Ok(until.map(|date| vec![(date, 1.0)]).unwrap_or_default())
         }

@@ -1,6 +1,7 @@
 //! 資料庫端耗時：以上次週報的快照算差額，統計重置過或沒有快照時改列累計。
 
-use chrono::{DateTime, Local, TimeZone};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 
 use super::super::db_statements::{
     SavedStatements, TopStatement, load, save, statement_line, top_statements, weekly_statements,
@@ -8,11 +9,15 @@ use super::super::db_statements::{
 use super::*;
 use crate::{domain::health::StatementStat, infra::nosql::redis::CLIENT};
 
-fn at(day: u32, hour: u32) -> DateTime<Local> {
-    Local
-        .with_ymd_and_hms(2026, 10, day, hour, 0, 0)
-        .single()
-        .expect("時間應合法")
+fn at(day: u32, hour: u32) -> TaipeiDateTime {
+    TaipeiDateTime::from_datetime(
+        crate::core::util::datetime::ymd(2026, 10, day)
+            .and_then(|day| {
+                crate::core::util::datetime::hms(hour, 0, 0).map(|time| day.to_datetime(time))
+            })
+            .expect("合法時間"),
+    )
+    .expect("合法時間")
 }
 
 fn stat(queryid: i64, calls: i64, total_ms: f64, query: &str) -> StatementStat {
@@ -24,7 +29,7 @@ fn stat(queryid: i64, calls: i64, total_ms: f64, query: &str) -> StatementStat {
     }
 }
 
-fn stats(reset: DateTime<Local>, rows: Vec<StatementStat>) -> StatementStats {
+fn stats(reset: TaipeiDateTime, rows: Vec<StatementStat>) -> StatementStats {
     StatementStats {
         stats_reset: reset,
         rows,
@@ -175,11 +180,11 @@ struct FakeRepo(fn() -> Result<Option<StatementStats>>);
 impl DataHealthRepository for FakeRepo {
     async fn fetch_snapshot(
         &self,
-        _: NaiveDate,
-        _: NaiveDate,
-        _: NaiveDate,
+        _: Date,
+        _: Date,
+        _: Date,
         _: i32,
-        _: NaiveDate,
+        _: Date,
     ) -> Result<DataHealthSnapshot> {
         unreachable!("資料庫端耗時不讀資料快照")
     }

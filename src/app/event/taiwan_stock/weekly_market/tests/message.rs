@@ -2,7 +2,9 @@
 
 use super::fakes::*;
 use super::*;
+use crate::core::util::datetime::ymd;
 use crate::domain::portfolio::{chip::BrokerPeriodNet, health::HoldingFundamentals};
+use jiff::civil::Date;
 
 /// 完整訊息：三段內容、億元換算、持股上升下降、沒有變化或只有一筆的持股不列。
 #[tokio::test]
@@ -257,7 +259,7 @@ async fn run_appends_month_seasonality_to_regime() {
 /// 季節性期間：前 8 年同月 1 日到今年同月 1 日的前一天；1 月跨年、閏日也正確。
 #[test]
 fn seasonality_range_covers_the_previous_eight_years() {
-    let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("合法日期");
+    let date = |y, m, d| ymd(y, m, d).expect("合法日期");
     assert_eq!(
         market::seasonality_range(date(2026, 10, 16)),
         (date(2018, 10, 1), date(2026, 9, 30))
@@ -308,14 +310,14 @@ struct CountingPortfolio {
 
 #[async_trait]
 impl HoldingBrokerQuery for CountingPortfolio {
-    async fn fetch_broker_dates(&self, _until: NaiveDate, _limit: usize) -> Result<Vec<NaiveDate>> {
+    async fn fetch_broker_dates(&self, _until: Date, _limit: usize) -> Result<Vec<Date>> {
         unreachable!("週摘要沿用法人一段的期間，不查主力交易日")
     }
 
     async fn fetch_broker_period(
         &self,
-        _from: NaiveDate,
-        _to: NaiveDate,
+        _from: Date,
+        _to: Date,
         _symbols: &[String],
     ) -> Result<Vec<BrokerPeriodNet>> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

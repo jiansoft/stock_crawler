@@ -1,7 +1,9 @@
 //! 技術指標 endpoint 的資料庫語意整合測試。
 
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::ToSpan;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
@@ -39,14 +41,14 @@ async fn technicals_endpoint_db_semantics() {
     .expect("種入 stocks");
 
     // 1989-03-01 起連續 30 天、收盤 100～129 逐日上漲；最後一天是無成交（收盤 0）的占位列。
-    let first = NaiveDate::from_ymd_opt(1989, 3, 1).expect("固定日期合法");
+    let first = date(1989, 3, 1);
     for i in 0..=30_u32 {
         let close = if i == 30 { 0 } else { 100 + i64::from(i) };
         sqlx::query(
             r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "HighestPrice", "LowestPrice")
                VALUES ($1, $2, $3, $4, $5)"#,
         )
-        .bind(first + chrono::Days::new(u64::from(i)))
+        .bind((first + i64::from(i).days()).to_sqlx())
         .bind(SYMBOL)
         .bind(Decimal::from(close))
         .bind(Decimal::from(close + 1))

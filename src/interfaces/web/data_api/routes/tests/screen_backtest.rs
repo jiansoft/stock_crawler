@@ -34,8 +34,10 @@ mod trend;
 mod valuation;
 mod walk_forward;
 
+use crate::core::util::datetime::ymd;
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
@@ -56,8 +58,8 @@ const SCORES: [(u32, &str, i16, Option<i64>); 6] = [
     (8, "79979BC", 70, None),
 ];
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1993, 3, d).expect("固定日期合法")
+fn day(d: u32) -> Date {
+    ymd(1993, 3, d).expect("固定日期合法")
 }
 
 /// 刪除種入的相對強度、報酬、訊號、籌碼、月營收、季報、三大財報與股票主檔。
@@ -85,27 +87,27 @@ async fn cleanup(pool: &sqlx::PgPool) {
     }
     let _ =
         sqlx::query(r#"DELETE FROM "index" WHERE category = 'TAIEX' AND "date" BETWEEN $1 AND $2"#)
-            .bind(day(1))
-            .bind(day(31))
+            .bind(day(1).to_sqlx())
+            .bind(day(31).to_sqlx())
             .execute(pool)
             .await;
     let _ = sqlx::query(
         r#"DELETE FROM "DailyQuotes" WHERE stock_symbol='0050' AND "Date" BETWEEN $1 AND $2"#,
     )
-    .bind(day(1))
-    .bind(day(31))
+    .bind(day(1).to_sqlx())
+    .bind(day(31).to_sqlx())
     .execute(pool)
     .await;
     let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date BETWEEN $1 AND $2")
-        .bind(day(1))
-        .bind(day(31))
+        .bind(day(1).to_sqlx())
+        .bind(day(31).to_sqlx())
         .execute(pool)
         .await;
     let _ = sqlx::query(
         "DELETE FROM daily_forward_return WHERE stock_symbol = '0050' AND date BETWEEN $1 AND $2",
     )
-    .bind(day(1))
-    .bind(day(31))
+    .bind(day(1).to_sqlx())
+    .bind(day(31).to_sqlx())
     .execute(pool)
     .await;
 }
@@ -143,7 +145,7 @@ async fn seed(pool: &sqlx::PgPool) {
                 "INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
                  VALUES ($1, $2, 0, $3, $4, 3)",
             )
-            .bind(day(d))
+            .bind(day(d).to_sqlx())
             .bind(symbol)
             .bind(score)
             .bind(rank)
@@ -156,7 +158,7 @@ async fn seed(pool: &sqlx::PgPool) {
         sqlx::query(
             "INSERT INTO daily_forward_return (date, stock_symbol, return_5d) VALUES ($1, $2, $3)",
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(symbol)
         .bind(return_5d.map(Decimal::from))
         .execute(pool)
@@ -166,7 +168,7 @@ async fn seed(pool: &sqlx::PgPool) {
     // 加權指數：03-01～03-05 為 100，03-08 跌到 90，低於近 6 日平均（約 98.3）。
     for (d, index) in [(1, 100), (2, 100), (3, 100), (4, 100), (5, 100), (8, 90)] {
         sqlx::query(r#"INSERT INTO "index" (category, "date", "index") VALUES ('TAIEX', $1, $2)"#)
-            .bind(day(d))
+            .bind(day(d).to_sqlx())
             .bind(Decimal::from(index))
             .execute(pool)
             .await
@@ -179,7 +181,7 @@ async fn seed(pool: &sqlx::PgPool) {
                  (date, stock_exchange_market_id, above_60_day_moving_average, below_60_day_moving_average)
              VALUES ($1, $2, $3, $4)",
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(market_id)
         .bind(above)
         .bind(below)
@@ -191,7 +193,7 @@ async fn seed(pool: &sqlx::PgPool) {
     sqlx::query(
         "INSERT INTO daily_forward_return (date, stock_symbol, return_5d) VALUES ($1, '0050', 4)",
     )
-    .bind(day(1))
+    .bind(day(1).to_sqlx())
     .execute(pool)
     .await
     .expect("種入 0050 報酬");
@@ -200,7 +202,7 @@ async fn seed(pool: &sqlx::PgPool) {
         "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
          VALUES ($1, '79979BB', 'kd', 'golden_cross', 'KD 黃金交叉')",
     )
-    .bind(day(3))
+    .bind(day(3).to_sqlx())
     .execute(pool)
     .await
     .expect("種入訊號");

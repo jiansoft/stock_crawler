@@ -1,14 +1,18 @@
 //! 持股績效計算的單元測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn day(month: u32, day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, month, day).expect("有效日期")
+fn day(month: u32, day: u32) -> Date {
+    ymd(2026, month, day).expect("有效日期")
 }
 
-fn point(date: NaiveDate, value: Decimal, buys: Decimal, sells: Decimal) -> ValuePoint {
+fn point(date: Date, value: Decimal, buys: Decimal, sells: Decimal) -> ValuePoint {
     ValuePoint {
         date,
         market_value: value,
@@ -83,7 +87,7 @@ fn drawdown_and_monthly_returns() {
 /// 前一日市值為 0 時報酬記 0；滿一年才有年化報酬；少於兩天回傳 None。
 #[test]
 fn zero_base_and_annualized() {
-    let start = NaiveDate::from_ymd_opt(2025, 1, 2).expect("有效日期");
+    let start = date(2025, 1, 2);
     let points = [
         point(start, dec!(0), dec!(0), dec!(0)),
         point(day(1, 2), dec!(100), dec!(100), dec!(0)),
@@ -131,7 +135,7 @@ fn risk_stats_regression() {
 /// evaluate 只用持股與指數都有報酬的日子：前一日市值為 0、缺指數的日子不算。
 #[test]
 fn evaluate_pairs_daily_returns_with_index() {
-    let start = NaiveDate::from_ymd_opt(2026, 1, 1).expect("有效日期");
+    let start = date(2026, 1, 1);
     let mut points = vec![point(start, dec!(0), dec!(0), dec!(0))];
     let mut index = vec![IndexClose {
         date: start,
@@ -139,7 +143,7 @@ fn evaluate_pairs_daily_returns_with_index() {
     }];
     let (mut value, mut close) = (dec!(100), dec!(100));
     for i in 1..=25_u32 {
-        let date = start + chrono::Days::new(u64::from(i));
+        let date = start + i64::from(i).days();
         // 第 1 天才買進（前一日市值 0），第 10 天缺指數。
         let buys = if i == 1 { dec!(100) } else { dec!(0) };
         if i > 1 {

@@ -186,7 +186,7 @@ pub(super) fn unresolved_after_fill(
     events
         .iter()
         .filter(|event| {
-            !filled_dates.contains(event.ex_date.format(DATE_FORMAT).to_string().as_str())
+            !filled_dates.contains(event.ex_date.strftime(DATE_FORMAT).to_string().as_str())
         })
         .map(|event| (*event).clone())
         .collect()
@@ -198,7 +198,7 @@ pub(crate) fn stock_from_yahoo(
     event: &ExDividendAnnouncement,
     yahoo_details: &[Dividend],
 ) -> Option<Dividend> {
-    let date = event.ex_date.format(DATE_FORMAT).to_string();
+    let date = event.ex_date.strftime(DATE_FORMAT).to_string();
     let stock: Decimal = yahoo_details
         .iter()
         .filter(|detail| detail.ex_dividend_date_stock == date)
@@ -226,7 +226,7 @@ pub(crate) fn select_fills(
 ) -> Vec<Dividend> {
     let mut chosen: Vec<Dividend> = Vec::new();
     for event in events {
-        let date = event.ex_date.format(DATE_FORMAT).to_string();
+        let date = event.ex_date.strftime(DATE_FORMAT).to_string();
         let Some(detail) = yahoo_details.iter().find(|detail| {
             (event.is_cash && detail.ex_dividend_date_cash == date)
                 || (event.is_stock && detail.ex_dividend_date_stock == date)

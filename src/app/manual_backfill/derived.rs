@@ -27,7 +27,9 @@
 //! - `test_rebuild_dividend_fill_events`：
 //!   整批重算除權息填息事件（`dividend_fill_event`），新建表或要立即反映股利修正時用；重跑安全。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::{today, ymd};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 未來報酬回填的預設起日（結束日）：技術訊號從 2019 年起，以 2019 年初為結束日，5 日報酬的基準日
 /// 從 2018 年底齊、240 日報酬的基準日從 2018 年初齊。
@@ -70,22 +72,21 @@ const MANUAL_MARKET_BREADTH_TO: &str = "2022-02-16";
 #[ignore]
 async fn test_backfill_forward_returns() {
     dotenvy::dotenv().ok();
-    let today = chrono::Local::now().date_naive().to_string();
+    let today = today().to_string();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date("MANUAL_FORWARD_RETURN_FROM", MANUAL_FORWARD_RETURN_FROM);
     let to = date("MANUAL_FORWARD_RETURN_TO", &today);
 
     let mut total = 0;
-    for day in from.iter_days().take_while(|day| *day <= to) {
+    for day in from.series(1.day()).take_while(|day| *day <= to) {
         let count = crate::app::calculation::forward_return::calculate_forward_returns(day)
             .await
             .unwrap_or_else(|why| panic!("{day} 未來報酬回填失敗：{why:#}"));
         total += count;
-        if count > 0 && day.format("%d").to_string() == "01" {
+        if count > 0 && day.strftime("%d").to_string() == "01" {
             println!("{day} 累計 {total} 列");
         }
     }
@@ -105,11 +106,10 @@ async fn test_backfill_forward_returns() {
 #[ignore]
 async fn test_backfill_market_forward_returns() {
     dotenvy::dotenv().ok();
-    let today = chrono::Local::now().date_naive().to_string();
+    let today = today().to_string();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date("MANUAL_MARKET_RETURN_FROM", "1990-01-01");
     let to = date("MANUAL_MARKET_RETURN_TO", &today);
@@ -134,11 +134,10 @@ async fn test_backfill_market_forward_returns() {
 #[ignore]
 async fn test_backfill_relative_strength() {
     dotenvy::dotenv().ok();
-    let today = chrono::Local::now().date_naive().to_string();
+    let today = today().to_string();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date(
         "MANUAL_RELATIVE_STRENGTH_FROM",
@@ -147,7 +146,7 @@ async fn test_backfill_relative_strength() {
     let to = date("MANUAL_RELATIVE_STRENGTH_TO", &today);
 
     let (mut days, mut total) = (0, 0);
-    for day in from.iter_days().take_while(|day| *day <= to) {
+    for day in from.series(1.day()).take_while(|day| *day <= to) {
         let count = crate::app::calculation::relative_strength::calculate_relative_strength(day)
             .await
             .unwrap_or_else(|why| panic!("{day} 相對強度寫入失敗：{why:#}"));
@@ -155,7 +154,7 @@ async fn test_backfill_relative_strength() {
             days += 1;
             total += count;
         }
-        if day.format("%d").to_string() == "01" {
+        if day.strftime("%d").to_string() == "01" {
             println!("{day} 累計 {days} 個交易日、{total} 列");
         }
     }
@@ -176,11 +175,10 @@ async fn test_backfill_market_valuation() {
     use crate::infra::database::repository::market_valuation::PgMarketValuationRepository;
 
     dotenvy::dotenv().ok();
-    let today = chrono::Local::now().date_naive().to_string();
+    let today = today().to_string();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date("MANUAL_MARKET_VALUATION_FROM", MANUAL_MARKET_VALUATION_FROM);
     let to = date("MANUAL_MARKET_VALUATION_TO", &today);
@@ -188,7 +186,7 @@ async fn test_backfill_market_valuation() {
     let mut total = 0;
     let mut start = from;
     while start <= to {
-        let end = NaiveDate::from_ymd_opt(chrono::Datelike::year(&start), 12, 31)
+        let end = ymd(i32::from(start.year()), 12, 31)
             .expect("合法日期")
             .min(to);
         let rows = repo
@@ -197,7 +195,7 @@ async fn test_backfill_market_valuation() {
             .unwrap_or_else(|why| panic!("{start}～{end} 重算失敗：{why:#}"));
         println!("{start}～{end}：{rows} 列");
         total += rows;
-        start = end.succ_opt().expect("合法日期");
+        start = end.tomorrow().expect("合法日期");
     }
     println!("市場估值水位回補 {from}～{to}：共 {total} 列");
 }
@@ -214,16 +212,14 @@ async fn test_backfill_market_valuation() {
 #[ignore]
 async fn test_backfill_range_breakout() {
     dotenvy::dotenv().ok();
-    let today = chrono::Local::now().date_naive();
-    let date = |name: &str, default: NaiveDate| match std::env::var(name) {
-        Ok(raw) => NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}")),
+    let today = today();
+    let date = |name: &str, default: Date| match std::env::var(name) {
+        Ok(raw) => {
+            Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        }
         Err(_) => default,
     };
-    let from = date(
-        "MANUAL_RANGE_BREAKOUT_FROM",
-        NaiveDate::from_ymd_opt(2019, 1, 2).expect("合法日期"),
-    );
+    let from = date("MANUAL_RANGE_BREAKOUT_FROM", jiff::civil::date(2019, 1, 2));
     let to = date("MANUAL_RANGE_BREAKOUT_TO", today);
 
     let count = crate::app::calculation::technical_signal::backfill_range_breakout(from, to)
@@ -246,13 +242,12 @@ async fn test_backfill_technical_signals() {
     dotenvy::dotenv().ok();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date("MANUAL_TECHNICAL_SIGNAL_FROM", MANUAL_TECHNICAL_SIGNAL_FROM);
     let to = date("MANUAL_TECHNICAL_SIGNAL_TO", MANUAL_TECHNICAL_SIGNAL_TO);
 
-    for day in from.iter_days().take_while(|day| *day <= to) {
+    for day in from.series(1.day()).take_while(|day| *day <= to) {
         let count = crate::app::calculation::technical_signal::calculate_technical_signals(day)
             .await
             .unwrap_or_else(|why| panic!("{day} 技術訊號計算失敗：{why:#}"));
@@ -276,14 +271,13 @@ async fn test_backfill_market_breadth() {
     dotenvy::dotenv().ok();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date("MANUAL_MARKET_BREADTH_FROM", MANUAL_MARKET_BREADTH_FROM);
     let to = date("MANUAL_MARKET_BREADTH_TO", MANUAL_MARKET_BREADTH_TO);
 
     let (mut days, mut total) = (0, 0);
-    for day in from.iter_days().take_while(|day| *day <= to) {
+    for day in from.series(1.day()).take_while(|day| *day <= to) {
         let count =
             crate::infra::database::table::quote::daily_stock_price_stats::DailyStockPriceStats::backfill_breadth(day)
                 .await
@@ -292,7 +286,7 @@ async fn test_backfill_market_breadth() {
             days += 1;
             total += count;
         }
-        if day.format("%d").to_string() == "01" {
+        if day.strftime("%d").to_string() == "01" {
             println!("{day} 累計 {days} 個交易日、{total} 列");
         }
     }
@@ -336,7 +330,7 @@ async fn test_strategy_edge_check() {
     crate::app::ports::register_strategy_gateway(std::sync::Arc::new(
         crate::interfaces::web::data_api::BacktestStrategyGateway,
     ));
-    crate::app::event::taiwan_stock::strategy_edge::run(chrono::Local::now().date_naive())
+    crate::app::event::taiwan_stock::strategy_edge::run(today())
         .await
         .expect("策略優勢檢查失敗");
     for record in crate::app::event::taiwan_stock::strategy_edge::load_latest().await {
@@ -353,19 +347,17 @@ async fn test_strategy_edge_check() {
 #[ignore]
 async fn test_backfill_risk_metrics() {
     dotenvy::dotenv().ok();
-    let today = chrono::Local::now().date_naive().to_string();
+    let today = today().to_string();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date("MANUAL_RISK_METRIC_FROM", MANUAL_RISK_METRIC_FROM);
     let to = date("MANUAL_RISK_METRIC_TO", &today);
     let mut start = from;
     let mut total = 0;
     while start <= to {
-        let year_end =
-            NaiveDate::from_ymd_opt(chrono::Datelike::year(&start), 12, 31).expect("年底日期合法");
+        let year_end = ymd(i32::from(start.year()), 12, 31).expect("年底日期合法");
         let end = year_end.min(to);
         let count =
             crate::app::calculation::risk_metric::calculate_risk_metrics_between(start, end)
@@ -373,7 +365,7 @@ async fn test_backfill_risk_metrics() {
                 .unwrap_or_else(|why| panic!("{start}～{end} 風險指標寫入失敗：{why:#}"));
         total += count;
         println!("{start}～{end}：{count} 列");
-        start = end.succ_opt().expect("日期合法");
+        start = end.tomorrow().expect("日期合法");
     }
     println!("風險指標回填 {from}～{to}：共 {total} 列");
 }
@@ -387,13 +379,11 @@ async fn test_backfill_risk_metrics() {
 #[ignore]
 async fn test_backfill_pb_percentiles() {
     dotenvy::dotenv().ok();
-    use chrono::Datelike;
 
-    let today = chrono::Local::now().date_naive().to_string();
+    let today = today().to_string();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date("MANUAL_PB_PERCENTILE_FROM", MANUAL_PB_PERCENTILE_FROM);
     let to = date("MANUAL_PB_PERCENTILE_TO", &today);
@@ -401,10 +391,10 @@ async fn test_backfill_pb_percentiles() {
     let mut total = 0;
     while start <= to {
         let next_month = start
-            .with_day(1)
-            .and_then(|first| first.checked_add_months(chrono::Months::new(1)))
+            .first_of_month()
+            .checked_add(1.months())
             .expect("下個月日期合法");
-        let end = next_month.pred_opt().expect("月底日期合法").min(to);
+        let end = next_month.yesterday().expect("月底日期合法").min(to);
         let count =
             crate::app::calculation::pb_percentile::calculate_pb_percentiles_between(start, end)
                 .await

@@ -1,5 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::today;
 use anyhow::Result;
-use chrono::{Datelike, Local};
+use jiff::ToSpan;
 use scopeguard::defer;
 
 // 每日掃描交易所除權息公告，補齊漏抓的股利事件。
@@ -43,7 +45,7 @@ pub(crate) use historical::{
 ///
 /// # 設計說明
 ///
-/// - 以 `Local::now().year()` 作為年度基準。
+/// - 以 `TaipeiDateTime::now().year()` 作為年度基準。
 /// - 使用 `scopeguard::defer!` 保證「結束」log 在函式離開時一定會寫出。
 /// - 採用 best-effort 策略：偏重資料補齊與可觀測性，而不是 fail-fast。
 ///
@@ -65,7 +67,7 @@ pub async fn execute() -> Result<()> {
     }
 
     // 以本地時間的「今年」當作回補目標年度。
-    run(Local::now().year()).await
+    run(i32::from(TaipeiDateTime::now().year())).await
 }
 
 /// [`execute`] 的本體：併跑 `year` 年度的兩條回補流程，各自記錄結果。
@@ -124,8 +126,8 @@ pub async fn reconcile_ex_right_results() -> Result<()> {
        tracing::info!("核對交易所除權息結果結束");
     }
 
-    let today = Local::now().date_naive();
-    let start = today - chrono::Duration::days(RECONCILE_LOOKBACK_DAYS);
+    let today = today();
+    let start = today - (RECONCILE_LOOKBACK_DAYS).days();
     let summary = ex_right_reconcile::execute(start, today, true).await?;
     tracing::info!(
         official = summary.official,

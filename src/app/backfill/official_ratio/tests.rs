@@ -1,5 +1,9 @@
 //! 官方本益比與股價淨值比回補的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -11,9 +15,9 @@ use super::*;
 /// 依市場回傳固定缺值日期、記下寫入內容的假倉儲。
 #[derive(Default)]
 struct FakeRepo {
-    listed: Vec<NaiveDate>,
-    otc: Vec<NaiveDate>,
-    filled: Mutex<Vec<(NaiveDate, usize)>>,
+    listed: Vec<Date>,
+    otc: Vec<Date>,
+    filled: Mutex<Vec<(Date, usize)>>,
     synced: Mutex<usize>,
 }
 
@@ -22,10 +26,10 @@ impl OfficialRatioRepository for FakeRepo {
     async fn fetch_dates_to_update(
         &self,
         market_id: i32,
-        _from: NaiveDate,
-        _to: NaiveDate,
+        _from: Date,
+        _to: Date,
         policy: PePolicy,
-    ) -> Result<Vec<NaiveDate>> {
+    ) -> Result<Vec<Date>> {
         assert_eq!(
             policy,
             if market_id == 2 {
@@ -43,7 +47,7 @@ impl OfficialRatioRepository for FakeRepo {
 
     async fn fill_official_ratios(
         &self,
-        date: NaiveDate,
+        date: Date,
         ratios: &[OfficialRatio],
         _policy: PePolicy,
     ) -> Result<u64> {
@@ -57,8 +61,8 @@ impl OfficialRatioRepository for FakeRepo {
     }
 }
 
-fn day(day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2020, 6, day).expect("有效日期")
+fn day(day: u32) -> Date {
+    ymd(2020, 6, day).expect("有效日期")
 }
 
 fn ratio(symbol: &str) -> OfficialRatio {
@@ -156,14 +160,8 @@ async fn run_fails_only_when_every_request_fails() {
 /// 排程回看區間含今天共 7 天。
 #[test]
 fn recent_window_covers_seven_days() {
-    let today = NaiveDate::from_ymd_opt(2026, 10, 12).expect("有效日期");
-    assert_eq!(
-        recent_window(today),
-        (
-            NaiveDate::from_ymd_opt(2026, 10, 6).expect("有效日期"),
-            today
-        )
-    );
+    let today = date(2026, 10, 12);
+    assert_eq!(recent_window(today), (date(2026, 10, 6), today));
 }
 
 /// 以本機 mock server 取代證交所與櫃買：真正的爬蟲接線、整段回補與排程入口。
@@ -189,8 +187,8 @@ mod mock_sources {
     /// 假上市股票（1999-03-10 的日線本益比、淨值比都是 0）。
     const SYMBOL: &str = "79979OR";
 
-    fn date(year: i32, month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, day).expect("合法日期")
+    fn date(year: i32, month: u32, day: u32) -> Date {
+        ymd(year, month, day).expect("合法日期")
     }
 
     async fn serve(server: &MockServer, route: &str, body: &str) {
@@ -266,7 +264,7 @@ mod mock_sources {
         sqlx::query(
             r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume") VALUES ($1, $2, 50, 1000)"#,
         )
-        .bind(date(1999, 3, 10))
+        .bind(date(1999, 3, 10).to_sqlx())
         .bind(SYMBOL)
         .execute(pool)
         .await

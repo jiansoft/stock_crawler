@@ -21,8 +21,10 @@
 //! 幾乎可以肯定是來源改版或解析錯誤，此時寧可整批放棄也不要污染
 //! `corporate_action` —— 錯誤的比例會讓該股的報酬率整段算錯。
 
+use crate::core::util::datetime::{today, ymd};
 use anyhow::{Context, Result};
-use chrono::{Datelike, Local, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use scopeguard::defer;
 
 use crate::{
@@ -62,16 +64,16 @@ pub async fn execute() -> Result<()> {
         tracing::info!("減資事件回補結束");
     }
 
-    let today = Local::now().date_naive();
+    let today = today();
     // 往回一年、往後三個月：往後是因為交易所會預先公告尚未到期的恢復買賣日，
     // 那些列此刻價格還是 `-`（會被 crawler 略過），但只要日期一到就抓得到。
     let start = today
-        .with_year(today.year() - 1)
+        .with()
+        .year(today.year() - 1)
+        .build()
         .unwrap_or(today)
         .max(full_backfill_start());
-    let end = today
-        .checked_add_months(chrono::Months::new(3))
-        .unwrap_or(today);
+    let end = today.checked_add(3.months()).ok().unwrap_or(today);
 
     let mut saved = 0_u64;
 
@@ -100,10 +102,7 @@ pub async fn execute() -> Result<()> {
 /// TWSE 端點支援日期區間，因此這是單一請求就能完成的操作，
 /// 供手動回補入口一次補齊歷史。
 pub async fn backfill_listed_full() -> Result<u64> {
-    let end = Local::now()
-        .date_naive()
-        .checked_add_months(chrono::Months::new(3))
-        .unwrap_or_else(|| Local::now().date_naive());
+    let end = today().checked_add(3.months()).ok().unwrap_or_else(today);
 
     let reductions = backfill_listed_range(full_backfill_start(), end).await?;
     let splits = backfill_listed_splits_range(full_backfill_start(), end).await?;
@@ -113,7 +112,7 @@ pub async fn backfill_listed_full() -> Result<u64> {
 /// 回補指定區間內上市的變更面額與 ETF 分割（反分割）事件，回傳實際寫入筆數。
 ///
 /// 兩張表任一抓取失敗就整批放棄，不寫入另一張——兩者合起來才是完整的分割清單。
-pub async fn backfill_listed_splits_range(start: NaiveDate, end: NaiveDate) -> Result<u64> {
+pub async fn backfill_listed_splits_range(start: Date, end: Date) -> Result<u64> {
     let mut actions = twse::split::visit_par_value_changes(start, end)
         .await
         .context("Failed to fetch listed par value changes")?;
@@ -132,7 +131,7 @@ pub async fn backfill_listed_splits_range(start: NaiveDate, end: NaiveDate) -> R
 }
 
 /// 回補指定區間內的上市減資事件，回傳實際寫入筆數。
-pub async fn backfill_listed_range(start: NaiveDate, end: NaiveDate) -> Result<u64> {
+pub async fn backfill_listed_range(start: Date, end: Date) -> Result<u64> {
     let actions = twse::capital_reduction::visit(start, end)
         .await
         .context("Failed to fetch listed capital reductions")?;
@@ -197,14 +196,14 @@ async fn save_all(actions: Vec<CorporateAction>, market: &str) -> Result<u64> {
     Ok(saved)
 }
 
-/// [`FULL_BACKFILL_START`] 的 [`NaiveDate`] 形式。
-fn full_backfill_start() -> NaiveDate {
+/// [`FULL_BACKFILL_START`] 的 [`Date`] 形式。
+fn full_backfill_start() -> Date {
     let (year, month, day) = FULL_BACKFILL_START;
-    NaiveDate::from_ymd_opt(year, month, day).unwrap_or_else(|| {
+    ymd(year, month, day).unwrap_or_else(|| {
         // 常數是編譯期就確定的合法日期，這條分支實務上不會走到；
         // 仍給一個保守的預設值而不是 panic。這個日期同樣不可早於
         // 民國 100 年 1 月 1 日，否則會被端點拒絕。
-        NaiveDate::from_ymd_opt(2011, 1, 1).unwrap_or_default()
+        ymd(2011, 1, 1).unwrap_or_default()
     })
 }
 

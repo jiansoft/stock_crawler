@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 期間累計最多的交易日數。
 pub const MAX_FLOW_DAYS: usize = 60;
@@ -57,15 +57,15 @@ pub struct StockStreak {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlowPeriod {
     /// 資料日（期間最後一個交易日）。
-    pub data_date: NaiveDate,
+    pub data_date: Date,
     /// 期間第一個交易日。
-    pub from: NaiveDate,
+    pub from: Date,
     /// 實際累計的交易日數。
     pub days: usize,
 }
 
 /// 由新到舊的籌碼交易日決定累計期間；沒有交易日回 `None`。
-pub fn flow_period(dates: &[NaiveDate], days: usize) -> Option<FlowPeriod> {
+pub fn flow_period(dates: &[Date], days: usize) -> Option<FlowPeriod> {
     let data_date = *dates.first()?;
     let days = days.clamp(1, dates.len());
     Some(FlowPeriod {
@@ -79,14 +79,14 @@ pub fn flow_period(dates: &[NaiveDate], days: usize) -> Option<FlowPeriod> {
 #[async_trait]
 pub trait ChipFlowQuery: Send + Sync {
     /// `until`（含）之前最近 [`MAX_FLOW_DAYS`] 個有籌碼資料的交易日，由新到舊。
-    async fn fetch_chip_dates(&self, until: NaiveDate) -> Result<Vec<NaiveDate>>;
+    async fn fetch_chip_dates(&self, until: Date) -> Result<Vec<Date>>;
 
     /// 期間 `period` 內法人別 `investor`（[`INVESTORS`] 之一）的全體上市櫃淨買賣，
     /// 附資料日的連續天數。
     async fn fetch_flows(&self, period: FlowPeriod, investor: &str) -> Result<Vec<StockFlow>>;
 
     /// 截至 `data_date` 各股票的外資、投信連續買賣超天數。
-    async fn fetch_streaks(&self, data_date: NaiveDate) -> Result<Vec<StockStreak>>;
+    async fn fetch_streaks(&self, data_date: Date) -> Result<Vec<StockStreak>>;
 }
 
 /// 載入 `until`（含）之前最近 `days` 個籌碼交易日、法人別 `investor` 的全體淨買賣；
@@ -97,7 +97,7 @@ pub trait ChipFlowQuery: Send + Sync {
 /// 查詢失敗時回傳錯誤。
 pub async fn load_flows(
     query: &impl ChipFlowQuery,
-    until: NaiveDate,
+    until: Date,
     days: usize,
     investor: &str,
 ) -> Result<Option<(FlowPeriod, Vec<StockFlow>)>> {
@@ -116,8 +116,8 @@ pub async fn load_flows(
 /// 查詢失敗時回傳錯誤。
 pub async fn load_streaks(
     query: &impl ChipFlowQuery,
-    until: NaiveDate,
-) -> Result<Option<(NaiveDate, Vec<StockStreak>)>> {
+    until: Date,
+) -> Result<Option<(Date, Vec<StockStreak>)>> {
     let dates = query.fetch_chip_dates(until).await?;
     let Some(&data_date) = dates.first() else {
         return Ok(None);

@@ -1,6 +1,10 @@
 //! 每日股價統計（市場廣度、52 週新高新低）寫入與查詢的測試。
 
 use crate::infra::cache::SHARE;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -17,8 +21,8 @@ async fn test_upsert() {
     tracing::debug!("開始 DailyStockPriceStats::upsert");
 
     // 開始日期與結束日期
-    let start_date = NaiveDate::parse_from_str("2026-02-03", "%Y-%m-%d").unwrap();
-    let end_date = NaiveDate::parse_from_str("2026-02-03", "%Y-%m-%d").unwrap();
+    let start_date = Date::strptime("%Y-%m-%d", "2026-02-03").unwrap();
+    let end_date = Date::strptime("%Y-%m-%d", "2026-02-03").unwrap();
 
     // 迴圈遍歷日期
     let mut current_date = start_date;
@@ -43,7 +47,7 @@ async fn test_upsert() {
         }
 
         // 日期加一天
-        current_date += chrono::Duration::days(1);
+        current_date += 1.days();
     }
 
     tracing::debug!("結束 DailyStockPriceStats::upsert");
@@ -64,7 +68,7 @@ async fn upsert_counts_52_week_highs_and_lows() {
         println!("跳過 upsert_counts_52_week_highs_and_lows：無資料庫連接");
         return;
     }
-    let date = NaiveDate::from_ymd_opt(1991, 6, 28).expect("固定日期合法");
+    let date = date(1991, 6, 28);
     let symbols = ["79979HA", "79979HB", "79979HC", "79979HD"];
     let cleanup = || async {
         for sql in [
@@ -75,7 +79,7 @@ async fn upsert_counts_52_week_highs_and_lows() {
             let _ = sqlx::query(sql).bind(symbols).execute(pool).await;
         }
         let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date = $1")
-            .bind(date)
+            .bind(date.to_sqlx())
             .execute(pool)
             .await;
     };
@@ -104,7 +108,7 @@ async fn upsert_counts_52_week_highs_and_lows() {
                UNION ALL SELECT $2::date, $1, $4, $4, $5"#,
         )
         .bind(symbol)
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(prior_days)
         .bind(high)
         .bind(low)
@@ -113,7 +117,7 @@ async fn upsert_counts_52_week_highs_and_lows() {
         .expect("種入日報價");
         sqlx::query("INSERT INTO estimate (security_code, date) VALUES ($1, $2)")
             .bind(symbol)
-            .bind(date)
+            .bind(date.to_sqlx())
             .execute(pool)
             .await
             .expect("種入 estimate");
@@ -126,7 +130,7 @@ async fn upsert_counts_52_week_highs_and_lows() {
         "SELECT stock_exchange_market_id, new_52_week_high, new_52_week_low
          FROM daily_stock_price_stats WHERE date = $1 ORDER BY 1",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .fetch_all(pool)
     .await
     .expect("讀回統計");
@@ -151,7 +155,7 @@ async fn backfill_breadth_counts_without_estimate_and_keeps_existing_rows() {
         );
         return;
     }
-    let date = NaiveDate::from_ymd_opt(1991, 7, 31).expect("固定日期合法");
+    let date = date(1991, 7, 31);
     let symbols = ["79979HE", "79979HF", "0079979"];
     let cleanup = || async {
         for sql in [
@@ -161,7 +165,7 @@ async fn backfill_breadth_counts_without_estimate_and_keeps_existing_rows() {
             let _ = sqlx::query(sql).bind(symbols).execute(pool).await;
         }
         let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date = $1")
-            .bind(date)
+            .bind(date.to_sqlx())
             .execute(pool)
             .await;
     };
@@ -188,7 +192,7 @@ async fn backfill_breadth_counts_without_estimate_and_keeps_existing_rows() {
                VALUES ($2, $1, $3, $3, $3, $4, $5)"#,
         )
         .bind(symbol)
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(close)
         .bind(ma60)
         .bind(change)
@@ -206,7 +210,7 @@ async fn backfill_breadth_counts_without_estimate_and_keeps_existing_rows() {
                 stocks_up, stocks_down, undervalued + fair_valued + overvalued + highly_overvalued
          FROM daily_stock_price_stats WHERE date = $1 ORDER BY 1",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .fetch_all(pool)
     .await
     .expect("讀回統計");
@@ -220,7 +224,7 @@ async fn backfill_breadth_counts_without_estimate_and_keeps_existing_rows() {
         "UPDATE daily_stock_price_stats SET above_60_day_moving_average = 99
          WHERE date = $1 AND stock_exchange_market_id = 0",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .execute(pool)
     .await
     .expect("改寫統計");
@@ -232,14 +236,14 @@ async fn backfill_breadth_counts_without_estimate_and_keeps_existing_rows() {
         "SELECT above_60_day_moving_average FROM daily_stock_price_stats
          WHERE date = $1 AND stock_exchange_market_id = 0",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .fetch_one(pool)
     .await
     .expect("讀回 all 列");
     assert_eq!(kept, 99);
 
     // 沒有日線的日子（非交易日）不寫入，連全 0 的合併列也不產生。
-    let holiday = date + chrono::Duration::days(3);
+    let holiday = date + 3.days();
     let written = DailyStockPriceStats::backfill_breadth(holiday)
         .await
         .expect("非交易日回補成功");

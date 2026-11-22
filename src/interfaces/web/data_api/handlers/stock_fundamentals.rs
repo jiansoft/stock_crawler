@@ -3,13 +3,14 @@
 
 mod rows;
 
+use crate::core::util::datetime::TaipeiDateTime;
 use axum::{
     Json,
     extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use self::rows::{DividendRow, RevenueRow, StatementRow, ValuationRow};
@@ -147,7 +148,7 @@ pub(crate) async fn dividend_history(
 ) -> Response {
     // 年度上限取「目前年度加一」：股利政策常於年初公布下一年度配息，
     // 允許查到明年；再往後的年度必然無資料，直接視為參數錯誤。
-    let max_year = chrono::Local::now().year() + 1;
+    let max_year = i32::from(TaipeiDateTime::now().year()) + 1;
     for year in [params.from_year, params.to_year].into_iter().flatten() {
         if !(1990..=max_year).contains(&year) {
             return error_response(
@@ -217,7 +218,7 @@ pub(crate) async fn stock_valuation(
     }
     // `(security_code, date)` 唯一索引支援代號等值與日期反向搜尋；指定截止日
     // 時的 `$2 - 30` 與截止日合計涵蓋 31 個日曆日。
-    let row: Result<Option<ValuationRow>, _> = sqlx::query_as(r#"SELECT security_code, date, closing_price, percentage, year_count, cheap, fair, expensive, price_cheap, price_fair, price_expensive, dividend_cheap, dividend_fair, dividend_expensive, eps_cheap, eps_fair, eps_expensive, pbr_cheap, pbr_fair, pbr_expensive, per_cheap, per_fair, per_expensive FROM estimate WHERE security_code = $1 AND ($2::date IS NULL OR (date <= $2 AND date >= $2 - 30)) ORDER BY date DESC LIMIT 1"#).bind(&symbol).bind(date).fetch_optional(database::get_connection()).await;
+    let row: Result<Option<ValuationRow>, _> = sqlx::query_as(r#"SELECT security_code, date, closing_price, percentage, year_count, cheap, fair, expensive, price_cheap, price_fair, price_expensive, dividend_cheap, dividend_fair, dividend_expensive, eps_cheap, eps_fair, eps_expensive, pbr_cheap, pbr_fair, pbr_expensive, per_cheap, per_fair, per_expensive FROM estimate WHERE security_code = $1 AND ($2::date IS NULL OR (date <= $2 AND date >= $2 - 30)) ORDER BY date DESC LIMIT 1"#).bind(&symbol).bind(date.map(ToSqlx::to_sqlx)).fetch_optional(database::get_connection()).await;
     match row {
         Ok(row) => {
             let valuation = row.map(Into::into);

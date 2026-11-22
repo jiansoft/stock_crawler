@@ -1,5 +1,9 @@
 //! 除權息提醒排程的測試；連外的測試標 #[ignore]。
 
+use crate::core::util::datetime::{today, ymd};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 use std::time::Duration;
 
 use tokio::time;
@@ -11,8 +15,8 @@ use super::*;
 async fn test_execute() {
     dotenvy::dotenv().ok();
     tracing::info!("開始 execute");
-    //let date = NaiveDate::from_ymd_opt(2023, 6, 15);
-    //let today: NaiveDate = Local::today().naive_local();
+    //let date = ymd(2023, 6, 15);
+    //let today: Date = Local::today().naive_local();
     let _ = execute().await;
 
     tracing::info!("結束 execute");
@@ -23,11 +27,11 @@ async fn test_execute() {
 fn test_is_trading_day() {
     let mut holidays = HashSet::new();
     // 2026-05-25 (週一)
-    let monday = NaiveDate::from_ymd_opt(2026, 5, 25).unwrap();
+    let monday = date(2026, 5, 25);
     // 2026-05-24 (週日)
-    let sunday = NaiveDate::from_ymd_opt(2026, 5, 24).unwrap();
+    let sunday = date(2026, 5, 24);
     // 2026-05-23 (週六)
-    let saturday = NaiveDate::from_ymd_opt(2026, 5, 23).unwrap();
+    let saturday = date(2026, 5, 23);
 
     // 未設定休市日時，週一應為交易日，週末非交易日
     assert!(is_trading_day(monday, &holidays));
@@ -43,11 +47,11 @@ fn test_is_trading_day() {
 fn test_find_next_trading_day() {
     let mut holidays = HashSet::new();
     // 2026-05-22 (週五)
-    let friday = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
+    let friday = date(2026, 5, 22);
     // 2026-05-25 (週一)
-    let monday = NaiveDate::from_ymd_opt(2026, 5, 25).unwrap();
+    let monday = date(2026, 5, 25);
     // 2026-05-26 (週二)
-    let tuesday = NaiveDate::from_ymd_opt(2026, 5, 26).unwrap();
+    let tuesday = date(2026, 5, 26);
 
     // 正常週五的下一交易日應為週一
     assert_eq!(find_next_trading_day(friday, &holidays), monday);
@@ -67,11 +71,11 @@ mod mock_sources {
 
     const HOLIDAY_PATH: &str = "/rwd/zh/holidaySchedule/holidaySchedule";
 
-    fn day(month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(2019, month, day).expect("固定測試日期")
+    fn day(month: u32, day: u32) -> Date {
+        ymd(2019, month, day).expect("固定測試日期")
     }
 
-    async fn holidays(server: &MockServer) -> HashSet<NaiveDate> {
+    async fn holidays(server: &MockServer) -> HashSet<Date> {
         let uri = server.uri();
         with_origins(&[("https://www.twse.com.tw", &uri)], get_holidays_set(2019)).await
     }
@@ -156,15 +160,15 @@ mod mock_holidays {
     const TWSE: &str = "https://www.twse.com.tw";
     const ROUTE: &str = "/rwd/zh/holidaySchedule/holidaySchedule";
 
-    fn date(year: i32, month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, day).expect("合法日期")
+    fn date(year: i32, month: u32, day: u32) -> Date {
+        ymd(year, month, day).expect("合法日期")
     }
 
     /// 回傳 `year` 年的休市日表，休市日為 `holidays`。
-    async fn mount_year(server: &MockServer, year: i32, holidays: &[NaiveDate], expected: u64) {
+    async fn mount_year(server: &MockServer, year: i32, holidays: &[Date], expected: u64) {
         let data: Vec<serde_json::Value> = holidays
             .iter()
-            .map(|day| serde_json::json!([day.format("%Y-%m-%d").to_string(), "測試休市", ""]))
+            .map(|day| serde_json::json!([day.strftime("%Y-%m-%d").to_string(), "測試休市", ""]))
             .collect();
         Mock::given(method("GET"))
             .and(path(ROUTE))
@@ -209,12 +213,12 @@ mod mock_holidays {
     /// 排程入口以今天執行：把今天（與 14 天後所在年度）設為休市日，不論哪天跑都只讀休市日表就結束。
     #[tokio::test]
     async fn execute_uses_today() {
-        let today = Local::now().date_naive();
-        let horizon = today + Days::new(HOLIDAY_HORIZON_DAYS);
+        let today = today();
+        let horizon = today + HOLIDAY_HORIZON_DAYS.days();
         let server = MockServer::start().await;
-        mount_year(&server, today.year(), &[today], 1).await;
+        mount_year(&server, i32::from(today.year()), &[today], 1).await;
         if horizon.year() != today.year() {
-            mount_year(&server, horizon.year(), &[], 1).await;
+            mount_year(&server, i32::from(horizon.year()), &[], 1).await;
         }
         let uri = server.uri();
 

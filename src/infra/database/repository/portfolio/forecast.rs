@@ -5,7 +5,9 @@
 //! 報價取 `last_daily_quotes`；已除息未發放的取已領股利明細（[`super::payout`]）。
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, Days, Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use sqlx::QueryBuilder;
 
@@ -66,8 +68,10 @@ struct EventRow {
     year_of_dividend: i32,
     quarter: String,
     cash_dividend: Decimal,
-    ex_date: Option<NaiveDate>,
-    payable_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    ex_date: Option<Date>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    payable_date: Option<Date>,
 }
 
 impl From<EventRow> for DividendEvent {
@@ -98,7 +102,7 @@ pub(crate) struct ForecastInputs {
 /// 任一查詢失敗時回傳錯誤。
 pub(crate) async fn load_inputs(
     view: &HoldingView,
-    today: NaiveDate,
+    today: Date,
     months: u32,
 ) -> Result<ForecastInputs> {
     let pool = database::get_connection();
@@ -119,9 +123,10 @@ pub(crate) async fn load_inputs(
         .await
         .with_context(|| format!("查詢預估用股利失敗: view={view:?}"))?;
     let end = today
-        .checked_add_months(Months::new(months))
+        .checked_add(i64::from(months).months())
+        .ok()
         .unwrap_or(today);
-    let allocations = super::payout::fetch(view, today + Days::new(1), end, today).await?;
+    let allocations = super::payout::fetch(view, today + 1.days(), end, today).await?;
     Ok(ForecastInputs {
         holdings: holdings.into_iter().map(Holding::from).collect(),
         events: events.into_iter().map(DividendEvent::from).collect(),
@@ -163,12 +168,12 @@ ORDER BY o.member_id"#,
 ///
 /// 刪除或寫入失敗時回傳錯誤，交易回滾、原有快照不變。
 pub(crate) async fn replace_snapshot(
-    snapshot_date: NaiveDate,
+    snapshot_date: Date,
     items: &[(i64, ForecastItem)],
 ) -> Result<u64> {
     let mut tx = database::get_tx().await?;
     sqlx::query("DELETE FROM dividend_forecast_snapshot WHERE snapshot_date = $1")
-        .bind(snapshot_date)
+        .bind(snapshot_date.to_sqlx())
         .execute(&mut *tx)
         .await
         .with_context(|| format!("刪除股利預估快照失敗: {snapshot_date}"))?;
@@ -178,11 +183,11 @@ pub(crate) async fn replace_snapshot(
             "INSERT INTO dividend_forecast_snapshot (snapshot_date, member_id, stock_symbol, ex_date, pay_date, shares, cash_per_share, amount, basis, entitled) ",
         );
         builder.push_values(chunk, |mut row, (member_id, item)| {
-            row.push_bind(snapshot_date)
+            row.push_bind(snapshot_date.to_sqlx())
                 .push_bind(member_id)
                 .push_bind(&item.stock_symbol)
-                .push_bind(item.ex_date)
-                .push_bind(item.pay_date)
+                .push_bind(item.ex_date.to_sqlx())
+                .push_bind(item.pay_date.to_sqlx())
                 .push_bind(item.shares)
                 .push_bind(item.cash_per_share)
                 .push_bind(item.amount)
@@ -216,7 +221,8 @@ WHERE f.snapshot_date = $1 AND f.member_id = ANY($2)
 struct SnapshotRow {
     stock_symbol: String,
     name: String,
-    pay_date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pay_date: Date,
     amount: Decimal,
     basis: String,
 }
@@ -245,11 +251,14 @@ pub(crate) struct AccuracyInputs {
 /// # Errors
 ///
 /// 查詢失敗時回傳錯誤。
-pub(crate) async fn latest_snapshot_date() -> Result<Option<NaiveDate>> {
-    sqlx::query_scalar("SELECT max(snapshot_date) FROM dividend_forecast_snapshot")
-        .fetch_one(database::get_connection())
-        .await
-        .context("查詢最近一次股利預估快照日失敗")
+pub(crate) async fn latest_snapshot_date() -> Result<Option<Date>> {
+    sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(
+        "SELECT max(snapshot_date) FROM dividend_forecast_snapshot",
+    )
+    .fetch_one(database::get_connection())
+    .await
+    .map(crate::infra::database::jiff_types::from_wire)
+    .context("查詢最近一次股利預估快照日失敗")
 }
 
 /// 不晚於 `date` 的最近一次快照日；沒有時為 `None`。
@@ -260,13 +269,14 @@ pub(crate) async fn latest_snapshot_date() -> Result<Option<NaiveDate>> {
 /// # Errors
 ///
 /// 查詢失敗時回傳錯誤。
-pub(crate) async fn latest_snapshot_on_or_before(date: NaiveDate) -> Result<Option<NaiveDate>> {
-    sqlx::query_scalar(
+pub(crate) async fn latest_snapshot_on_or_before(date: Date) -> Result<Option<Date>> {
+    sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(
         "SELECT max(snapshot_date) FROM dividend_forecast_snapshot WHERE snapshot_date <= $1",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .fetch_one(database::get_connection())
     .await
+    .map(crate::infra::database::jiff_types::from_wire)
     .with_context(|| format!("查詢 {date} 以前最近一次股利預估快照日失敗"))
 }
 
@@ -276,20 +286,21 @@ pub(crate) async fn latest_snapshot_on_or_before(date: NaiveDate) -> Result<Opti
 ///
 /// 任一查詢失敗時回傳錯誤。
 pub(crate) async fn load_accuracy_inputs(
-    snapshot_date: NaiveDate,
+    snapshot_date: Date,
     view: &HoldingView,
-    today: NaiveDate,
+    today: Date,
 ) -> Result<AccuracyInputs> {
     let members = holding_view::member_ids(view).await?;
     let rows: Vec<SnapshotRow> = sqlx::query_as(SNAPSHOT_SQL)
-        .bind(snapshot_date)
+        .bind(snapshot_date.to_sqlx())
         .bind(&members)
         .fetch_all(database::get_connection())
         .await
         .with_context(|| format!("查詢股利預估快照失敗: {snapshot_date}"))?;
-    let from = snapshot_date + Days::new(1);
+    let from = snapshot_date + 1.days();
     let to = snapshot_date
-        .checked_add_months(Months::new(12))
+        .checked_add(12.months())
+        .ok()
         .unwrap_or(snapshot_date)
         .min(today);
     let allocations = if from <= to {

@@ -2,6 +2,9 @@
 //!
 //! 快照日固定 2026-04-01，會員 979_791、代號 79978A，測完刪除。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -11,13 +14,13 @@ use crate::infra::database;
 const MEMBER: i64 = 979_791;
 const SYMBOL: &str = "79978A";
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("有效日期")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("有效日期")
 }
 
-async fn cleanup(pool: &sqlx::PgPool, snapshot_date: NaiveDate) {
+async fn cleanup(pool: &sqlx::PgPool, snapshot_date: Date) {
     let _ = sqlx::query("DELETE FROM dividend_forecast_snapshot WHERE snapshot_date = $1")
-        .bind(snapshot_date)
+        .bind(snapshot_date.to_sqlx())
         .execute(pool)
         .await;
     let _ = sqlx::query(
@@ -88,13 +91,13 @@ async fn record_writes_announced_and_entitled_items_and_replaces_rerun() {
 
     let first = record(today).await.expect("第一次快照");
     let second = record(today).await.expect("同一天重跑");
-    let rows: Vec<(NaiveDate, i64, Decimal, String, bool)> = sqlx::query_as(
+    let rows: Vec<(Date, i64, Decimal, String, bool)> = sqlx::query_as::<_, (jiff_sqlx::Date, i64, Decimal, String, bool)>(
         "SELECT ex_date, shares, amount, basis, entitled FROM dividend_forecast_snapshot WHERE snapshot_date = $1 AND member_id = $2 ORDER BY ex_date",
     )
-    .bind(today)
+    .bind(today.to_sqlx())
     .bind(MEMBER)
     .fetch_all(pool)
-    .await
+    .await.map(|rows| rows.into_iter().map(|(c0, c1, c2, c3, c4)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2, c3, c4)).collect::<Vec<_>>())
     .expect("查詢快照");
     cleanup(pool, today).await;
 

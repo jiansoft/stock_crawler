@@ -1,6 +1,7 @@
 //! 條件選股回測 endpoint 整合測試：低波動（年化波動度、beta 上限與低波動排序），只用換股當天的風險指標。
 
 use super::*;
+use jiff_sqlx::ToSqlx;
 
 /// 兩個換股日（03-01、03-08）的風險指標：`(代號, 年化波動度, beta)`。
 const RISKS: [(&str, i32, f64); 3] = [
@@ -16,7 +17,7 @@ async fn seed_risks(pool: &sqlx::PgPool) {
                 "INSERT INTO daily_risk_metric (date, stock_symbol, volatility_percent, beta, samples)
                  VALUES ($1, $2, $3, $4, 240)",
             )
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(symbol)
             .bind(Decimal::from(volatility))
             .bind(Decimal::try_from(beta).expect("有限數值"))

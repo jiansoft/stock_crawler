@@ -9,11 +9,12 @@
 //! * [`TaipeiDateTime`]（`timestamptz`）本身就實作了 sqlx 的型別特徵，直接綁定與讀取即可，
 //!   `Option<TaipeiDateTime>` 也一樣。
 
+use jiff::Timestamp;
 use jiff::civil::{Date, DateTime, Time};
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
-use sqlx::postgres::{PgArgumentBuffer, PgHasArrayType, PgTypeInfo, PgValueRef};
-use sqlx::{Decode, Encode, Postgres, Type, ValueRef};
+use sqlx::postgres::{PgArgumentBuffer, PgHasArrayType, PgRow, PgTypeInfo, PgValueRef};
+use sqlx::{ColumnIndex, Decode, Encode, Postgres, Row, Type, ValueRef};
 
 use crate::core::util::datetime::TaipeiDateTime;
 
@@ -84,6 +85,119 @@ impl From<Nullable<jiff_sqlx::Time>> for Option<Time> {
     fn from(value: Nullable<jiff_sqlx::Time>) -> Self {
         value.0.map(jiff_sqlx::Time::to_jiff)
     }
+}
+
+impl From<Nullable<jiff_sqlx::Timestamp>> for Option<Timestamp> {
+    fn from(value: Nullable<jiff_sqlx::Timestamp>) -> Self {
+        value.0.map(jiff_sqlx::Timestamp::to_jiff)
+    }
+}
+
+/// 可以從 PostgreSQL 欄位讀出的 jiff 型別（含 `Option`），供 [`get`]、[`try_get`] 依目標型別推導。
+pub trait JiffColumn: Sized {
+    /// 線路上的 `jiff_sqlx` 包裝型別。
+    type Wire: for<'r> Decode<'r, Postgres> + Type<Postgres>;
+
+    /// 由包裝型別轉回 jiff 型別。
+    fn from_wire(wire: Self::Wire) -> Self;
+}
+
+impl JiffColumn for Date {
+    type Wire = jiff_sqlx::Date;
+
+    fn from_wire(wire: Self::Wire) -> Self {
+        wire.to_jiff()
+    }
+}
+
+impl JiffColumn for Option<Date> {
+    type Wire = Option<jiff_sqlx::Date>;
+
+    fn from_wire(wire: Self::Wire) -> Self {
+        wire.map(jiff_sqlx::Date::to_jiff)
+    }
+}
+
+impl JiffColumn for Timestamp {
+    type Wire = jiff_sqlx::Timestamp;
+
+    fn from_wire(wire: Self::Wire) -> Self {
+        wire.to_jiff()
+    }
+}
+
+impl JiffColumn for Option<Timestamp> {
+    type Wire = Option<jiff_sqlx::Timestamp>;
+
+    fn from_wire(wire: Self::Wire) -> Self {
+        wire.map(jiff_sqlx::Timestamp::to_jiff)
+    }
+}
+
+impl JiffColumn for DateTime {
+    type Wire = jiff_sqlx::DateTime;
+
+    fn from_wire(wire: Self::Wire) -> Self {
+        wire.to_jiff()
+    }
+}
+
+impl JiffColumn for Option<DateTime> {
+    type Wire = Option<jiff_sqlx::DateTime>;
+
+    fn from_wire(wire: Self::Wire) -> Self {
+        wire.map(jiff_sqlx::DateTime::to_jiff)
+    }
+}
+
+impl JiffColumn for Time {
+    type Wire = jiff_sqlx::Time;
+
+    fn from_wire(wire: Self::Wire) -> Self {
+        wire.to_jiff()
+    }
+}
+
+impl JiffColumn for Option<Time> {
+    type Wire = Option<jiff_sqlx::Time>;
+
+    fn from_wire(wire: Self::Wire) -> Self {
+        wire.map(jiff_sqlx::Time::to_jiff)
+    }
+}
+
+/// 把查詢結果的 `jiff_sqlx` 包裝型別轉回 jiff 型別，依目標型別推導，例如
+/// `rows.into_iter().map(from_wire).collect::<Vec<Date>>()`。
+#[must_use]
+pub fn from_wire<T: JiffColumn>(wire: T::Wire) -> T {
+    T::from_wire(wire)
+}
+
+/// 讀取一個 jiff 型別的欄位，取代 `row.try_get(…)`。
+///
+/// # Errors
+///
+/// 欄位不存在、型別不符或 NULL 讀進非 `Option` 時回傳 [`sqlx::Error`]。
+pub fn try_get<T, I>(row: &PgRow, index: I) -> Result<T, sqlx::Error>
+where
+    T: JiffColumn,
+    I: ColumnIndex<PgRow>,
+{
+    row.try_get::<T::Wire, I>(index).map(T::from_wire)
+}
+
+/// 讀取一個 jiff 型別的欄位，取代 `row.get(…)`。
+///
+/// # Panics
+///
+/// 與 sqlx 的 `Row::get` 相同：欄位不存在、型別不符或 NULL 讀進非 `Option` 時 panic。
+pub fn get<T, I>(row: &PgRow, index: I) -> T
+where
+    T: JiffColumn,
+    I: ColumnIndex<PgRow> + std::fmt::Debug,
+{
+    let column = format!("{index:?}");
+    try_get(row, index).unwrap_or_else(|why| panic!("讀取欄位 {column} 失敗：{why}"))
 }
 
 #[cfg(test)]

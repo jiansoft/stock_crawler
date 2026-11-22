@@ -2,57 +2,28 @@
 
 //use crate::internal::database::table::revenue;
 
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::ToSpan;
 use std::str::FromStr;
 
-use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
 use rust_decimal::Decimal;
 
-//use chrono::{Datelike, Local, NaiveDate};
 use crate::infra::database::table::revenue::{fetch_last_two_month, rebuild_revenue_last_date};
 
-#[tokio::test]
-async fn test_date() {
-    // 取得本月的第一天
-    let now = Local::now();
-    let first_day_of_month = NaiveDate::from_ymd_opt(now.year(), now.month(), 1);
+/// 本月 1 日、上個月 1 日與兩個月前 1 日；前一天分別落在上個月與兩個月前。
+#[test]
+fn test_date() {
+    let now = TaipeiDateTime::now();
+    let first_day_of_month = now.date().first_of_month();
+    let last_month = (first_day_of_month - 1.day()).first_of_month();
+    let two_month_ago = (last_month - 1.day()).first_of_month();
 
-    // 取得上個月的第一天
-    let last_month = if now.month() == 1 {
-        NaiveDate::from_ymd_opt(now.year() - 1, 12, 1)
-    } else {
-        NaiveDate::from_ymd_opt(now.year(), now.month() - 1, 1)
-    };
-
-    // 取得二個月前的第一天
-    let two_month_ago = if now.month() <= 2 {
-        NaiveDate::from_ymd_opt(now.year() - 1, now.month() + 10, 1)
-    } else {
-        NaiveDate::from_ymd_opt(now.year(), now.month() - 2, 1)
-    };
-
-    println!("This month's first day: {:?}", first_day_of_month);
-    println!("Last month's first day: {:?}", last_month);
-    println!("Two months ago first day: {:?}", two_month_ago);
-
-    let now_first_day = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap();
-
-    let last_month = now_first_day - TimeDelta::try_minutes(1).unwrap();
-    let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-    let last_month_timezone = timezone.from_local_datetime(&last_month).unwrap();
-    let two_month_ago_first_day = NaiveDate::from_ymd_opt(last_month.year(), last_month.month(), 1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap();
-    let two_month_ago = two_month_ago_first_day - TimeDelta::try_minutes(1).unwrap();
-    let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-    let two_month_ago_timezone = timezone.from_local_datetime(&two_month_ago).unwrap();
-
-    println!("This month's first day: {:?}", now_first_day);
-    println!("Last month's last day: {:?}", last_month_timezone);
-    println!("Two months ago last day: {:?}", two_month_ago_timezone);
+    println!("This month's first day: {first_day_of_month}");
+    println!("Last month's first day: {last_month}");
+    println!("Two months ago first day: {two_month_ago}");
+    assert_eq!(first_day_of_month.day(), 1);
+    assert_eq!(last_month + 1.month(), first_day_of_month);
+    assert_eq!(two_month_ago + 2.months(), first_day_of_month);
 }
 
 #[tokio::test]
@@ -145,9 +116,7 @@ async fn fetch_last_two_months_before_reads_previous_two_months() {
         .await
         .expect("插入測試營收");
     }
-    let now = Local
-        .with_ymd_and_hms(1999, 3, 15, 9, 0, 0)
-        .single()
+    let now = TaipeiDateTime::from_datetime(jiff::civil::date(1999, 3, 15).at(9, 0, 0, 0))
         .expect("合法時間");
 
     let revenues = fetch_last_two_months_before(now).await;

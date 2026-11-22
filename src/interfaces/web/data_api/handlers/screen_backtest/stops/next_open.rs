@@ -1,12 +1,13 @@
 //! 次日開盤停損：收盤觸發後尋找下一個有效開盤，成交不得跨越原定出場日。
 
 use super::*;
+use jiff::civil::Date;
 
 /// 一次停損的實際成交日與相對進場開盤的還原報酬。
 #[derive(Debug, Clone, Copy)]
 pub(super) struct StopExit {
     /// 真正有有效開盤的賣出日。
-    pub(super) date: NaiveDate,
+    pub(super) date: Date,
     /// 買進開盤至停損賣出開盤的報酬（%），未扣費稅。
     pub(super) ret: f64,
 }
@@ -15,8 +16,8 @@ pub(super) struct StopExit {
 pub(super) fn stop_exit(
     series: &[PriceBar],
     symbol: &str,
-    start: NaiveDate,
-    end: NaiveDate,
+    start: Date,
+    end: Date,
     rule: StopRule,
     ratios: &OpenRatios,
 ) -> Option<StopExit> {

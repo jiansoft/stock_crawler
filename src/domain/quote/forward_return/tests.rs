@@ -1,9 +1,11 @@
 //! 未來報酬的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("有效日期")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("有效日期")
 }
 
 /// 第 N 個交易日：由新到舊的第 N 個（跳過假日）；結束日不是交易日或日數不足為 None。

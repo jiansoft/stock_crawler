@@ -1,11 +1,14 @@
 //! 會員每日市值表的測試。
 
 use super::*;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 #[tokio::test]
 #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
 async fn pending_registration_has_no_settlement_rows() {
-    let date = NaiveDate::from_ymd_opt(1987, 7, 23).expect("固定日期合法");
+    let date = date(1987, 7, 23);
     let mut tx = Some(database::get_tx().await.expect("開啟隔離測試交易"));
     let conn = tx.as_mut().expect("交易存在");
     let household: i64 = sqlx::query_scalar(
@@ -32,7 +35,7 @@ async fn pending_registration_has_no_settlement_rows() {
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM daily_money_history_member WHERE date=$1 AND household_id=$2",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .bind(household)
     .fetch_one(&mut **conn)
     .await
@@ -51,8 +54,8 @@ async fn household_settlement_isolated_postgres() {
     };
     use rust_decimal_macros::dec;
 
-    let date = NaiveDate::from_ymd_opt(1987, 7, 22).expect("固定日期合法");
-    let previous = date.pred_opt().expect("有前一日");
+    let date = date(1987, 7, 22);
+    let previous = date.yesterday().expect("有前一日");
     let mut tx = Some(database::get_tx().await.expect("開啟隔離測試交易"));
     let conn = tx.as_mut().expect("交易存在");
     let other: i64 = sqlx::query_scalar(
@@ -90,7 +93,7 @@ async fn household_settlement_isolated_postgres() {
         }
     }
     sqlx::query(r#"INSERT INTO "DailyQuotes" (stock_symbol, "Date", "ClosingPrice") VALUES ('IAM7SET', $1, 20), ('IAM7SET', $2, 10)"#)
-        .bind(date).bind(previous).execute(&mut **conn).await.expect("新增測試報價");
+        .bind(date.to_sqlx()).bind(previous.to_sqlx()).execute(&mut **conn).await.expect("新增測試報價");
     for day in [previous, date] {
         DailyMoneyHistoryMember::upsert(day, &mut tx)
             .await
@@ -107,14 +110,14 @@ async fn household_settlement_isolated_postgres() {
         .expect("舊表只結算預設家庭");
     let conn = tx.as_mut().expect("交易存在");
     let totals: Vec<(i64, Decimal)> = sqlx::query_as("SELECT household_id, market_value FROM daily_money_history_member WHERE date=$1 AND member_id=0 AND household_id IN (1, $2) ORDER BY household_id")
-        .bind(date).bind(other).fetch_all(&mut **conn).await.expect("讀取家庭合計");
+        .bind(date.to_sqlx()).bind(other).fetch_all(&mut **conn).await.expect("讀取家庭合計");
     assert_eq!(
         totals,
         [(1, dec!(200)), (other, dec!(600))],
         "停用資產仍計入自己的家庭，刪除者不混入"
     );
     let details: Vec<(i64, Decimal, Decimal, Decimal)> = sqlx::query_as("SELECT household_id, market_value, total_shares::numeric, ratio FROM daily_money_history_detail WHERE date=$1 AND security_code='IAM7SET' AND member_id=0 ORDER BY household_id")
-        .bind(date).fetch_all(&mut **conn).await.expect("讀取家庭明細");
+        .bind(date.to_sqlx()).fetch_all(&mut **conn).await.expect("讀取家庭明細");
     assert_eq!(
         details,
         [
@@ -123,12 +126,12 @@ async fn household_settlement_isolated_postgres() {
         ]
     );
     let batches: Vec<(i64, Decimal)> = sqlx::query_as("SELECT household_id, sum(market_value) FROM daily_money_history_detail_more WHERE date=$1 AND security_code='IAM7SET' AND member_id=0 GROUP BY household_id ORDER BY household_id")
-        .bind(date).fetch_all(&mut **conn).await.expect("讀取家庭交易批次");
+        .bind(date.to_sqlx()).fetch_all(&mut **conn).await.expect("讀取家庭交易批次");
     assert_eq!(batches, totals, "交易批次合計不得跨家庭重複連結");
     let comparisons = sqlx::query_as::<_, DailyMoneyHistoryMemberWithPreviousTradingDay>(
         PREVIOUS_TRADING_DAY_SQL,
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .fetch_all(&mut **conn)
     .await
     .expect("家庭前日比較");
@@ -147,7 +150,7 @@ async fn household_settlement_isolated_postgres() {
     }
     let legacy_total: Decimal =
         sqlx::query_scalar("SELECT sum FROM daily_money_history WHERE date=$1")
-            .bind(date)
+            .bind(date.to_sqlx())
             .fetch_one(&mut **conn)
             .await
             .expect("讀取預設家庭舊表");
@@ -155,7 +158,7 @@ async fn household_settlement_isolated_postgres() {
     let deleted_rows: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM daily_money_history_member WHERE date=$1 AND member_id=$2",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .bind(members[2])
     .fetch_one(&mut **conn)
     .await
@@ -168,7 +171,7 @@ async fn household_settlement_isolated_postgres() {
             UNION ALL SELECT household_id, settlement_household_id FROM daily_money_history_detail WHERE date=$1
             UNION ALL SELECT household_id, settlement_household_id FROM daily_money_history_detail_more WHERE date=$1
          ) rows WHERE household_id<>settlement_household_id"
-    ).bind(date).fetch_one(&mut **conn).await.expect("確認新結算歸屬");
+    ).bind(date.to_sqlx()).fetch_one(&mut **conn).await.expect("確認新結算歸屬");
     assert_eq!(mismatch, 0, "新結算的三張市值表必須保存原家庭");
     sqlx::query("SELECT public.member_money_history_move($1, $2)")
         .bind(members[0])
@@ -177,10 +180,10 @@ async fn household_settlement_isolated_postgres() {
         .await
         .expect("搬移本人歷史");
     let moved: (i64, i64) = sqlx::query_as("SELECT household_id, settlement_household_id FROM daily_money_history_member WHERE date=$1 AND member_id=$2")
-        .bind(date).bind(members[0]).fetch_one(&mut **conn).await.expect("讀取搬移後歸屬");
+        .bind(date.to_sqlx()).bind(members[0]).fetch_one(&mut **conn).await.expect("讀取搬移後歸屬");
     assert_eq!(moved, (other, 1));
     let original: Decimal = sqlx::query_scalar("SELECT market_value FROM daily_money_history_member WHERE date=$1 AND household_id=1 AND member_id=0")
-        .bind(date).fetch_one(&mut **conn).await.expect("原家庭歷史合計");
+        .bind(date.to_sqlx()).fetch_one(&mut **conn).await.expect("原家庭歷史合計");
     assert_eq!(original, dec!(200), "搬家不重算歷史合計");
     sqlx::query("SELECT public.member_money_history_delete($1)")
         .bind(members[0])
@@ -188,10 +191,10 @@ async fn household_settlement_isolated_postgres() {
         .await
         .expect("刪除後重建原結算家庭");
     let removed_total: Decimal = sqlx::query_scalar("SELECT market_value FROM daily_money_history_member WHERE date=$1 AND household_id=1 AND member_id=0")
-        .bind(date).fetch_one(&mut **conn).await.expect("刪除後原家庭合計");
+        .bind(date.to_sqlx()).fetch_one(&mut **conn).await.expect("刪除後原家庭合計");
     let removed_legacy: Decimal =
         sqlx::query_scalar("SELECT sum FROM daily_money_history WHERE date=$1")
-            .bind(date)
+            .bind(date.to_sqlx())
             .fetch_one(&mut **conn)
             .await
             .expect("刪除後凍結寬表合計");
@@ -221,7 +224,7 @@ async fn test_upsert() {
         return;
     }
     tracing::debug!("開始 DailyMoneyHistoryMember::upsert");
-    let current_date = NaiveDate::parse_from_str("2023-08-30", "%Y-%m-%d").unwrap();
+    let current_date = Date::strptime("%Y-%m-%d", "2023-08-30").unwrap();
     let mut tx = database::get_tx().await.ok();
 
     match DailyMoneyHistoryMember::upsert(current_date, &mut tx).await {
@@ -258,7 +261,7 @@ async fn test_upsert_covers_all_undeleted_members() {
         println!("跳過 test_upsert_covers_all_undeleted_members：無資料庫連接");
         return;
     }
-    let date = NaiveDate::from_ymd_opt(1987, 7, 20).expect("固定日期合法");
+    let date = date(1987, 7, 20);
     let mut tx = Some(database::get_tx().await.expect("開啟交易"));
     let mut ids = Vec::new();
     {
@@ -303,7 +306,7 @@ async fn test_upsert_covers_all_undeleted_members() {
         "SELECT member_id, market_value FROM daily_money_history_member
          WHERE date = $1 AND member_id = ANY($2) ORDER BY member_id",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .bind(&ids)
     .fetch_all(&mut **conn)
     .await

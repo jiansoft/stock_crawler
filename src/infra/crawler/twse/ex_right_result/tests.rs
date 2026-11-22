@@ -1,5 +1,8 @@
 //! TWSE 上市除權除息計算結果表採集器的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -13,11 +16,11 @@ fn fixture() -> Twt49uResponse {
 #[test]
 fn parse_references_reads_open_base_of_every_row() {
     let references = parse_references(&fixture()).expect("解析成功");
-    let rows: Vec<(&str, NaiveDate, rust_decimal::Decimal)> = references
+    let rows: Vec<(&str, Date, rust_decimal::Decimal)> = references
         .iter()
         .map(|r| (r.stock_symbol.as_str(), r.date, r.reference_price))
         .collect();
-    let day = |m, d| NaiveDate::from_ymd_opt(2025, m, d).expect("有效日期");
+    let day = |m, d| ymd(2025, m, d).expect("有效日期");
     assert_eq!(
         rows,
         [
@@ -55,7 +58,7 @@ fn parse_results_maps_cash_only_events_with_amounts() {
 
     let first = &results[0];
     assert_eq!(first.stock_symbol, "00730");
-    assert_eq!(first.ex_date, NaiveDate::from_ymd_opt(2025, 1, 17).unwrap());
+    assert_eq!(first.ex_date, date(2025, 1, 17));
     assert!(first.is_cash && !first.is_stock);
     assert_eq!(first.cash_dividend, Some(dec!(0.086)));
     assert_eq!(first.market, StockExchangeMarket::Listed);
@@ -104,10 +107,7 @@ fn empty_result_and_abnormal_status() {
 
 #[test]
 fn parse_roc_full_date_handles_the_minguo_format() {
-    assert_eq!(
-        parse_roc_full_date("114年01月02日"),
-        NaiveDate::from_ymd_opt(2025, 1, 2)
-    );
+    assert_eq!(parse_roc_full_date("114年01月02日"), ymd(2025, 1, 2));
     assert_eq!(parse_roc_full_date("2025年01月02日"), None);
     assert_eq!(parse_roc_full_date("114年13月02日"), None);
     assert_eq!(parse_roc_full_date("--"), None);

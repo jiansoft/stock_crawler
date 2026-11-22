@@ -1,6 +1,8 @@
 //! 條件選股回測 endpoint 整合測試：滾動前推最佳化。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff_sqlx::ToSqlx;
 
 /// 滾動前推：另種入 1994-03 的相對強度與 03-05 換股日的報酬，1993 為訓練期（兩期，有夏普值）、1994
 /// 為樣本外；各偏移都跑一次，回傳逐年挑出的參數與彙總。訓練年數超出範圍或期間太短回 422。
@@ -13,14 +15,14 @@ async fn screen_backtest_walk_forward_rolls_yearly() {
     let Some(pool) = seeded("screen_backtest_walk_forward_rolls_yearly").await else {
         return;
     };
-    let next_year = |d: u32| NaiveDate::from_ymd_opt(1994, 3, d).expect("固定日期合法");
+    let next_year = |d: u32| ymd(1994, 3, d).expect("固定日期合法");
     for d in DAYS {
         for (index, (symbol, _, _)) in STOCKS.iter().enumerate() {
             sqlx::query(
                 "INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
                  VALUES ($1, $2, 0, $3, 1, 3)",
             )
-            .bind(next_year(d))
+            .bind(next_year(d).to_sqlx())
             .bind(symbol)
             .bind(90 - index as i16 * 10)
             .execute(pool)
@@ -33,7 +35,7 @@ async fn screen_backtest_walk_forward_rolls_yearly() {
         sqlx::query(
             "INSERT INTO daily_forward_return (date, stock_symbol, return_5d) VALUES ($1, $2, $3)",
         )
-        .bind(next_year(5))
+        .bind(next_year(5).to_sqlx())
         .bind(symbol)
         .bind(Decimal::from(ret))
         .execute(pool)

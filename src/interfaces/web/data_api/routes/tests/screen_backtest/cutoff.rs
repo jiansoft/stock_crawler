@@ -1,6 +1,7 @@
 //! 回測截止日不洩漏未來報酬、日頻風險走完整流程的資料庫語意整合測試。
 
 use super::*;
+use jiff_sqlx::ToSqlx;
 
 /// 回測截止日不洩漏未來報酬（B02）：單日回測或換股日在迄日前不足持有天數時，不計入完整期數，
 /// 不偷看迄日之後的價格，0050 與策略共用同一終點。
@@ -53,10 +54,10 @@ async fn daily_risk_matches_actual_weighted_and_core_portfolio() {
                 100
             };
             sqlx::query(r#"INSERT INTO "DailyQuotes"("Date",stock_symbol,"ClosingPrice","TradeValue") VALUES ($1,$2,$3,$4) ON CONFLICT("Date",stock_symbol) DO UPDATE SET "ClosingPrice"=EXCLUDED."ClosingPrice""#)
-                .bind(day(d)).bind(symbol).bind(close).bind(value).execute(pool).await.unwrap();
+                .bind(day(d).to_sqlx()).bind(symbol).bind(close).bind(value).execute(pool).await.unwrap();
         }
     }
-    sqlx::query("UPDATE daily_forward_return SET return_5d=0 WHERE date=$1 AND stock_symbol IN ('79979BA','79979BC','0050')").bind(day(1)).execute(pool).await.unwrap();
+    sqlx::query("UPDATE daily_forward_return SET return_5d=0 WHERE date=$1 AND stock_symbol IN ('79979BA','79979BC','0050')").bind(day(1).to_sqlx()).execute(pool).await.unwrap();
     let path = "/api/v1/stocks/screen/backtest?from=1993-03-01&to=1993-03-08&hold_days=5&limit=2&weighting=trade_value&fee_discount=0";
     let (status, weighted) = get(path).await;
     assert_eq!(status, StatusCode::OK, "{weighted}");

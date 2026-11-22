@@ -1,7 +1,7 @@
 use crate::domain::money_flow::entity::MoneyFlowMemberWithPreviousDay;
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 資金流向與帳戶市值領域之倉儲介面 (Repository Trait)。
 ///
@@ -17,13 +17,13 @@ pub trait MoneyFlowRepository: Send + Sync {
     /// 4. 先清除後重建交易批次明細 (daily_money_history_detail_more)
     /// 5. 更新當日市場統計 (daily_stock_price_stats)
     /// 任一步驟失敗即會自動 Transaction Rollback，以確保多張資料表在該日期下的數據一致性。
-    async fn recalculate_and_save_money_flow(&self, date: NaiveDate) -> Result<()>;
+    async fn recalculate_and_save_money_flow(&self, date: Date) -> Result<()>;
 
     /// 取得指定交易日與前一交易日之會員市值對照。
     ///
     /// 傳回包含合計 (member_id = 0) 及各個個別會員在當日與前一日的市值數據。
     async fn fetch_member_money_history_with_previous_day(
         &self,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Vec<MoneyFlowMemberWithPreviousDay>>;
 }

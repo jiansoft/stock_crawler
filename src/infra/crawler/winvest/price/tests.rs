@@ -1,6 +1,8 @@
 //! Winvest 報價爬蟲的單元測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
 const URL: &str = "https://example.test/QueryRecentDailyPrice";
 
@@ -16,8 +18,8 @@ const OFFICIAL_BODY: &str = r#"{
     "DataDate": "2026/09/29", "errMsg": null, "actionUrl": "/Stock/Symbol/QueryRecentDailyPrice"
 }"#;
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("測試日期應合法")
 }
 
 /// 驗證實際回應的 serde 欄位對應（PascalCase rename、`errMsg` 為 null）。

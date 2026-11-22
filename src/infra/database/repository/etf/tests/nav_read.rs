@@ -1,6 +1,8 @@
 //! ETF 淨值與單位數的讀取：週申購流量、淨值序列（優先官方淨值）與最新單位數。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
 #[tokio::test]
 #[cfg_attr(
@@ -11,7 +13,7 @@ async fn weekly_flows_sum_recent_days_with_units() {
     dotenvy::dotenv().ok();
     cleanup().await;
     // 用遠在未來的日期，確保是全表最近的幾天。
-    let future = |d| NaiveDate::from_ymd_opt(2099, 1, d).expect("日期應合法");
+    let future = |d| ymd(2099, 1, d).expect("日期應合法");
     let repo = PgEtfRepository::new();
     let record = |date, change: i64, premium| EtfNavRecord {
         units_change: change,
@@ -80,7 +82,7 @@ async fn nav_series_prefers_official_nav() {
         .nav_series(&[FAKE.to_string()], day(1))
         .await
         .expect("讀淨值序列");
-    let points: Vec<(NaiveDate, f64)> = series[FAKE].iter().map(|b| (b.date, b.close)).collect();
+    let points: Vec<(Date, f64)> = series[FAKE].iter().map(|b| (b.date, b.close)).collect();
     // 4/30 還沒回填正式淨值，用預估淨值。
     assert_eq!(points, vec![(day(28), 19.5), (day(30), 20.0)]);
     assert!(

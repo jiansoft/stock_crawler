@@ -4,13 +4,16 @@
 //! 讀預先彙總的 `daily_market_forward_return`，與訊號績效、法人連買績效的大盤基準共用
 //! [`fetch_benchmark`]；基準日落在期間內才計入。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::signal_history::{benchmark_output, fetch_benchmark, fetch_benchmark_by_month};
 use super::{database_error, error_response, market_id_for_stats, parse_optional_date};
@@ -50,21 +53,24 @@ pub(crate) async fn market_forward_returns(
             "market 必須為 all、twse 或 tpex",
         );
     };
-    let to = date.unwrap_or_else(|| Local::now().date_naive());
+    let to = date.unwrap_or_else(today);
     let from = to
-        .checked_sub_months(Months::new(u32::from(years) * 12))
-        .unwrap_or(NaiveDate::MIN);
+        .checked_sub(i64::from(u32::from(years) * 12).months())
+        .ok()
+        .unwrap_or(Date::MIN);
 
-    let data_as_of: Option<NaiveDate> = match sqlx::query_scalar(DATA_AS_OF_SQL)
-        .bind(market_id)
-        .bind(from)
-        .bind(to)
-        .fetch_one(database::get_connection())
-        .await
-    {
-        Ok(value) => value,
-        Err(error) => return database_error(error),
-    };
+    let data_as_of: Option<Date> =
+        match sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(DATA_AS_OF_SQL)
+            .bind(market_id)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
+            .fetch_one(database::get_connection())
+            .await
+            .map(crate::infra::database::jiff_types::from_wire)
+        {
+            Ok(value) => value,
+            Err(error) => return database_error(error),
+        };
     let Some(data_as_of) = data_as_of else {
         return error_response(StatusCode::NOT_FOUND, "期間內沒有未來報酬資料");
     };

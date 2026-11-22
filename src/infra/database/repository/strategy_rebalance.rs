@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff_sqlx::ToSqlx;
 
 use crate::domain::strategy::rebalance::{
     RecordedHolding, StrategyRebalanceRecord, StrategyRebalanceRepository,
@@ -25,9 +25,9 @@ WHERE preset_name = $1
 ORDER BY date
 "#;
 
-/// [`LIST_SQL`] 的一列。
+/// [`LIST_SQL`] 的一列（日期為 `jiff_sqlx` 的線路型別）。
 type RecordRow = (
-    NaiveDate,
+    jiff_sqlx::Date,
     String,
     i16,
     i16,
@@ -69,7 +69,7 @@ impl StrategyRebalanceRepository for PgStrategyRebalanceRepository {
             .collect();
         let result = sqlx::query(SAVE_SQL)
             .bind(&record.preset_name)
-            .bind(record.date)
+            .bind(record.date.to_sqlx())
             .bind(&record.query)
             .bind(i16::try_from(record.hold_days).unwrap_or(i16::MAX))
             .bind(i16::from(record.etf_weight))
@@ -106,7 +106,7 @@ impl StrategyRebalanceRepository for PgStrategyRebalanceRepository {
                 )| {
                     StrategyRebalanceRecord {
                         preset_name: preset_name.to_owned(),
-                        date,
+                        date: date.to_jiff(),
                         query,
                         hold_days: u16::try_from(hold_days).unwrap_or_default(),
                         etf_weight: u8::try_from(etf_weight).unwrap_or_default(),

@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::app::event::taiwan_stock::{format_decimal_with_commas, holdings};
@@ -145,7 +145,7 @@ impl EventDispatcher {
     ///
     /// 每檔、每個方向各用一個會過期的 Redis 鍵去重（20 天），而不是像月營收那樣共用一個集合：
     /// 共用集合每次寫入都會延長 TTL，已通知過的股票就永遠不會再被提醒。
-    pub(super) async fn handle_foreign_holdings_updated(date: NaiveDate) -> Result<()> {
+    pub(super) async fn handle_foreign_holdings_updated(date: Date) -> Result<()> {
         let alerts = PgForeignHoldingRepository::new()
             .fetch_holding_alerts()
             .await?;
@@ -154,10 +154,7 @@ impl EventDispatcher {
     }
 
     /// 外資持股通知的本體：挑出達門檻且去重期間內沒通知過的持股送出一則，回傳這次通知的檔數。
-    async fn notify_foreign_holdings(
-        date: NaiveDate,
-        alerts: &[HoldingForeignHoldingAlert],
-    ) -> usize {
+    async fn notify_foreign_holdings(date: Date, alerts: &[HoldingForeignHoldingAlert]) -> usize {
         let mut increases = Vec::new();
         let mut decreases = Vec::new();
         let mut keys = Vec::new();
@@ -227,7 +224,7 @@ impl EventDispatcher {
 
     /// 組出外資持股變化通知：增持在前、減持在後，各自依 20 日變化幅度排序。
     fn build_foreign_holding_message(
-        date: NaiveDate,
+        date: Date,
         increases: &[&HoldingForeignHoldingAlert],
         decreases: &[&HoldingForeignHoldingAlert],
     ) -> String {

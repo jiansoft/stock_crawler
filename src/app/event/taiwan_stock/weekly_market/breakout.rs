@@ -2,7 +2,8 @@
 //! 出現後 20 個交易日的勝率與平均還原報酬。
 
 use anyhow::Result;
-use chrono::{Days, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use super::{TOP, WEEK_DAYS};
 use crate::app::event::taiwan_stock::technical_alert::MIN_OUTCOME_SAMPLES;
@@ -15,13 +16,13 @@ use crate::domain::quote::{
 };
 
 /// 歷史表現統計的回看天數（日曆天）。
-const OUTCOME_LOOKBACK_DAYS: u64 = 364;
+const OUTCOME_LOOKBACK_DAYS: i64 = 364;
 
 /// 一週的區間突破。
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct BreakoutSection {
-    pub(super) from: NaiveDate,
-    pub(super) to: NaiveDate,
+    pub(super) from: Date,
+    pub(super) to: Date,
     /// 一週內每天的訊號檔數合計（同一檔不同天各算一次）。
     pub(super) total: i64,
     /// 一週內成交值最大的前 [`TOP`] 檔（同一檔只取成交值最大的那天）。
@@ -33,7 +34,7 @@ pub(super) struct BreakoutSection {
 /// 最近 [`WEEK_DAYS`] 個交易日的區間突破；沒有交易日回 `None`。
 pub(super) async fn breakout_section(
     quote: &(impl ForwardReturnRepository + RankedSignalQuery + TechnicalSignalQuery),
-    date: NaiveDate,
+    date: Date,
 ) -> Result<Option<BreakoutSection>> {
     let dates = quote.fetch_trading_dates(date, WEEK_DAYS).await?;
     let (Some(&to), Some(&from)) = (dates.first(), dates.last()) else {
@@ -63,7 +64,7 @@ pub(super) async fn breakout_section(
     top.truncate(TOP);
     let outcome = match quote
         .fetch_signal_outcomes(
-            to - Days::new(OUTCOME_LOOKBACK_DAYS),
+            to - OUTCOME_LOOKBACK_DAYS.days(),
             to,
             &[RANGE_BREAKOUT_INDICATOR],
         )

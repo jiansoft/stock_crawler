@@ -4,6 +4,7 @@
 //! `moving_average`。
 
 use anyhow::{Context, Result};
+use jiff_sqlx::ToSqlx;
 use sqlx::postgres::PgQueryResult;
 
 use crate::infra::database;
@@ -75,9 +76,9 @@ impl DailyQuote {
             "PriceEarningRatio" = excluded."PriceEarningRatio"
     "#;
         sqlx::query(sql)
-            .bind(self.maximum_price_in_year_date_on)
-            .bind(self.minimum_price_in_year_date_on)
-            .bind(self.date)
+            .bind(self.maximum_price_in_year_date_on.to_sqlx())
+            .bind(self.minimum_price_in_year_date_on.to_sqlx())
+            .bind(self.date.to_sqlx())
             .bind(self.create_time)
             .bind(self.record_time)
             .bind(self.price_earning_ratio)
@@ -157,7 +158,7 @@ impl DailyQuote {
         );
 
         builder.push_values(quotes, |mut row, quote| {
-            row.push_bind(quote.date)
+            row.push_bind(quote.date.to_sqlx())
                 .push_bind(quote.stock_symbol.clone())
                 .push_bind(quote.year)
                 .push_bind(quote.month)
@@ -171,8 +172,8 @@ impl DailyQuote {
                 .push_bind(quote.trading_volume)
                 .push_bind(quote.trade_value)
                 .push_bind(quote.transaction)
-                .push_bind(quote.maximum_price_in_year_date_on)
-                .push_bind(quote.minimum_price_in_year_date_on);
+                .push_bind(quote.maximum_price_in_year_date_on.to_sqlx())
+                .push_bind(quote.minimum_price_in_year_date_on.to_sqlx());
         });
         builder.push(r#" ON CONFLICT (stock_symbol, "Date") DO NOTHING"#);
 

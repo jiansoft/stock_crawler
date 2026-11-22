@@ -1,6 +1,7 @@
 //! 週／月資料：千張大戶、集保級距、400 張欄位與董監持股的檢查。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 
 /// 集保級距落後千張大戶、列數太少、千張大戶最新週有 400 張空值都要列出；沒有級距資料時不附數字。
 #[test]
@@ -52,8 +53,8 @@ fn periodic_tables_must_not_go_stale() {
     // 10-10 往前 9 天是 10-01（剛好到期限不算停更）；55 天前是 08-16，應至少有 8 月。
     snapshot.latest_holder_week = Some(day(1));
     assert!(periodic_table_problems(&snapshot, day(10)).is_empty());
-    snapshot.latest_holder_week = NaiveDate::from_ymd_opt(2026, 9, 30);
-    snapshot.latest_insider_month = NaiveDate::from_ymd_opt(2026, 7, 1);
+    snapshot.latest_holder_week = ymd(2026, 9, 30);
+    snapshot.latest_insider_month = ymd(2026, 7, 1);
     assert_eq!(
         periodic_table_problems(&snapshot, day(10)),
         [

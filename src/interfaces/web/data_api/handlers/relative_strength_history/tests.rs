@@ -1,11 +1,12 @@
 //! `/stocks/{symbol}/relative-strength` handler：個股近 N 個交易日的相對強度走勢的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 
 fn row(day: u32, weaker: i64, universe: i64) -> RelativeStrengthDay {
     RelativeStrengthDay {
         stock_symbol: "2330".to_owned(),
-        date: chrono::NaiveDate::from_ymd_opt(2026, 10, day).expect("合法日期"),
+        date: ymd(2026, 10, day).expect("合法日期"),
         weighted: 12.345,
         rs_score: crate::domain::quote::relative_strength::percentile_score(
             usize::try_from(weaker).expect("測試資料非負"),

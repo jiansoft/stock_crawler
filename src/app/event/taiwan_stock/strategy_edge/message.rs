@@ -1,7 +1,5 @@
 //! 策略優勢檢查的告警訊息、每週摘要文字與日誌。
 
-use chrono::Datelike;
-
 use super::{EdgeRecord, EdgeWindow, RECENT_MONTHS, SLIPPAGE_BPS, Verdict, verdict};
 
 /// 百分比文字（兩位小數）；沒有為「—」。

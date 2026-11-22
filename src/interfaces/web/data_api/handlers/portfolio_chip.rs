@@ -13,7 +13,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use super::{error_response, parse_optional_date, repository_error, round2};
@@ -77,7 +77,7 @@ pub(crate) async fn portfolio_chip(
 /// 沒有任何主力資料時為 `(0, [])`。
 async fn broker_recent(
     repository: &impl HoldingBrokerQuery,
-    date: NaiveDate,
+    date: Date,
     chips: &[HoldingChip],
 ) -> Result<BrokerRecent> {
     let dates = repository

@@ -14,7 +14,7 @@ use std::{
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::technical::{
     RS50_INDICATOR, RS80_INDICATOR, SignalKind, StockTechnicalSignal, TechnicalSignal,
@@ -41,7 +41,7 @@ pub struct RelativeStrengthDay {
     /// 股票代號。
     pub stock_symbol: String,
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 加權報酬（%）。
     pub weighted: f64,
     /// 相對強度分數 1–99。
@@ -101,7 +101,7 @@ pub fn crossings(previous: u8, current: u8) -> Vec<(u8, CrossDirection)> {
 /// 說明附當天名次與計分總數（`scored` 是當天全體）。前一天沒有分數（剛滿 240 個交易日、
 /// 前一天已停止交易超過 [`ACTIVE_DAYS`] 個交易日）的股票不產生訊號。
 pub fn crossing_signals(
-    date: NaiveDate,
+    date: Date,
     previous: &HashMap<String, u8>,
     scored: &[ScoredStock],
 ) -> Vec<StockTechnicalSignal> {
@@ -175,21 +175,21 @@ impl UniverseRow {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BaseDates {
     /// 資料日。
-    pub end: NaiveDate,
+    pub end: Date,
     /// 往前第 20 個交易日。
-    pub d20: NaiveDate,
+    pub d20: Date,
     /// 往前第 60 個交易日。
-    pub d60: NaiveDate,
+    pub d60: Date,
     /// 往前第 120 個交易日。
-    pub d120: NaiveDate,
+    pub d120: Date,
     /// 往前第 240 個交易日。
-    pub d240: NaiveDate,
+    pub d240: Date,
     /// 往前第 [`ACTIVE_DAYS`] 個交易日：之後（不含）到資料日有收盤才列入母體。
-    pub active_since: NaiveDate,
+    pub active_since: Date,
 }
 
 /// 以 `trading_dates`（由新到舊）的第一天為資料日，找出各天期的基準日；交易日不足回 `None`。
-pub fn base_dates(trading_dates: &[NaiveDate]) -> Option<BaseDates> {
+pub fn base_dates(trading_dates: &[Date]) -> Option<BaseDates> {
     let end = *trading_dates.first()?;
     let base = |horizon| super::forward_return::base_date(end, horizon, trading_dates);
     Some(BaseDates {
@@ -275,7 +275,7 @@ pub trait RelativeStrengthQuery: Send + Sync {
     /// 沒有分數。
     async fn fetch_relative_strength(
         &self,
-        until: NaiveDate,
+        until: Date,
         days: u16,
         stock_symbols: &[String],
     ) -> Result<Vec<RelativeStrengthDay>>;
@@ -288,7 +288,7 @@ pub trait RelativeStrengthRepository: Send + Sync {
     /// 替換當天的相對強度穿越訊號（[`CROSSING_INDICATORS`]，其他技術訊號不動），回傳分數寫入列數。
     async fn replace_relative_strength(
         &self,
-        date: NaiveDate,
+        date: Date,
         scored: &[ScoredStock],
         signals: &[StockTechnicalSignal],
     ) -> Result<u64>;
@@ -325,11 +325,7 @@ pub fn parse_crossing(indicator: &str, kind: &str) -> Option<(u8, CrossDirection
 #[async_trait]
 pub trait RelativeStrengthCrossingQuery: Send + Sync {
     /// `from`～`to`（皆含）每檔股票對每個門檻的最後一次穿越，附 `to` 當天的分數。
-    async fn fetch_period_crossings(
-        &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<PeriodCrossing>>;
+    async fn fetch_period_crossings(&self, from: Date, to: Date) -> Result<Vec<PeriodCrossing>>;
 }
 
 /// 全體計分的查詢介面。
@@ -339,10 +335,7 @@ pub trait ScoredUniverseQuery: Send + Sync {
     ///
     /// 最新一個交易日的報酬可能還沒回填（例如收盤匯總尚未跑完），最多往前退一天；兩天都沒有
     /// 資料回 `Ok(None)`。
-    async fn fetch_scored_universe(
-        &self,
-        until: NaiveDate,
-    ) -> Result<Option<(NaiveDate, Vec<ScoredStock>)>>;
+    async fn fetch_scored_universe(&self, until: Date) -> Result<Option<(Date, Vec<ScoredStock>)>>;
 }
 
 #[cfg(test)]

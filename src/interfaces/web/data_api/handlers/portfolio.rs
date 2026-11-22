@@ -9,6 +9,8 @@
 //! 以及最新月營收、最近一季三率與基本面警示（規則在 [`crate::domain::portfolio::health`]）：
 //! 月營收超過 2 個月沒更新、財報落後超過 2 季視為過期。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use axum::{
@@ -16,7 +18,6 @@ use axum::{
     extract::Query,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::institutional_flow::{StreakRow, load_streaks};
@@ -78,7 +79,8 @@ struct PositionRow {
     name: String,
     industry_id: Option<i32>,
     industry_name: String,
-    quote_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    quote_date: Option<Date>,
     closing_price: Option<Decimal>,
     dividend_yield_percent: Option<Decimal>,
     f_score: Option<i16>,
@@ -133,7 +135,7 @@ pub(crate) async fn portfolio_summary(
         Ok(members) => members,
         Err(error) => return repository_error(error),
     };
-    let today = Local::now().date_naive();
+    let today = today();
     let (rows, scores, streaks) = tokio::join!(
         sqlx::query_as::<_, PositionRow>(POSITIONS_SQL)
             .bind(&members)
@@ -169,8 +171,8 @@ pub(crate) async fn portfolio_summary(
 /// 依代號把相對強度分數與連續買賣超天數附到各持股，並填入兩者的資料日。
 fn attach_indicators(
     response: &mut PortfolioSummaryResponse,
-    scores: Option<(NaiveDate, Vec<ScoredStock>)>,
-    streaks: Option<(NaiveDate, Vec<StreakRow>)>,
+    scores: Option<(Date, Vec<ScoredStock>)>,
+    streaks: Option<(Date, Vec<StreakRow>)>,
 ) {
     let mut rs_scores = HashMap::new();
     if let Some((date, scored)) = scores {

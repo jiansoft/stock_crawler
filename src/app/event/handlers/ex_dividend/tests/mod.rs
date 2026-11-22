@@ -1,15 +1,16 @@
 //! 除權息提醒的市場清單與持股預估股利訊息測試。
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 
 #[test]
 fn test_build_holding_dividend_message_groups_by_stock_and_member() {
     use crate::domain::portfolio::entity::StockOwnershipDetail;
-    use chrono::{Local, NaiveDate, TimeZone};
     use rust_decimal_macros::dec;
 
-    let today = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
+    let today = date(2026, 4, 1);
     let stocks = vec![
         StockDividendInfo {
             stock_symbol: "2330".to_string(),
@@ -54,7 +55,10 @@ fn test_build_holding_dividend_message_groups_by_stock_and_member() {
             cumulate_dividends_stock: Decimal::ZERO,
             cumulate_dividends_stock_money: Decimal::ZERO,
             cumulate_dividends_total: Decimal::ZERO,
-            created_time: Local.with_ymd_and_hms(2026, 3, 31, 9, 0, 0).unwrap(),
+            created_time: TaipeiDateTime::from_datetime(
+                jiff::civil::date(2026, 3, 31).at(9, 0, 0, 0),
+            )
+            .expect("合法時間"),
         },
         StockOwnershipDetail {
             serial: 2,
@@ -69,7 +73,10 @@ fn test_build_holding_dividend_message_groups_by_stock_and_member() {
             cumulate_dividends_stock: Decimal::ZERO,
             cumulate_dividends_stock_money: Decimal::ZERO,
             cumulate_dividends_total: Decimal::ZERO,
-            created_time: Local.with_ymd_and_hms(2026, 3, 30, 9, 0, 0).unwrap(),
+            created_time: TaipeiDateTime::from_datetime(
+                jiff::civil::date(2026, 3, 30).at(9, 0, 0, 0),
+            )
+            .expect("合法時間"),
         },
         StockOwnershipDetail {
             serial: 3,
@@ -84,7 +91,10 @@ fn test_build_holding_dividend_message_groups_by_stock_and_member() {
             cumulate_dividends_stock: Decimal::ZERO,
             cumulate_dividends_stock_money: Decimal::ZERO,
             cumulate_dividends_total: Decimal::ZERO,
-            created_time: Local.with_ymd_and_hms(2026, 3, 20, 9, 0, 0).unwrap(),
+            created_time: TaipeiDateTime::from_datetime(
+                jiff::civil::date(2026, 3, 20).at(9, 0, 0, 0),
+            )
+            .expect("合法時間"),
         },
         StockOwnershipDetail {
             serial: 4,
@@ -99,7 +109,10 @@ fn test_build_holding_dividend_message_groups_by_stock_and_member() {
             cumulate_dividends_stock: Decimal::ZERO,
             cumulate_dividends_stock_money: Decimal::ZERO,
             cumulate_dividends_total: Decimal::ZERO,
-            created_time: Local.with_ymd_and_hms(2026, 4, 1, 9, 0, 0).unwrap(),
+            created_time: TaipeiDateTime::from_datetime(
+                jiff::civil::date(2026, 4, 1).at(9, 0, 0, 0),
+            )
+            .expect("合法時間"),
         },
     ];
 
@@ -131,10 +144,9 @@ fn test_build_holding_dividend_message_groups_by_stock_and_member() {
 
 #[test]
 fn test_market_dividend_message_groups_stocks_before_etfs_and_sorts_each_group_by_yield() {
-    use chrono::NaiveDate;
     use rust_decimal_macros::dec;
 
-    let today = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
+    let today = date(2026, 4, 1);
     let mut stocks = vec![
         StockDividendInfo {
             stock_symbol: "0050".to_string(),
@@ -220,7 +232,6 @@ fn test_market_dividend_message_groups_stocks_before_etfs_and_sorts_each_group_b
 /// 一年多次配息的列在殖利率後加上年化殖利率與配息頻率；年配的列不加。
 #[test]
 fn market_dividend_message_shows_annualized_yield_for_frequent_payers() {
-    use chrono::NaiveDate;
     use rust_decimal_macros::dec;
 
     let etf = |symbol: &str, cash: Decimal, price: Decimal, yield_pct: Decimal, quarter: &str| {
@@ -246,7 +257,7 @@ fn market_dividend_message_shows_annualized_yield_for_frequent_payers() {
         etf("2330", dec!(5), dec!(1000), dec!(0.5), ""),
     ];
     let msg = EventDispatcher::build_market_dividend_message(
-        NaiveDate::from_ymd_opt(2026, 10, 6).unwrap(),
+        date(2026, 10, 6),
         "進行除權息的股票與 ETF 如下︰",
         &stocks,
         &FillHints::default(),
@@ -265,10 +276,9 @@ fn market_dividend_message_shows_annualized_yield_for_frequent_payers() {
 #[test]
 fn holding_dividend_message_shows_annualized_yield_for_frequent_payers() {
     use crate::domain::portfolio::entity::StockOwnershipDetail;
-    use chrono::{Local, NaiveDate, TimeZone};
     use rust_decimal_macros::dec;
 
-    let today = NaiveDate::from_ymd_opt(2026, 10, 6).unwrap();
+    let today = date(2026, 10, 6);
     let stocks = vec![StockDividendInfo {
         stock_symbol: "00953B".to_string(),
         name: "群益優選非投等債".to_string(),
@@ -296,7 +306,8 @@ fn holding_dividend_message_shows_annualized_yield_for_frequent_payers() {
         cumulate_dividends_stock: Decimal::ZERO,
         cumulate_dividends_stock_money: Decimal::ZERO,
         cumulate_dividends_total: Decimal::ZERO,
-        created_time: Local.with_ymd_and_hms(2026, 9, 1, 9, 0, 0).unwrap(),
+        created_time: TaipeiDateTime::from_datetime(jiff::civil::date(2026, 9, 1).at(9, 0, 0, 0))
+            .expect("合法時間"),
     }];
 
     let msg = EventDispatcher::build_holding_dividend_message(
@@ -356,7 +367,7 @@ fn market_message_appends_fill_hint() {
         ),
     ];
     let message = EventDispatcher::build_market_dividend_message(
-        chrono::NaiveDate::from_ymd_opt(2026, 11, 2).expect("日期應合法"),
+        date(2026, 11, 2),
         "進行除權息的股票與 ETF 如下︰",
         &stocks,
         &hints,
@@ -371,7 +382,7 @@ fn market_message_appends_fill_hint() {
 /// 除權息當天重算已領股利的年度：當年與下一年（12 月除息、隔年發放）。
 #[test]
 fn payout_years_cover_next_year_payout() {
-    let ex_date = chrono::NaiveDate::from_ymd_opt(2026, 12, 10).expect("合法日期");
+    let ex_date = date(2026, 12, 10);
     assert_eq!(payout_years(ex_date), [2026, 2027]);
 }
 

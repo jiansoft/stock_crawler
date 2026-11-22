@@ -5,7 +5,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -83,25 +84,30 @@ impl OfficialRatioRepository for PgQuoteRepository {
     async fn fetch_dates_to_update(
         &self,
         market_id: i32,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         policy: PePolicy,
-    ) -> Result<Vec<NaiveDate>> {
+    ) -> Result<Vec<Date>> {
         let sql = match policy {
             PePolicy::FillZeroOnly => MISSING_DATES_SQL,
             PePolicy::Authoritative => ALL_DATES_SQL,
         };
-        Ok(sqlx::query_scalar(sql)
+        Ok(sqlx::query_scalar::<_, jiff_sqlx::Date>(sql)
             .bind(market_id)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .fetch_all(database::get_connection())
-            .await?)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(crate::infra::database::jiff_types::from_wire)
+                    .collect::<Vec<_>>()
+            })?)
     }
 
     async fn fill_official_ratios(
         &self,
-        date: NaiveDate,
+        date: Date,
         ratios: &[OfficialRatio],
         policy: PePolicy,
     ) -> Result<u64> {
@@ -116,7 +122,7 @@ impl OfficialRatioRepository for PgQuoteRepository {
             PePolicy::Authoritative => AUTHORITATIVE_FILL_SQL,
         };
         let result = sqlx::query(sql)
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(&symbols)
             .bind(&pe)
             .bind(&pb)

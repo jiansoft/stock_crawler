@@ -1,13 +1,13 @@
 //! `/stocks/{symbol}/valuation-band` handler：本益比、股價淨值比在近幾年的相對位置的測試。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
 use rust_decimal_macros::dec;
 
 use super::*;
 
 fn row(day: u32, close: Decimal, pe: Decimal, pb: Decimal) -> DailyRatio {
     DailyRatio {
-        date: NaiveDate::from_ymd_opt(2026, 4, day).expect("有效日期"),
+        date: ymd(2026, 4, day).expect("有效日期"),
         close,
         price_earning_ratio: pe,
         price_to_book_ratio: pb,

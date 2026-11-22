@@ -23,10 +23,11 @@
 //! BigGo 財經也有董監持股（`/stock/major-shareholder`），但 2026-10 實測上市只到 7 月、
 //! 上櫃停在 2025-11，因此改用官方來源。
 
+use crate::core::util::datetime::ymd;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::core::util::{self, datetime, text};
@@ -78,7 +79,7 @@ pub struct InsiderHolding {
     /// 股票代號。
     pub stock_symbol: String,
     /// 資料月份（該月 1 日）。
-    pub month: NaiveDate,
+    pub month: Date,
     /// 職稱。
     pub title: String,
     /// 姓名。
@@ -238,12 +239,12 @@ fn parse_row(row: &InsiderHoldingRaw) -> Option<InsiderHolding> {
 }
 
 /// 解析民國年月（`11508` → 2026-08-01）。
-fn parse_month(raw: &str) -> Option<NaiveDate> {
+fn parse_month(raw: &str) -> Option<Date> {
     let raw = raw.trim();
     let split = raw.len().checked_sub(2)?;
     let roc_year: i32 = raw.get(..split)?.parse().ok()?;
     let month: u32 = raw.get(split..)?.parse().ok()?;
-    NaiveDate::from_ymd_opt(datetime::roc_year_to_gregorian_year(roc_year), month, 1)
+    ymd(datetime::roc_year_to_gregorian_year(roc_year), month, 1)
 }
 
 #[cfg(test)]

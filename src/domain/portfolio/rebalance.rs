@@ -222,7 +222,7 @@ pub struct DatedEtfComponent {
     /// 成分股與權重。
     pub component: EtfLookThroughComponent,
     /// 成分資料的日期。
-    pub as_of: chrono::NaiveDate,
+    pub as_of: jiff::civil::Date,
 }
 
 /// 計算持股再平衡建議之純函式。

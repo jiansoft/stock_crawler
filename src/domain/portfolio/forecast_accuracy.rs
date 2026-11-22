@@ -3,9 +3,9 @@
 //! 預估的除息日與發放日可能是推估的，不一定和實際日期同一天，所以依（代號, 發放月份）配對，
 //! 與 T23 手動比對腳本相同。發放日還沒到的預估列為待定（`pending`），不計入誤差。
 
+use jiff::civil::Date;
 use std::collections::BTreeMap;
 
-use chrono::{Datelike, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::domain::portfolio::payout::PayoutAllocation;
@@ -19,7 +19,7 @@ pub struct ForecastedPayout {
     /// 股票名稱。
     pub name: String,
     /// 預估發放日。
-    pub pay_date: NaiveDate,
+    pub pay_date: Date,
     /// 預估入帳金額。
     pub amount: Decimal,
     /// 預估依據（`announced`、`estimated` 等）。
@@ -34,7 +34,7 @@ pub struct ActualPayout {
     /// 股票名稱。
     pub name: String,
     /// 發放日。
-    pub pay_date: NaiveDate,
+    pub pay_date: Date,
     /// 入帳金額。
     pub amount: Decimal,
 }
@@ -73,7 +73,7 @@ pub struct AccuracyItem {
     /// 股票名稱。
     pub name: String,
     /// 發放月份的第一天。
-    pub month: NaiveDate,
+    pub month: Date,
     /// 預估依據；同月多筆不同依據時以 `/` 串接（依字母排序），沒有預估時為空字串。
     pub basis: String,
     /// 預估金額合計。
@@ -119,7 +119,7 @@ struct Bucket {
     bases: Vec<String>,
     forecast: Decimal,
     has_forecast: bool,
-    last_pay_date: Option<NaiveDate>,
+    last_pay_date: Option<Date>,
     actual: Decimal,
     has_actual: bool,
 }
@@ -142,8 +142,8 @@ pub fn actual_payouts(allocations: &[PayoutAllocation]) -> Vec<ActualPayout> {
 }
 
 /// 月份的第一天。
-fn month_start(date: NaiveDate) -> NaiveDate {
-    date.with_day(1).unwrap_or(date)
+fn month_start(date: Date) -> Date {
+    date.first_of_month()
 }
 
 /// 依（代號, 發放月份）比對預估與實際入帳；`today` 之後才發放的預估列為待定。
@@ -153,9 +153,9 @@ fn month_start(date: NaiveDate) -> NaiveDate {
 pub fn compare(
     forecasts: &[ForecastedPayout],
     actuals: &[ActualPayout],
-    today: NaiveDate,
+    today: Date,
 ) -> ForecastAccuracy {
-    let mut buckets: BTreeMap<(NaiveDate, String), Bucket> = BTreeMap::new();
+    let mut buckets: BTreeMap<(Date, String), Bucket> = BTreeMap::new();
     for forecast in forecasts {
         let bucket = buckets
             .entry((
@@ -287,7 +287,7 @@ impl MonthAccuracy {
 ///
 /// 待定與快照沒有預估的入帳不計入：前者尚未結算，後者不是預估誤差。
 #[must_use]
-pub fn month_accuracy(accuracy: &ForecastAccuracy, month: NaiveDate) -> Option<MonthAccuracy> {
+pub fn month_accuracy(accuracy: &ForecastAccuracy, month: Date) -> Option<MonthAccuracy> {
     let month = month_start(month);
     let mut summary = MonthAccuracy::default();
     for item in accuracy.items.iter().filter(|item| item.month == month) {

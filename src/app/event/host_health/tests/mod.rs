@@ -1,13 +1,13 @@
 //! 主機健康檢查的測試：共用樣本在這裡，各主題的測試在子模組。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil;
 
 /// 測試用的時間點。
-fn at(day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-    NaiveDate::from_ymd_opt(2026, 10, day)
-        .unwrap()
-        .and_hms_opt(hour, minute, 0)
-        .unwrap()
+fn at(day: u32, hour: u32, minute: u32) -> civil::DateTime {
+    let time = crate::core::util::datetime::hms(hour, minute, 0).unwrap();
+    ymd(2026, 10, day).unwrap().to_datetime(time)
 }
 
 /// 一切正常的樣本：可用 700 MB、swap 用 50%、fsync 12 ms、開機以來沒有供電異常、不在部署期間。

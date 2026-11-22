@@ -1,8 +1,7 @@
 //! 持股通知共用的測試。
 
-use chrono::Local;
-
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::domain::portfolio::view::HoldingView;
 
 /// 持股可能重複（同一檔分次買進），挑出來的代號去重並排序。
@@ -65,7 +64,7 @@ fn stock_name_reads_the_registry_cache() {
             rust_decimal::Decimal::ZERO,
             rust_decimal::Decimal::ZERO,
             rust_decimal::Decimal::ZERO,
-            Local::now(),
+            TaipeiDateTime::now(),
             2,
             24,
             0,

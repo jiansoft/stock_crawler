@@ -1,12 +1,14 @@
 //! 回測報酬歸因（Brinson-Fachler）的測試：超額報酬拆解、現金部位與跨期彙總。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::collections::BTreeMap;
 
 use super::brinson::{Effect, YEAR_INDUSTRIES};
 use super::*;
 
-fn day(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2024, m, d).expect("有效日期")
+fn day(m: u32, d: u32) -> Date {
+    ymd(2024, m, d).expect("有效日期")
 }
 
 fn near(actual: f64, expected: f64) -> bool {

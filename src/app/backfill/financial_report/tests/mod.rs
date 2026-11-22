@@ -1,3 +1,4 @@
+use jiff::civil::date;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -52,7 +53,7 @@ impl FinancialReportRepository for FakeRepository {
                 stock_symbol,
                 fiscal_year: 2026,
                 quarter: "Q3".to_owned(),
-                published_on: chrono::NaiveDate::from_ymd_opt(2026, 11, 10).expect("date"),
+                published_on: date(2026, 11, 10),
             })
             .collect())
     }

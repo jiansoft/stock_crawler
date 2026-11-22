@@ -1,11 +1,13 @@
+use crate::core::util::datetime::ymd;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use jiff::civil::Date;
 
 use super::*;
 use crate::app::ports::{StrategyRebalance, StrategySettlement};
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).unwrap()
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).unwrap()
 }
 
 fn window(median: Option<f64>, etf: Option<f64>, beat: Option<f64>) -> EdgeWindow {
@@ -91,7 +93,7 @@ fn first_trading_day_skips_weekends_and_holidays() {
     assert!(!is_first_trading_day(date(2026, 10, 2), &none));
 
     // 元旦休市：2027-01-01 週五休市、01-04 週一才是第一個交易日。
-    let holidays: HashSet<NaiveDate> = [date(2027, 1, 1)].into_iter().collect();
+    let holidays: HashSet<Date> = [date(2027, 1, 1)].into_iter().collect();
     assert!(!is_first_trading_day(date(2027, 1, 1), &holidays));
     assert!(is_first_trading_day(date(2027, 1, 4), &holidays));
     assert!(!is_first_trading_day(date(2027, 1, 5), &holidays));
@@ -175,11 +177,7 @@ impl StrategyGateway for FakeGateway {
         unreachable!("策略優勢檢查不取換股")
     }
 
-    async fn settlement(
-        &self,
-        _: &str,
-        _: NaiveDate,
-    ) -> anyhow::Result<Option<StrategySettlement>> {
+    async fn settlement(&self, _: &str, _: Date) -> anyhow::Result<Option<StrategySettlement>> {
         unreachable!("策略優勢檢查不做結算")
     }
 
@@ -252,11 +250,7 @@ async fn default_offset_edge_is_unsupported() {
             Ok(None)
         }
 
-        async fn settlement(
-            &self,
-            _: &str,
-            _: NaiveDate,
-        ) -> anyhow::Result<Option<StrategySettlement>> {
+        async fn settlement(&self, _: &str, _: Date) -> anyhow::Result<Option<StrategySettlement>> {
             Ok(None)
         }
     }

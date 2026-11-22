@@ -17,7 +17,7 @@
 //! 因此**只有上市公司**能從這裡取得所屬期間，上櫃仍需仰賴既有來源。
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
@@ -77,9 +77,9 @@ pub struct DividendAllotment {
     /// 所屬季度：空字串代表年度，`Q1`～`Q4` 為單季，`H1`／`H2` 為上下半年。
     pub quarter: String,
     /// 股利所屬期間起日。
-    pub period_start: Option<NaiveDate>,
+    pub period_start: Option<Date>,
     /// 股利所屬期間迄日。
-    pub period_end: Option<NaiveDate>,
+    pub period_end: Option<Date>,
     /// 盈餘現金股利（元/股）。
     pub earnings_cash: Decimal,
     /// 公積現金股利（元/股），含法定盈餘公積與資本公積。
@@ -162,7 +162,7 @@ fn parse_allotments(rows: Vec<DividendAllotmentRaw>) -> Vec<DividendAllotment> {
 ///
 /// 任一端解析失敗時該端為 `None`，不影響另一端，也不會讓整列被丟棄——
 /// 期間只是季別判定的備援，主要判定仍以「股利所屬年(季)度」文字為準。
-fn parse_period(period: &str) -> (Option<NaiveDate>, Option<NaiveDate>) {
+fn parse_period(period: &str) -> (Option<Date>, Option<Date>) {
     let mut parts = period.trim().split('~');
     let start = parts
         .next()
@@ -184,8 +184,8 @@ fn parse_period(period: &str) -> (Option<NaiveDate>, Option<NaiveDate>) {
 /// 空字串在資料表裡代表「年度」，是個有意義的值，猜錯會直接寫錯資料列。
 fn resolve_quarter(
     period_kind: &str,
-    period_start: Option<NaiveDate>,
-    period_end: Option<NaiveDate>,
+    period_start: Option<Date>,
+    period_end: Option<Date>,
 ) -> Option<String> {
     match period_kind.trim() {
         "年度" => return Some(String::new()),
@@ -202,9 +202,7 @@ fn resolve_quarter(
 }
 
 /// 由所屬期間的起訖月份推算季別（`resolve_quarter` 的備援路徑）。
-fn quarter_from_period(start: Option<NaiveDate>, end: Option<NaiveDate>) -> Option<String> {
-    use chrono::Datelike;
-
+fn quarter_from_period(start: Option<Date>, end: Option<Date>) -> Option<String> {
     let (Some(start), Some(end)) = (start, end) else {
         return None;
     };

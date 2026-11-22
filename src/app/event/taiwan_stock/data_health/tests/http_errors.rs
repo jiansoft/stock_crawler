@@ -1,9 +1,9 @@
 //! 本週 HTTP 異常：解析 warn／error 日誌的 http 事件、依網域加總、排名與門檻警示。
 
-use super::*;
 use crate::app::event::taiwan_stock::data_health::http_errors::{
     HostIssues, http_issue_line, parse_http_line, weekly_http_issues,
 };
+use jiff::civil::date;
 
 #[test]
 fn parse_http_line_classifies_events() {
@@ -78,11 +78,7 @@ fn weekly_http_issues_ranks_hosts() {
     )
     .expect("寫入");
 
-    let hosts = weekly_http_issues(
-        &dir,
-        NaiveDate::from_ymd_opt(2026, 10, 24).expect("日期"),
-        NaiveDate::from_ymd_opt(2026, 10, 30).expect("日期"),
-    );
+    let hosts = weekly_http_issues(&dir, date(2026, 10, 24), date(2026, 10, 30));
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(hosts.len(), 6);
     assert_eq!(

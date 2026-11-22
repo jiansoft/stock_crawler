@@ -1,5 +1,6 @@
 //! 富邦證券（MoneyDJ）主力進出的測試；連外的測試標 #[ignore]。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -24,7 +25,7 @@ fn parse_reads_both_sides_and_totals() {
     let flow = parse(FIXTURE_2884, "2884").expect("解析 fixture");
 
     assert_eq!(flow.stock_symbol, "2884");
-    assert_eq!(flow.date, NaiveDate::from_ymd_opt(2026, 10, 5).unwrap());
+    assert_eq!(flow.date, date(2026, 10, 5));
     assert_eq!(flow.buyers.len(), 15);
     assert_eq!(flow.sellers.len(), 15);
     assert_eq!(

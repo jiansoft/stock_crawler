@@ -1,4 +1,6 @@
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::date;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -23,7 +25,7 @@ async fn test_dispatch_stock_registered_event() {
         name: "台積電".to_string(),
         market_id: 2,
         industry_id: 24,
-        occurred_at: chrono::Local::now(),
+        occurred_at: TaipeiDateTime::now(),
     }];
 
     dispatcher.dispatch_async(events).await;
@@ -63,7 +65,7 @@ async fn test_dispatch_identity_changed_event() {
         new_market_id: 3,
         old_industry_id: 24,
         new_industry_id: 25,
-        occurred_at: chrono::Local::now(),
+        occurred_at: TaipeiDateTime::now(),
     }];
 
     dispatcher.dispatch_async(events).await;
@@ -95,7 +97,7 @@ async fn test_dispatch_nav_updated_event() {
         symbol: "2330".to_string(),
         old_nav: rust_decimal_macros::dec!(90.0),
         new_nav: rust_decimal_macros::dec!(95.12),
-        occurred_at: chrono::Local::now(),
+        occurred_at: TaipeiDateTime::now(),
     }];
 
     dispatcher.dispatch_async(events).await;
@@ -124,10 +126,10 @@ async fn test_dispatch_stock_index_updated_event() {
     let dispatcher = EventDispatcher::new_with_handler(Some(fake_handler(event_log.clone())), 10);
 
     let events = vec![DomainEvent::StockIndexUpdated {
-        date: chrono::NaiveDate::from_ymd_opt(2026, 6, 7).unwrap(),
+        date: date(2026, 6, 7),
         index: rust_decimal_macros::dec!(16500.25),
         change: rust_decimal_macros::dec!(120.50),
-        occurred_at: chrono::Local::now(),
+        occurred_at: TaipeiDateTime::now(),
     }];
 
     dispatcher.dispatch_async(events).await;
@@ -142,7 +144,7 @@ async fn test_dispatch_stock_index_updated_event() {
         ..
     } = log[0]
     {
-        assert_eq!(date, chrono::NaiveDate::from_ymd_opt(2026, 6, 7).unwrap());
+        assert_eq!(date, jiff::civil::date(2026, 6, 7));
         assert_eq!(index, rust_decimal_macros::dec!(16500.25));
         assert_eq!(change, rust_decimal_macros::dec!(120.50));
     } else {
@@ -161,7 +163,7 @@ async fn test_dispatch_multiple_events() {
             name: "台積電".to_string(),
             market_id: 2,
             industry_id: 24,
-            occurred_at: chrono::Local::now(),
+            occurred_at: TaipeiDateTime::now(),
         },
         DomainEvent::StockIdentityChanged {
             symbol: "2330".to_string(),
@@ -171,7 +173,7 @@ async fn test_dispatch_multiple_events() {
             new_market_id: 3,
             old_industry_id: 24,
             new_industry_id: 25,
-            occurred_at: chrono::Local::now(),
+            occurred_at: TaipeiDateTime::now(),
         },
     ];
 
@@ -208,7 +210,7 @@ async fn test_handler_error_does_not_panic() {
         name: "測試股".to_string(),
         market_id: 1,
         industry_id: 1,
-        occurred_at: chrono::Local::now(),
+        occurred_at: TaipeiDateTime::now(),
     }];
 
     // 即使 handler 回傳錯誤，dispatch 本身不應 panic
@@ -223,7 +225,7 @@ async fn test_handler_error_does_not_panic() {
 #[tokio::test]
 async fn default_handler_buffers_messages_by_event_type() {
     let debouncer = Arc::new(TelegramDebouncer::new());
-    let now = chrono::Local::now();
+    let now = TaipeiDateTime::now();
     let events = vec![
         DomainEvent::StockRegistered {
             symbol: "79979".to_string(),
@@ -249,7 +251,7 @@ async fn default_handler_buffers_messages_by_event_type() {
             occurred_at: now,
         },
         DomainEvent::StockIndexUpdated {
-            date: chrono::NaiveDate::from_ymd_opt(2024, 12, 10).expect("合法日期"),
+            date: date(2024, 12, 10),
             index: rust_decimal_macros::dec!(23000.5),
             change: rust_decimal_macros::dec!(-12.3),
             occurred_at: now,

@@ -3,13 +3,13 @@
 //! 快照與入帳由 [`crate::infra::database::repository::portfolio::forecast::load_accuracy_inputs`]
 //! 讀取，比對規則在 [`crate::domain::portfolio::forecast_accuracy`]。
 
+use crate::core::util::datetime::today;
 use axum::{
     Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Local;
 
 use super::{error_response, parse_optional_date, repository_error};
 use crate::domain::portfolio::forecast_accuracy::{self, ForecastAccuracy};
@@ -46,7 +46,7 @@ pub(crate) async fn dividend_forecast_accuracy(
             Err(error) => return repository_error(error),
         },
     };
-    let today = Local::now().date_naive();
+    let today = today();
     let accuracy = match snapshot_date {
         Some(date) => match forecast::load_accuracy_inputs(date, &view, today).await {
             Ok(inputs) => forecast_accuracy::compare(&inputs.forecasts, &inputs.actuals, today),

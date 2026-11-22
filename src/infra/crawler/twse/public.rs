@@ -1,5 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{Datelike, Local, NaiveDate, TimeDelta};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -27,15 +29,15 @@ pub struct Public {
     /// 發行市場
     pub market: String,
     /// 申購開始日
-    pub offering_start_date: Option<NaiveDate>,
+    pub offering_start_date: Option<Date>,
     /// 申購結束日
-    pub offering_end_date: Option<NaiveDate>,
+    pub offering_end_date: Option<Date>,
     /// 抽籤日期
-    pub drawing_date: Option<NaiveDate>,
+    pub drawing_date: Option<Date>,
     /// 承銷價
     pub offering_price: Option<Decimal>,
     /// 撥券日期
-    pub issue_date: Option<NaiveDate>,
+    pub issue_date: Option<Date>,
 }
 
 impl Keyable for Public {
@@ -73,13 +75,13 @@ impl Public {
 ///
 /// 當 HTTP 請求或 JSON 解析失敗時回傳錯誤。
 pub async fn visit() -> Result<Vec<Public>> {
-    let now = Local::now();
-    let date = now + TimeDelta::try_days(5).unwrap();
+    let now = TaipeiDateTime::now();
+    let date = now + 5.days();
     let url = format!(
         "https://www.{host}/rwd/zh/announcement/publicForm?date={year}&response=json&_={time}",
         host = twse::HOST,
         year = date.year(),
-        time = now.timestamp_millis()
+        time = now.timestamp().as_millisecond()
     );
     let res = util::http::get_json::<PublicFormResponse>(&url).await?;
     let mut result: Vec<Public> = Vec::with_capacity(2048);
@@ -107,7 +109,7 @@ pub async fn visit() -> Result<Vec<Public>> {
 ///
 /// 這是一個「純函式」——輸入只有已反序列化的資料列，不做任何網路 I/O，
 /// 可直接用組好的資料驗證（見下方測試）。民國日期（`115/07/21`）
-/// 在這裡轉成西元 `NaiveDate`；承銷價無法解析（如 `-`）時為 `None`。
+/// 在這裡轉成西元 `Date`；承銷價無法解析（如 `-`）時為 `None`。
 fn map_public_items(data: Vec<Vec<String>>) -> Vec<Public> {
     let mut result: Vec<Public> = Vec::with_capacity(data.len());
 

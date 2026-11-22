@@ -20,7 +20,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 與傳輸層無關的股票基本資料載體。
 ///
@@ -92,7 +92,7 @@ pub struct StrategyHolding {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrategyRebalance {
     /// 換股日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 持有天數（交易日），也就是距下次換股的交易日數。
     pub hold_days: u16,
     /// 換股日之後到最新交易日經過的交易日數（換股當天為 0）。
@@ -121,9 +121,9 @@ pub struct StrategyRebalance {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrategySettlement {
     /// 上一期的換股日。
-    pub start: NaiveDate,
+    pub start: Date,
     /// 上一期的結束日（這次換股日或最新交易日）。
-    pub end: NaiveDate,
+    pub end: Date,
     /// 上一期策略部位的報酬（%）；查不到日線為 `None`。
     pub strategy_return: Option<f64>,
     /// 上一期 0050 的報酬（%）。
@@ -133,7 +133,7 @@ pub struct StrategySettlement {
     /// 上一期的 0050 核心部位（%）。
     pub etf_weight: u8,
     /// 第一次記錄的換股日。
-    pub tracked_from: NaiveDate,
+    pub tracked_from: Date,
     /// 追蹤以來已結束的期數（含上一期）。
     pub periods: usize,
     /// 追蹤以來各期組合報酬連乘的累積報酬（%）；有任一期查不到為 `None`。
@@ -147,9 +147,9 @@ pub struct StrategySettlement {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrategyOffsetEdge {
     /// 實際起日。
-    pub from: NaiveDate,
+    pub from: Date,
     /// 實際迄日（最近一個有相對強度的交易日）。
-    pub to: NaiveDate,
+    pub to: Date,
     /// 跑了幾個偏移。
     pub offsets: usize,
     /// 各偏移扣成本年化報酬（%）的中位數；沒有任何一期為 `None`。
@@ -169,11 +169,8 @@ pub trait StrategyGateway: Send + Sync {
 
     /// 依 `preset_name` 的換股紀錄，結算 `date` 之前最後一次換股的那一期（持有到 `date` 或最新交易日）
     /// 與追蹤以來的累積表現；`date` 之前沒有紀錄時回 `None`。
-    async fn settlement(
-        &self,
-        preset_name: &str,
-        date: NaiveDate,
-    ) -> Result<Option<StrategySettlement>>;
+    async fn settlement(&self, preset_name: &str, date: Date)
+    -> Result<Option<StrategySettlement>>;
 
     /// 以 `query`（必須指定 `from`）把換股日偏移都跑一遍，回傳扣成本年化報酬的分布摘要。
     /// 預設回錯誤（不支援偏移掃描的實作）。

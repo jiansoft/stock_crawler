@@ -1,6 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 use std::fmt::Write;
 
-use chrono::{DateTime, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::{
@@ -23,7 +24,7 @@ pub use query::{
     makeup_for_the_lack_daily_quotes,
 };
 
-#[derive(sqlx::Type, sqlx::FromRow, Default, Debug, Clone)]
+#[derive(sqlx::FromRow, Default, Debug, Clone)]
 /// 每日股票報價資料模型。
 ///
 /// 對應資料表為 `DailyQuotes`，包含開高低收、成交量、
@@ -32,15 +33,18 @@ pub use query::{
 /// 以兼容舊資料欄位與新欄位。
 pub struct DailyQuote {
     /// 年內最高價對應日期。
-    pub maximum_price_in_year_date_on: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub maximum_price_in_year_date_on: Date,
     /// 年內最低價對應日期。
-    pub minimum_price_in_year_date_on: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub minimum_price_in_year_date_on: Date,
     /// 交易日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 建立時間。
-    pub create_time: DateTime<Local>,
+    pub create_time: TaipeiDateTime,
     /// 最後更新時間（資料寫入時間）。
-    pub record_time: DateTime<Local>,
+    pub record_time: TaipeiDateTime,
     /// 本益比
     pub price_earning_ratio: Decimal,
     /// 60 日均線。
@@ -145,7 +149,7 @@ impl CopyIn for DailyQuote {
 
 impl Keyable for DailyQuote {
     fn key(&self) -> String {
-        format!("{}-{}", self.date.format("%Y%m%d"), self.stock_symbol)
+        format!("{}-{}", self.date.strftime("%Y%m%d"), self.stock_symbol)
     }
 
     fn key_with_prefix(&self) -> String {
@@ -159,6 +163,10 @@ impl DailyQuote {
         let security_code = security_code.into();
         DailyQuote {
             stock_symbol: security_code,
+            // 維持 chrono 時代的預設日期（jiff 的 Date 預設是 0000-01-01）
+            maximum_price_in_year_date_on: datetime::EPOCH_DATE,
+            minimum_price_in_year_date_on: datetime::EPOCH_DATE,
+            date: datetime::EPOCH_DATE,
             ..Default::default()
         }
     }
@@ -277,10 +285,10 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
             _ => {}
         }
 
-        e.create_time = Local::now();
+        e.create_time = TaipeiDateTime::now();
         let default_date = datetime::parse_date("1970-01-01T00:00:00Z");
-        e.maximum_price_in_year_date_on = default_date.date_naive();
-        e.minimum_price_in_year_date_on = default_date.date_naive();
+        e.maximum_price_in_year_date_on = default_date.date();
+        e.minimum_price_in_year_date_on = default_date.date();
 
         e
     }

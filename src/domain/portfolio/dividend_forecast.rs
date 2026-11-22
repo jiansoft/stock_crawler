@@ -20,10 +20,10 @@
 //! 只算現金股利，不含股票股利，也不扣二代健保補充保費與所得稅；尚未除息的配息假設目前
 //! 持股會一路持有到除息日。
 
-use std::collections::HashMap;
-
-use chrono::{Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
+use std::collections::HashMap;
 
 mod entitlement;
 mod schedule;
@@ -34,7 +34,7 @@ use self::schedule::{
 };
 
 /// 沒有發放日時，以除息日後幾天推估發放日（台股多在除息後 3～5 週發放）。
-pub const PAYABLE_LAG_DAYS: u64 = 30;
+pub const PAYABLE_LAG_DAYS: i64 = 30;
 /// 推估的除息日與已公告配息相差幾天內視為同一期。
 pub const MATCH_WINDOW_DAYS: i64 = 60;
 /// 月配依間隔排出的除息日與既有配息相差幾天內視為同一期。
@@ -65,9 +65,9 @@ pub struct DividendEvent {
     /// 每股現金股利（元）。
     pub cash_per_share: Decimal,
     /// 除息日；尚未公布為 `None`。
-    pub ex_date: Option<NaiveDate>,
+    pub ex_date: Option<Date>,
     /// 發放日；尚未公布為 `None`。
-    pub payable_date: Option<NaiveDate>,
+    pub payable_date: Option<Date>,
 }
 
 /// 預估依據。
@@ -115,9 +115,9 @@ pub struct ForecastItem {
     /// 持有股數。
     pub shares: i64,
     /// 除息日（推估者為去年同期加一年）。
-    pub ex_date: NaiveDate,
+    pub ex_date: Date,
     /// 發放日（已公告者為公告日，否則為推估）。
-    pub pay_date: NaiveDate,
+    pub pay_date: Date,
     /// 每股現金股利。
     pub cash_per_share: Decimal,
     /// 預估入帳金額＝股數 × 每股現金股利。
@@ -143,9 +143,9 @@ pub struct MonthTotal {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Forecast {
     /// 預估起日（不含）。
-    pub from: NaiveDate,
+    pub from: Date,
     /// 預估迄日（含）。
-    pub to: NaiveDate,
+    pub to: Date,
     /// 預估期間合計。
     pub total: f64,
     /// 其中已公告（含金額已公告）的金額。
@@ -168,14 +168,15 @@ pub fn forecast(
     holdings: &[Holding],
     events: &[DividendEvent],
     entitlements: &[Entitlement],
-    today: NaiveDate,
+    today: Date,
     months: u32,
 ) -> Forecast {
     let end = today
-        .checked_add_months(Months::new(months))
+        .checked_add(i64::from(months).months())
+        .ok()
         .unwrap_or(today);
-    let lookback = today.checked_sub_months(Months::new(12)).unwrap_or(today);
-    let in_window = |date: NaiveDate| date > today && date <= end;
+    let lookback = today.checked_sub(12.months()).ok().unwrap_or(today);
+    let in_window = |date: Date| date > today && date <= end;
 
     let mut items = Vec::new();
     for holding in holdings.iter().filter(|holding| holding.shares > 0) {
@@ -230,9 +231,9 @@ pub fn forecast(
                 continue;
             }
             let already_announced = dated.iter().any(|event| {
-                event
-                    .ex_date
-                    .is_some_and(|ex| (ex - ex_date).num_days().abs() <= MATCH_WINDOW_DAYS)
+                event.ex_date.is_some_and(|ex| {
+                    i64::from((ex - ex_date).get_days()).abs() <= MATCH_WINDOW_DAYS
+                })
             });
             if already_announced {
                 continue;
@@ -262,7 +263,8 @@ pub fn forecast(
             continue;
         };
         for (ex_date, pay_date) in cadence_schedule(&periodic, today, end) {
-            let near = |other: NaiveDate| (other - ex_date).num_days().abs() <= CADENCE_WINDOW_DAYS;
+            let near =
+                |other: Date| i64::from((other - ex_date).get_days()).abs() <= CADENCE_WINDOW_DAYS;
             let covered = dated.iter().any(|event| event.ex_date.is_some_and(near))
                 || items
                     .iter()

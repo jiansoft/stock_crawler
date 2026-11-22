@@ -1,7 +1,8 @@
 //! 上櫃股票減資恢復買賣參考價格的測試；連外的測試標 #[ignore]。
 
 use super::*;
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 /// include_str! 的路徑相對於本檔案（tpex/capital_reduction/tests.rs）→ tpex/testdata/。
@@ -12,8 +13,8 @@ fn parse_fixture() -> Vec<CorporateAction> {
     parse_capital_reductions(response)
 }
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("測試日期應合法")
 }
 
 /// fixture 的 5 列會收斂成 3 筆：3710 重複一次，4529 尚未恢復交易。

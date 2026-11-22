@@ -1,5 +1,6 @@
 //! ETF 資金流向一段：流入／流出排序與數量上限、持有 ETF 的淨申購與折溢價、整則訊息的標題日期。
 
+use crate::core::util::datetime::ymd;
 use std::collections::BTreeSet;
 
 use rust_decimal_macros::dec;
@@ -133,7 +134,7 @@ fn holding(rank: i16, symbol: &str, name: &str, weight: rust_decimal::Decimal) -
 #[tokio::test]
 async fn held_etf_with_new_holding_period_lists_changes() {
     let period = |month, rows: Vec<EtfHoldingRecord>| EtfHoldingPeriod {
-        as_of: NaiveDate::from_ymd_opt(2026, month, 1).expect("合法日期"),
+        as_of: ymd(2026, month, 1).expect("合法日期"),
         holdings: rows,
     };
     let repo = RecordingEtfRepository {

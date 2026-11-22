@@ -1,11 +1,13 @@
 //! 填息（填權）分析：除權息後股價回到除權息前一日收盤價花了幾個交易日的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 9, d).expect("日期應合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 9, d).expect("日期應合法")
 }
 
 fn closes(prices: &[(u32, Decimal)]) -> Vec<DailyClose> {

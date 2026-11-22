@@ -1,5 +1,8 @@
 //! 收盤後回填未來報酬的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -10,23 +13,18 @@ use super::*;
 /// 交易日固定、記錄寫入參數的假倉儲；`fail_horizon` 的天期寫入時回錯誤。
 #[derive(Default)]
 struct FakeRepo {
-    dates: Vec<NaiveDate>,
-    writes: Mutex<Vec<(NaiveDate, NaiveDate, usize)>>,
+    dates: Vec<Date>,
+    writes: Mutex<Vec<(Date, Date, usize)>>,
     fail_horizon: Option<usize>,
 }
 
 #[async_trait]
 impl ForwardReturnRepository for FakeRepo {
-    async fn fetch_trading_dates(&self, _until: NaiveDate, count: usize) -> Result<Vec<NaiveDate>> {
+    async fn fetch_trading_dates(&self, _until: Date, count: usize) -> Result<Vec<Date>> {
         Ok(self.dates.iter().copied().take(count).collect())
     }
 
-    async fn upsert_forward_returns(
-        &self,
-        base: NaiveDate,
-        end: NaiveDate,
-        horizon: usize,
-    ) -> Result<u64> {
+    async fn upsert_forward_returns(&self, base: Date, end: Date, horizon: usize) -> Result<u64> {
         if self.fail_horizon == Some(horizon) {
             return Err(anyhow!("連線中斷"));
         }
@@ -39,12 +37,12 @@ impl ForwardReturnRepository for FakeRepo {
 }
 
 /// 由新到舊連續 `count` 個交易日（每天一個），第一個是 `end`。
-fn calendar(end: NaiveDate, count: u64) -> Vec<NaiveDate> {
-    (0..count).map(|i| end - chrono::Days::new(i)).collect()
+fn calendar(end: Date, count: u64) -> Vec<Date> {
+    (0..count).map(|i| end - (i as i64).days()).collect()
 }
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("有效日期")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("有效日期")
 }
 
 /// 交易日足夠時每個天期都回填，基準日是往前第 N 個交易日。
@@ -60,11 +58,11 @@ async fn run_fills_every_horizon() {
     assert_eq!(
         writes,
         [
-            (end - chrono::Days::new(5), end, 5),
-            (end - chrono::Days::new(20), end, 20),
-            (end - chrono::Days::new(60), end, 60),
-            (end - chrono::Days::new(120), end, 120),
-            (end - chrono::Days::new(240), end, 240),
+            (end - 5.days(), end, 5),
+            (end - 20.days(), end, 20),
+            (end - 60.days(), end, 60),
+            (end - 120.days(), end, 120),
+            (end - 240.days(), end, 240),
         ]
     );
 }

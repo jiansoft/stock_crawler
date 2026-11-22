@@ -1,14 +1,24 @@
-use chrono::{DateTime, Datelike, Local, NaiveDate, TimeDelta, Weekday};
+use jiff::Timestamp;
+use jiff::ToSpan;
+use jiff::civil::{Date, Weekday};
 
 use crate::core::declare::Quarter;
 
+/// 以 UTC（`Z` 結尾）序列化 `Timestamp`，格式與 chrono 的 `DateTime<Utc>` 相同。
+pub mod rfc3339_utc;
 mod taipei_time;
 
-pub use self::taipei_time::{TaipeiDateTime, taipei, today, ymd};
+pub use self::taipei_time::{TaipeiDateTime, hms, taipei, today, ymd};
+
+/// 1970-01-01：chrono `NaiveDate::default()` 的值。
+///
+/// jiff 的 `Date::default()` 是 `0000-01-01`；原本依賴預設日期、而且會寫進資料庫的欄位
+/// （例如年內最高價日期尚未算出時）明確用這個值，維持原本的資料。
+pub const EPOCH_DATE: Date = jiff::civil::date(1970, 1, 1);
 
 /// 提供「是否為週末」判斷能力的 trait。
 ///
-/// 目前專門實作於 [`DateTime<Local>`]，用來統一專案內
+/// 目前專門實作於 [`TaipeiDateTime`]，用來統一專案內
 /// 對六、日的判定方式。
 pub trait Weekend {
     /// 判斷日期是否落在週末。
@@ -17,7 +27,7 @@ pub trait Weekend {
     fn is_weekend(&self) -> bool;
 }
 
-impl Weekend for DateTime<Local> {
+impl Weekend for TaipeiDateTime {
     /// 將星期六與星期日視為週末。
     ///
     /// 此實作僅依星期判斷，不處理國定假日、補班日或其他交易所休市規則。
@@ -25,14 +35,13 @@ impl Weekend for DateTime<Local> {
     /// # 範例
     ///
     /// ```ignore
-    /// use chrono::{DateTime, Local};
-    /// use stock_crawler::util::datetime::Weekend;
+    /// use stock_crawler::core::util::datetime::{TaipeiDateTime, Weekend};
     ///
-    /// let date: DateTime<Local> = "2023-03-25T12:00:00".parse().unwrap();
+    /// let date: TaipeiDateTime = "2023-03-25T12:00:00+08:00".parse().unwrap();
     /// assert!(date.is_weekend());
     /// ```
     fn is_weekend(&self) -> bool {
-        matches!(self.weekday(), Weekday::Sat | Weekday::Sun)
+        matches!(self.weekday(), Weekday::Saturday | Weekday::Sunday)
     }
 }
 
@@ -128,14 +137,13 @@ pub fn month_to_quarter(month: u32) -> &'static str {
 /// # 範例
 ///
 /// ```ignore
-/// use chrono::Local;
-/// use stock_crawler::util::datetime::latest_published_quarter_for_listed_and_otc;
+/// use stock_crawler::core::util::datetime::{TaipeiDateTime, latest_published_quarter_for_listed_and_otc};
 ///
-/// let report_quarter = latest_published_quarter_for_listed_and_otc(Local::now());
+/// let report_quarter = latest_published_quarter_for_listed_and_otc(TaipeiDateTime::now());
 /// println!("{} {}", report_quarter.year, report_quarter.quarter);
 /// ```
-pub fn latest_published_quarter_for_listed_and_otc(now: DateTime<Local>) -> ReportQuarter {
-    latest_published_quarter_for_listed_and_otc_by_date(now.date_naive())
+pub fn latest_published_quarter_for_listed_and_otc(now: TaipeiDateTime) -> ReportQuarter {
+    latest_published_quarter_for_listed_and_otc_by_date(now.date())
 }
 
 /// 取得上市/上櫃季 EPS 流程目前應處理的季度清單。
@@ -151,8 +159,8 @@ pub fn latest_published_quarter_for_listed_and_otc(now: DateTime<Local>) -> Repo
 ///
 /// 這樣可以在大多數公司提早上傳季報時，先行把已公告資料收進資料庫，
 /// 等正式截止日過後再自然切換主目標季度。
-pub fn eps_report_quarter_targets_for_listed_and_otc(now: DateTime<Local>) -> Vec<ReportQuarter> {
-    eps_report_quarter_targets_for_listed_and_otc_by_date(now.date_naive())
+pub fn eps_report_quarter_targets_for_listed_and_otc(now: TaipeiDateTime) -> Vec<ReportQuarter> {
+    eps_report_quarter_targets_for_listed_and_otc_by_date(now.date())
 }
 
 /// 取得上市/上櫃 Yahoo 補欄位流程目前應處理的季度清單。
@@ -160,9 +168,9 @@ pub fn eps_report_quarter_targets_for_listed_and_otc(now: DateTime<Local>) -> Ve
 /// 此函式沿用較保守的預抓策略，只有在法定截止日前一段時間內，
 /// 才會將下一季納入處理清單，避免 Yahoo 財務欄位來源過早查詢時雜訊過多。
 pub fn backfill_report_quarter_targets_for_listed_and_otc(
-    now: DateTime<Local>,
+    now: TaipeiDateTime,
 ) -> Vec<ReportQuarter> {
-    backfill_report_quarter_targets_for_listed_and_otc_by_date(now.date_naive())
+    backfill_report_quarter_targets_for_listed_and_otc_by_date(now.date())
 }
 
 /// 解析 RFC 3339 日期字串並轉成本地時區時間。
@@ -176,15 +184,13 @@ pub fn backfill_report_quarter_targets_for_listed_and_otc(
 ///
 /// # 回傳值
 ///
-/// 解析成功時回傳對應的 [`DateTime<Local>`]；失敗時回傳預設時間。
-pub fn parse_date(date_str: &str) -> DateTime<Local> {
-    match DateTime::parse_from_rfc3339(date_str) {
-        Ok(dt) => dt.with_timezone(&Local),
+/// 解析成功時回傳對應的 [`TaipeiDateTime`]；失敗時回傳預設時間。
+pub fn parse_date(date_str: &str) -> TaipeiDateTime {
+    match date_str.parse::<Timestamp>() {
+        Ok(timestamp) => TaipeiDateTime::from_timestamp(timestamp),
         Err(why) => {
             tracing::error!("Failed to parse date string '{}': {}", date_str, why);
-            DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z")
-                .unwrap()
-                .with_timezone(&Local)
+            TaipeiDateTime::from_timestamp(Timestamp::UNIX_EPOCH)
         }
     }
 }
@@ -203,13 +209,13 @@ pub fn gregorian_year_to_roc_year(gregorian_year: i32) -> i32 {
     gregorian_year - 1911
 }
 
-/// 解析民國日期字串並轉成西元曆的 [`NaiveDate`]。
+/// 解析民國日期字串並轉成西元曆的 [`Date`]。
 ///
 /// 此函式接受 `YYY/MM/DD` 或 `YYY-MM-DD` 格式的民國日期，例如 `113/08/14`，
 /// 並將年份轉成西元後回傳。
 ///
 /// 若字串格式不正確、任一欄位無法解析，或日期本身不存在，則回傳 `None`。
-pub fn parse_taiwan_date(date_str: &str) -> Option<NaiveDate> {
+pub fn parse_taiwan_date(date_str: &str) -> Option<Date> {
     let split_date: Vec<&str> = date_str.split(['/', '-']).collect();
     if split_date.len() != 3 {
         return None;
@@ -219,10 +225,10 @@ pub fn parse_taiwan_date(date_str: &str) -> Option<NaiveDate> {
     let month = parse_date_part::<u32>(split_date[1])?;
     let day = parse_date_part::<u32>(split_date[2])?;
 
-    NaiveDate::from_ymd_opt(year, month, day)
+    ymd(year, month, day)
 }
 
-/// 解析短格式民國日期字串（無分隔符號）並轉成西元曆的 [`NaiveDate`]。
+/// 解析短格式民國日期字串（無分隔符號）並轉成西元曆的 [`Date`]。
 ///
 /// 此函式專門處理台灣證券交易所（TWSE）OpenAPI 格式中常見的 `YYYMMDD` 字串。
 /// 例如：`1150409` 代表民國 115 年 4 月 9 日，會被轉換為 `2026-04-09`。
@@ -233,7 +239,7 @@ pub fn parse_taiwan_date(date_str: &str) -> Option<NaiveDate> {
 ///
 /// # 回傳值
 ///
-/// * `Some(NaiveDate)` - 解析成功且日期合法。
+/// * `Some(Date)` - 解析成功且日期合法。
 /// * `None` - 字串長度不符（非 7 位）、內容包含非數字，或日期邏輯不合法（如 2 月 30 日）。
 ///
 /// # 範例
@@ -244,7 +250,7 @@ pub fn parse_taiwan_date(date_str: &str) -> Option<NaiveDate> {
 /// let date = parse_taiwan_date_short("1150409").unwrap();
 /// assert_eq!(date.to_string(), "2026-04-09");
 /// ```
-pub fn parse_taiwan_date_short(date_str: &str) -> Option<NaiveDate> {
+pub fn parse_taiwan_date_short(date_str: &str) -> Option<Date> {
     // 先驗證「長度為 7 且全部是 ASCII 數字」再切片。
     // 重要：`&s[0..3]` 這種 byte index 切片要求索引落在 UTF-8 字元邊界上，
     // 外部資料若混入中文或全形字元（每字 3 bytes），len() == 7 仍可能成立，
@@ -262,16 +268,16 @@ pub fn parse_taiwan_date_short(date_str: &str) -> Option<NaiveDate> {
     let month = parse_date_part::<u32>(month_str)?;
     let day = parse_date_part::<u32>(day_str)?;
 
-    NaiveDate::from_ymd_opt(year, month, day)
+    ymd(year, month, day)
 }
 
 /// 依上市/上櫃公司季報法定申報截止日，計算指定日期對應的最新已公告季別。
-fn latest_published_quarter_for_listed_and_otc_by_date(current_date: NaiveDate) -> ReportQuarter {
-    let year = current_date.year();
-    let q4_deadline = NaiveDate::from_ymd_opt(year, 3, 31).expect("invalid Q4 deadline");
-    let q1_deadline = NaiveDate::from_ymd_opt(year, 5, 15).expect("invalid Q1 deadline");
-    let q2_deadline = NaiveDate::from_ymd_opt(year, 8, 14).expect("invalid Q2 deadline");
-    let q3_deadline = NaiveDate::from_ymd_opt(year, 11, 14).expect("invalid Q3 deadline");
+fn latest_published_quarter_for_listed_and_otc_by_date(current_date: Date) -> ReportQuarter {
+    let year = i32::from(current_date.year());
+    let q4_deadline = ymd(year, 3, 31).expect("invalid Q4 deadline");
+    let q1_deadline = ymd(year, 5, 15).expect("invalid Q1 deadline");
+    let q2_deadline = ymd(year, 8, 14).expect("invalid Q2 deadline");
+    let q3_deadline = ymd(year, 11, 14).expect("invalid Q3 deadline");
 
     if current_date > q3_deadline {
         ReportQuarter {
@@ -302,9 +308,7 @@ fn latest_published_quarter_for_listed_and_otc_by_date(current_date: NaiveDate) 
 }
 
 /// 依目前日期回傳季 EPS 流程的正式季度與可能的預抓季度。
-fn eps_report_quarter_targets_for_listed_and_otc_by_date(
-    current_date: NaiveDate,
-) -> Vec<ReportQuarter> {
+fn eps_report_quarter_targets_for_listed_and_otc_by_date(current_date: Date) -> Vec<ReportQuarter> {
     let published = latest_published_quarter_for_listed_and_otc_by_date(current_date);
     let mut targets = vec![published];
     let preload_quarter = published.next();
@@ -318,7 +322,7 @@ fn eps_report_quarter_targets_for_listed_and_otc_by_date(
 
 /// 依目前日期回傳 Yahoo 補欄位流程的正式季度與可能的預抓季度。
 fn backfill_report_quarter_targets_for_listed_and_otc_by_date(
-    current_date: NaiveDate,
+    current_date: Date,
 ) -> Vec<ReportQuarter> {
     let published = latest_published_quarter_for_listed_and_otc_by_date(current_date);
     let mut targets = vec![published];
@@ -334,58 +338,38 @@ fn backfill_report_quarter_targets_for_listed_and_otc_by_date(
 /// 判斷目前是否已進入季 EPS 流程的預抓視窗。
 ///
 /// 規則是「只要季末已過，就開始預抓下一季」。
-fn should_preload_next_quarter_for_eps(
-    current_date: NaiveDate,
-    preload_quarter: ReportQuarter,
-) -> bool {
-    current_date >= report_period_end(preload_quarter) + TimeDelta::try_days(1).unwrap()
+fn should_preload_next_quarter_for_eps(current_date: Date, preload_quarter: ReportQuarter) -> bool {
+    current_date >= report_period_end(preload_quarter) + 1.days()
 }
 
 /// 判斷目前是否已進入 Yahoo 補欄位流程的預抓視窗。
 fn should_preload_next_quarter_for_backfill(
-    current_date: NaiveDate,
+    current_date: Date,
     preload_quarter: ReportQuarter,
 ) -> bool {
     let deadline = report_deadline_for_listed_and_otc(preload_quarter);
-    let preload_start =
-        deadline - TimeDelta::try_days(BACKFILL_PRELOAD_DAYS_BEFORE_REPORT_DEADLINE).unwrap();
+    let preload_start = deadline - (BACKFILL_PRELOAD_DAYS_BEFORE_REPORT_DEADLINE).days();
 
     current_date >= preload_start && current_date <= deadline
 }
 
 /// 回傳指定季度的季度結束日。
-fn report_period_end(report_quarter: ReportQuarter) -> NaiveDate {
+fn report_period_end(report_quarter: ReportQuarter) -> Date {
     match report_quarter.quarter {
-        Quarter::Q1 => {
-            NaiveDate::from_ymd_opt(report_quarter.year, 3, 31).expect("invalid Q1 period end")
-        }
-        Quarter::Q2 => {
-            NaiveDate::from_ymd_opt(report_quarter.year, 6, 30).expect("invalid Q2 period end")
-        }
-        Quarter::Q3 => {
-            NaiveDate::from_ymd_opt(report_quarter.year, 9, 30).expect("invalid Q3 period end")
-        }
-        Quarter::Q4 => {
-            NaiveDate::from_ymd_opt(report_quarter.year, 12, 31).expect("invalid Q4 period end")
-        }
+        Quarter::Q1 => ymd(report_quarter.year, 3, 31).expect("invalid Q1 period end"),
+        Quarter::Q2 => ymd(report_quarter.year, 6, 30).expect("invalid Q2 period end"),
+        Quarter::Q3 => ymd(report_quarter.year, 9, 30).expect("invalid Q3 period end"),
+        Quarter::Q4 => ymd(report_quarter.year, 12, 31).expect("invalid Q4 period end"),
     }
 }
 
 /// 回傳指定財報季度對應的法定申報截止日。
-fn report_deadline_for_listed_and_otc(report_quarter: ReportQuarter) -> NaiveDate {
+fn report_deadline_for_listed_and_otc(report_quarter: ReportQuarter) -> Date {
     match report_quarter.quarter {
-        Quarter::Q1 => {
-            NaiveDate::from_ymd_opt(report_quarter.year, 5, 15).expect("invalid Q1 deadline")
-        }
-        Quarter::Q2 => {
-            NaiveDate::from_ymd_opt(report_quarter.year, 8, 14).expect("invalid Q2 deadline")
-        }
-        Quarter::Q3 => {
-            NaiveDate::from_ymd_opt(report_quarter.year, 11, 14).expect("invalid Q3 deadline")
-        }
-        Quarter::Q4 => {
-            NaiveDate::from_ymd_opt(report_quarter.year + 1, 3, 31).expect("invalid Q4 deadline")
-        }
+        Quarter::Q1 => ymd(report_quarter.year, 5, 15).expect("invalid Q1 deadline"),
+        Quarter::Q2 => ymd(report_quarter.year, 8, 14).expect("invalid Q2 deadline"),
+        Quarter::Q3 => ymd(report_quarter.year, 11, 14).expect("invalid Q3 deadline"),
+        Quarter::Q4 => ymd(report_quarter.year + 1, 3, 31).expect("invalid Q4 deadline"),
     }
 }
 

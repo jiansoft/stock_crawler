@@ -1,6 +1,7 @@
 //! 條件選股整合測試：千張大戶持股比例變化。
 
 use super::*;
+use jiff::civil::date;
 
 /// 以固定歷史查詢日 1988-03-05（週六）執行選股：只用日期早於查詢日的週，查詢日當天的週不會提前用到；
 /// 1 週變化 03-04 對 02-26 為 +1、2 週變化 03-04 對 02-19 為 +1.5。
@@ -41,7 +42,7 @@ async fn screen_at_filters_major_change() {
             .expect("種入大戶選股資料");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let query_date = date(1988, 3, 5);
     let listed = |minimum: f64, weeks: Option<u8>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

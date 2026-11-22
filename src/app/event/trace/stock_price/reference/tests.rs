@@ -1,6 +1,9 @@
 //! 開盤前參考價（除權息、減資恢復買賣）的測試。
 
 use super::*;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 /// 沒有除權息與減資事件的日子，兩類參考價都是空集合，整批寫入也不出錯。
 #[tokio::test]
@@ -10,7 +13,7 @@ use super::*;
 )]
 async fn reference_prices_are_empty_on_a_day_without_events() {
     dotenvy::dotenv().ok();
-    let date = NaiveDate::from_ymd_opt(1999, 1, 4).unwrap();
+    let date = date(1999, 1, 4);
     let Ok(resumption) = corporate_action_reference_prices(date).await else {
         println!("跳過 reference_prices_are_empty_on_a_day_without_events：無資料庫連接");
         return;
@@ -42,8 +45,8 @@ mod database {
     const NO_CLOSE: &str = "79979RC";
     const SYMBOLS: [&str; 3] = [RESUMED, DOUBLE, NO_CLOSE];
 
-    fn day() -> NaiveDate {
-        NaiveDate::from_ymd_opt(1999, 6, 15).expect("合法日期")
+    fn day() -> Date {
+        date(1999, 6, 15)
     }
 
     async fn cleanup() {
@@ -65,7 +68,7 @@ mod database {
 
     async fn seed() {
         let pool = database::get_connection();
-        let ex_date = day().format("%Y-%m-%d").to_string();
+        let ex_date = day().strftime("%Y-%m-%d").to_string();
         for symbol in SYMBOLS {
             sqlx::query(
                 r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol) VALUES ($1, $1, $1)"#,
@@ -79,7 +82,7 @@ mod database {
             sqlx::query(
                 "INSERT INTO last_daily_quotes (date, stock_symbol, closing_price) VALUES ($1, $2, $3)",
             )
-            .bind(NaiveDate::from_ymd_opt(1999, 6, 14).expect("合法日期"))
+            .bind(date(1999, 6, 14).to_sqlx())
             .bind(symbol)
             .bind(close)
             .execute(pool)
@@ -92,7 +95,7 @@ mod database {
                  VALUES ($1, $2, 'capital_reduction', 0.5, '測試用')",
             )
             .bind(symbol)
-            .bind(day())
+            .bind(day().to_sqlx())
             .execute(pool)
             .await
             .expect("插入減資事件");

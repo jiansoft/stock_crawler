@@ -1,5 +1,7 @@
 //! 除權息日漲跌修正的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -8,8 +10,8 @@ use rust_decimal_macros::dec;
 
 use super::*;
 
-fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("有效日期")
+fn day(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("有效日期")
 }
 
 /// 記錄寫入參數的假倉儲；每筆基準價算更新一列。
@@ -37,7 +39,7 @@ impl ExRightChangeRepository for FakeRepo {
     }
 }
 
-fn reference(symbol: &str, date: NaiveDate) -> ExRightReference {
+fn reference(symbol: &str, date: Date) -> ExRightReference {
     ExRightReference {
         stock_symbol: symbol.to_owned(),
         date,

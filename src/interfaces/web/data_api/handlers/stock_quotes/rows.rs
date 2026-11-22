@@ -1,6 +1,7 @@
 //! `/stocks/*` handlers 對應的資料庫列型別與轉成回應 DTO 的規則。
 
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::Timestamp;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::super::{decimal_to_f64, timestamp};
@@ -39,7 +40,8 @@ pub(super) struct LatestQuoteRow {
     pub(super) stock_exchange_market_id: i32,
     pub(super) stock_industry_id: i32,
     pub(super) suspend_listing: bool,
-    pub(super) date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    pub(super) date: Option<Date>,
     pub(super) opening_price: Option<Decimal>,
     pub(super) highest_price: Option<Decimal>,
     pub(super) lowest_price: Option<Decimal>,
@@ -56,8 +58,10 @@ pub(super) struct LatestQuoteRow {
     pub(super) moving_average_120: Option<Decimal>,
     pub(super) moving_average_240: Option<Decimal>,
     pub(super) price_earning_ratio: Option<Decimal>,
-    pub(super) record_time: Option<DateTime<Utc>>,
-    pub(super) updated_time: Option<DateTime<Utc>>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Timestamp>")]
+    pub(super) record_time: Option<Timestamp>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Timestamp>")]
+    pub(super) updated_time: Option<Timestamp>,
 }
 impl LatestQuoteRow {
     /// 複製 LEFT JOIN 左側一定存在的股票主檔欄位。
@@ -99,7 +103,8 @@ impl LatestQuoteRow {
 /// 對應歷史日線列。
 #[derive(sqlx::FromRow)]
 pub(super) struct HistoricalQuoteRow {
-    pub(super) date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub(super) date: Date,
     pub(super) opening_price: Option<Decimal>,
     pub(super) highest_price: Option<Decimal>,
     pub(super) lowest_price: Option<Decimal>,
@@ -115,7 +120,8 @@ pub(super) struct HistoricalQuoteRow {
     pub(super) moving_average_60: Option<Decimal>,
     pub(super) price_earning_ratio: Option<Decimal>,
     pub(super) price_to_book_ratio: Option<Decimal>,
-    pub(super) record_time: Option<DateTime<Utc>>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Timestamp>")]
+    pub(super) record_time: Option<Timestamp>,
 }
 impl From<HistoricalQuoteRow> for HistoricalQuote {
     fn from(row: HistoricalQuoteRow) -> Self {
@@ -154,13 +160,17 @@ pub(super) struct ProfileRow {
     /// `stocks.issued_share` 是 bigint；宣告成 Decimal 會解碼失敗，整個 profile 回 500。
     pub(super) issued_share: Option<i64>,
     pub(super) maximum_price: Option<Decimal>,
-    pub(super) maximum_price_date_on: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    pub(super) maximum_price_date_on: Option<Date>,
     pub(super) minimum_price: Option<Decimal>,
-    pub(super) minimum_price_date_on: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    pub(super) minimum_price_date_on: Option<Date>,
     pub(super) maximum_price_to_book_ratio: Option<Decimal>,
-    pub(super) maximum_price_to_book_ratio_date_on: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    pub(super) maximum_price_to_book_ratio_date_on: Option<Date>,
     pub(super) minimum_price_to_book_ratio: Option<Decimal>,
-    pub(super) minimum_price_to_book_ratio_date_on: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    pub(super) minimum_price_to_book_ratio_date_on: Option<Date>,
 }
 
 impl From<ProfileRow> for StockProfile {

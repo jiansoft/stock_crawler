@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use jiff::civil::date;
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -26,7 +26,7 @@ fn bench_dto_map(c: &mut Criterion) {
         .enumerate()
         .map(|(i, f)| (f.as_str(), i))
         .collect();
-    let date = NaiveDate::from_ymd_opt(2026, 6, 25).unwrap();
+    let date = date(2026, 6, 25);
 
     c.bench_function("twse_dto_map_100rows", |b| {
         b.iter(|| {

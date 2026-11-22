@@ -1,5 +1,7 @@
 //! 月營收回補的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 use std::time::Duration;
 
 use rust_decimal::Decimal;
@@ -11,7 +13,7 @@ use crate::infra::database;
 /// 月中、月初與跨年都回到上個月最後一分鐘（台北時間）。
 #[test]
 fn previous_month_end_is_last_minute_of_previous_month_in_taipei() {
-    let day = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("日期應合法");
+    let day = |y, m, d| ymd(y, m, d).expect("日期應合法");
     for (today, expected) in [
         (day(2026, 10, 11), "2026-09-30T23:59:00+08:00"),
         (day(2026, 10, 1), "2026-09-30T23:59:00+08:00"),
@@ -225,7 +227,7 @@ mod mock_sources {
             .mount(&server)
             .await;
         let uri = server.uri();
-        let today = NaiveDate::from_ymd_opt(1991, 2, 15).expect("有效日期");
+        let today = date(1991, 2, 15);
 
         let result = with_origins(&[("https://mopsov.twse.com.tw", &uri)], execute_on(today)).await;
         let rows: Vec<(String, Decimal)> = sqlx::query_as(
@@ -288,12 +290,8 @@ async fn test_process_revenues() {
     SHARE.load().await;
     tracing::debug!("開始 test_process_revenues");
 
-    let naive_datetime = NaiveDate::from_ymd_opt(2025, 4, 1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap();
-    let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-    let month_timezone = timezone.from_local_datetime(&naive_datetime).unwrap();
+    let month_timezone =
+        TaipeiDateTime::from_datetime(date(2025, 4, 1).at(0, 0, 0, 0)).expect("合法時間");
 
     match process_revenues(month_timezone).await {
         Ok(_) => {}

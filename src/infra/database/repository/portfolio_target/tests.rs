@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::domain::portfolio::view::HoldingView;
+use jiff::civil::date;
 
 /// 持股載入：加總未售出股數、帶出收盤價／產業／ETF 旗標，並為目標中未持有的代號補零股列。
 #[tokio::test]
@@ -73,7 +74,7 @@ async fn fetch_etf_components_returns_top_ten_with_dates() {
         .fetch_etf_components(&["79978EF".to_owned()])
         .await
         .unwrap();
-    let as_of = chrono::NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+    let as_of = date(2026, 4, 30);
     let summary: Vec<_> = components
         .iter()
         .map(|dated| {

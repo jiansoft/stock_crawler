@@ -7,7 +7,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::Timestamp;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::domain::quote::technical::{SIGNAL_INDICATORS, SignalKind};
@@ -80,20 +81,18 @@ pub(super) fn round4(value: f64) -> f64 {
 }
 
 /// 將資料庫 timestamp 轉為 UTC ISO 8601 格式。
-pub(super) fn timestamp(value: Option<DateTime<Utc>>) -> Option<String> {
-    value.map(|time| time.to_rfc3339())
+pub(super) fn timestamp(value: Option<Timestamp>) -> Option<String> {
+    value.map(crate::core::util::datetime::rfc3339_utc::to_rfc3339)
 }
 
 /// 驗證並解析可選的日期區間。
 pub(super) fn parse_range(
     from: Option<&str>,
     to: Option<&str>,
-) -> Result<(Option<NaiveDate>, Option<NaiveDate>), &'static str> {
+) -> Result<(Option<Date>, Option<Date>), &'static str> {
     let parse = |value: Option<&str>| {
         value
-            .map(|raw| {
-                NaiveDate::parse_from_str(raw, "%Y-%m-%d").map_err(|_| "日期必須為 YYYY-MM-DD")
-            })
+            .map(|raw| Date::strptime("%Y-%m-%d", raw).map_err(|_| "日期必須為 YYYY-MM-DD"))
             .transpose()
     };
     let (from, to) = (parse(from)?, parse(to)?);
@@ -107,15 +106,15 @@ pub(super) fn parse_range(
 ///
 /// `None` 代表由資料表自行取最新資料；有值但不是嚴格合法的
 /// `YYYY-MM-DD` 時回 422 所使用的固定安全訊息。
-pub(super) fn parse_optional_date(value: Option<&str>) -> Result<Option<NaiveDate>, &'static str> {
+pub(super) fn parse_optional_date(value: Option<&str>) -> Result<Option<Date>, &'static str> {
     value
         .map(|raw| {
-            // chrono 會接受未補零的月／日；契約要求固定十字元，先驗外觀，
-            // 再以 chrono 驗證實際曆法（例如 2 月 30 日）。
+            // jiff 的 strptime 會接受未補零的月／日；契約要求固定十字元，先驗外觀，
+            // 再以 jiff 驗證實際曆法（例如 2 月 30 日）。
             if raw.len() != 10 || raw.as_bytes()[4] != b'-' || raw.as_bytes()[7] != b'-' {
                 return Err("日期必須為 YYYY-MM-DD");
             }
-            NaiveDate::parse_from_str(raw, "%Y-%m-%d").map_err(|_| "日期必須為 YYYY-MM-DD")
+            Date::strptime("%Y-%m-%d", raw).map_err(|_| "日期必須為 YYYY-MM-DD")
         })
         .transpose()
 }
@@ -272,7 +271,7 @@ pub(super) fn quarter_to_api(quarter: &str) -> String {
 /// （P0-3 實測有 `1.39%` 這類髒資料）；只有能解析成合法 `YYYY-MM-DD`
 /// 的值才輸出，其餘一律 `null`，不嘗試修補。
 pub(super) fn sanitize_date(value: &str) -> Option<String> {
-    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+    Date::strptime("%Y-%m-%d", value)
         .ok()
         .map(|date| date.to_string())
 }

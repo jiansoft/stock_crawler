@@ -1,5 +1,6 @@
 //! 上市股票變更面額與 ETF 分割（反分割）恢復買賣參考價格的測試；連外的測試標 #[ignore]。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -31,10 +32,7 @@ fn parse_par_value_changes_fixture() {
     );
 
     let chang_wah = find(&actions, "8070");
-    assert_eq!(
-        chang_wah.effective_date,
-        NaiveDate::from_ymd_opt(2020, 8, 17).unwrap()
-    );
+    assert_eq!(chang_wah.effective_date, date(2020, 8, 17));
     assert_eq!(chang_wah.share_ratio, dec!(10));
     assert_eq!(chang_wah.note, "變更面額（分割）：190 ÷ 19");
     assert_eq!(find(&actions, "6949").share_ratio, dec!(20));
@@ -95,8 +93,8 @@ fn parse_rows_skips_unpriced_and_short_rows() {
 #[ignore = "live test：連線真實外部網站，需要時手動執行"]
 async fn test_visit() {
     dotenvy::dotenv().ok();
-    let start = NaiveDate::from_ymd_opt(2011, 1, 1).unwrap();
-    let end = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+    let start = date(2011, 1, 1);
+    let end = date(2026, 12, 31);
     let par = visit_par_value_changes(start, end).await.expect("面額變更");
     let etf = visit_etf_splits(start, end).await.expect("ETF 分割");
     dbg!(par.len(), etf.len());

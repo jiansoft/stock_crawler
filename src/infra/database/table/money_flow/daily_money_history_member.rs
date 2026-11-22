@@ -1,5 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result, anyhow};
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction, postgres::PgQueryResult};
 
@@ -12,7 +14,8 @@ use crate::infra::database;
 #[derive(sqlx::FromRow, Debug)]
 pub struct DailyMoneyHistoryMember {
     /// 交易日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 所屬家庭，用於區別各家庭的合計列。
     pub household_id: i64,
     /// 會員編號；0 代表該家庭總和。
@@ -20,18 +23,20 @@ pub struct DailyMoneyHistoryMember {
     /// 當日收盤市值總額。
     pub market_value: Decimal,
     /// 建立時間。
-    pub created_at: DateTime<Local>,
+    pub created_at: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_at: DateTime<Local>,
+    pub updated_at: TaipeiDateTime,
 }
 
 /// 當日與前一交易日的會員市值對照資料。
 #[derive(sqlx::FromRow, Debug)]
 pub struct DailyMoneyHistoryMemberWithPreviousTradingDay {
     /// 當日資料日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 前一個交易日日期。
-    pub previous_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    pub previous_date: Option<Date>,
     /// 所屬家庭，用於區別各家庭的合計列。
     pub household_id: i64,
     /// 會員編號；0 代表該家庭總和。
@@ -84,7 +89,7 @@ impl DailyMoneyHistoryMember {
     /// # Errors
     /// 會員、持股或報價查詢與寫入失敗時回傳錯誤，由呼叫者決定交易回滾。
     pub async fn upsert(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
@@ -129,7 +134,7 @@ ON CONFLICT (date, household_id, member_id) DO UPDATE SET
     updated_time = NOW();
 "#;
 
-        let query = sqlx::query(sql).bind(date);
+        let query = sqlx::query(sql).bind(date.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
@@ -149,10 +154,10 @@ ON CONFLICT (date, household_id, member_id) DO UPDATE SET
     /// 會保留 `member_id = 0` 的合計列，並同時回傳所有會員，
     /// 家庭編號會一路帶入比較與通知，不讓不同家庭的合計互相配對。
     pub async fn fetch_with_previous_trading_day(
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Vec<DailyMoneyHistoryMemberWithPreviousTradingDay>> {
         sqlx::query_as::<_, DailyMoneyHistoryMemberWithPreviousTradingDay>(PREVIOUS_TRADING_DAY_SQL)
-            .bind(date)
+            .bind(date.to_sqlx())
             .fetch_all(database::get_connection())
             .await
             .context(format!(

@@ -1,14 +1,16 @@
 //! 上月持股股利入帳彙總：月份推算、查詢期間、訊息組裝與去年同月比較。
 
+use crate::core::util::datetime::ymd;
 use crate::domain::portfolio::view::HoldingView;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 use crate::domain::portfolio::payout::PayoutAllocation;
 use crate::domain::portfolio::test_double::FakePayoutRepository;
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("合法日期")
 }
 
 fn payout(member_id: i64, symbol: &str, day: u32, cash: Decimal) -> DividendPayout {

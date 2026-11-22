@@ -2,7 +2,6 @@
 
 use std::fmt::Write;
 
-use chrono::Datelike;
 use rust_decimal::Decimal;
 
 use super::super::{add_thousand_separators, format_decimal_with_commas};

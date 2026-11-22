@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -26,11 +26,24 @@ ORDER BY "Date" DESC
 #[async_trait]
 impl ValuationHistoryRepository for PgQuoteRepository {
     async fn fetch_daily_ratios(&self, stock_symbol: &str, years: u8) -> Result<Vec<DailyRatio>> {
-        let rows: Vec<(NaiveDate, Decimal, Decimal, Decimal)> = sqlx::query_as(DAILY_RATIOS_SQL)
-            .bind(stock_symbol)
-            .bind(i32::from(years))
-            .fetch_all(database::get_connection())
-            .await?;
+        let rows: Vec<(Date, Decimal, Decimal, Decimal)> =
+            sqlx::query_as::<_, (jiff_sqlx::Date, Decimal, Decimal, Decimal)>(DAILY_RATIOS_SQL)
+                .bind(stock_symbol)
+                .bind(i32::from(years))
+                .fetch_all(database::get_connection())
+                .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|(c0, c1, c2, c3)| {
+                            (
+                                crate::infra::database::jiff_types::from_wire(c0),
+                                c1,
+                                c2,
+                                c3,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })?;
         Ok(rows
             .into_iter()
             .map(

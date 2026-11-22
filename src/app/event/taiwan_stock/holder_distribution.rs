@@ -14,10 +14,11 @@
 //! 5. 以資料日期做去重（Redis `tdcc:holder_report:{日期}`）：集保還沒更新、入庫後最新一週仍是
 //!    已通知過的那週時不再送。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::{collections::HashMap, fmt::Write};
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::{add_thousand_separators, format_decimal_with_commas, holdings};
@@ -91,12 +92,7 @@ pub async fn execute() -> Result<()> {
         .context("fetch active holdings for holder distribution report failed")?
         .into_iter()
         .collect();
-    let Some((date, rows)) = collect_rows(
-        &PgChipRepository::new(),
-        &symbols,
-        Local::now().date_naive(),
-    )
-    .await?
+    let Some((date, rows)) = collect_rows(&PgChipRepository::new(), &symbols, today()).await?
     else {
         tracing::info!("集保股權分散沒有任何持股的本週資料，略過大戶週報");
         return Ok(());
@@ -131,8 +127,8 @@ pub async fn execute() -> Result<()> {
 async fn collect_rows(
     repository: &impl HolderHistoryRepository,
     symbols: &[String],
-    as_of: NaiveDate,
-) -> Result<Option<(NaiveDate, Vec<Row>)>> {
+    as_of: Date,
+) -> Result<Option<(Date, Vec<Row>)>> {
     let weeks = repository
         .recent_holder_weeks(symbols, as_of, WEEKS)
         .await
@@ -195,7 +191,7 @@ fn sort_rows(rows: &mut [Row]) {
 /// 組出週報（Telegram MarkdownV2）。每檔兩行：千張一行，400 張與股東人數一行。
 ///
 /// `stock_name` 由呼叫端提供（正式流程讀股票主檔快取），測試時可換成固定對照。
-fn build_message(date: NaiveDate, rows: &[Row], stock_name: impl Fn(&str) -> String) -> String {
+fn build_message(date: Date, rows: &[Row], stock_name: impl Fn(&str) -> String) -> String {
     let mut message = String::with_capacity(256 + rows.len() * 192);
     let _ = writeln!(
         &mut message,
@@ -293,12 +289,12 @@ fn holders_change(previous: i64, current: i64) -> String {
 }
 
 /// 這週已通知的去重鍵。
-fn reported_key(date: NaiveDate) -> String {
+fn reported_key(date: Date) -> String {
     format!("tdcc:holder_report:{date}")
 }
 
 /// 記下這個資料週已通知；回傳 `false` 代表先前已通知過。Redis 失敗時寧可重送，記錄後回傳 `true`。
-async fn mark_reported(date: NaiveDate) -> bool {
+async fn mark_reported(date: Date) -> bool {
     match CLIENT
         .set_if_absent(reported_key(date), "1", REPORTED_TTL_SECONDS)
         .await

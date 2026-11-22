@@ -9,9 +9,10 @@ mod payout;
 mod query;
 mod save;
 
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::civil::Date;
 
 use crate::domain::dividend::entity::{
     Dividend, StockDividendInfo as DomainStockDividendInfo,
@@ -92,7 +93,7 @@ impl DividendRepository for PgDividendRepository {
         &self,
         security_code: &str,
         year: i32,
-        created_time: DateTime<Local>,
+        created_time: TaipeiDateTime,
     ) -> Result<Vec<Dividend>> {
         query::fetch_dividends_summary_by_date(security_code, year, created_time).await
     }
@@ -112,7 +113,7 @@ impl DividendRepository for PgDividendRepository {
     /// 取得指定日期有除權或除息事件的股票資料與參考收盤價。
     async fn fetch_stocks_with_dividends_on_date(
         &self,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Vec<DomainStockDividendInfo>> {
         let table_list = stock_dividend_info::fetch_stocks_with_dividends_on_date(date).await?;
         Ok(table_list
@@ -123,7 +124,7 @@ impl DividendRepository for PgDividendRepository {
 
     async fn fetch_payable_date_info_on_date(
         &self,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Vec<DomainStockDividendPayableDateInfo>> {
         let table_list = stock_dividend_payable_date_info::fetch(date).await?;
         Ok(table_list

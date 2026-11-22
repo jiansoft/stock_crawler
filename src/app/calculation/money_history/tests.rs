@@ -1,6 +1,7 @@
 //! 市值歷史計算的測試。
 
 use crate::infra::cache::SHARE;
+use jiff::civil::Date;
 
 use super::*;
 
@@ -13,7 +14,7 @@ async fn test_calculate_money_history() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
     tracing::debug!("開始 calculate_money_history");
-    let current_date = NaiveDate::parse_from_str("2026-04-20", "%Y-%m-%d").unwrap();
+    let current_date = Date::strptime("%Y-%m-%d", "2026-04-20").unwrap();
     match calculate_money_history(current_date).await {
         Ok(_) => {}
         Err(why) => {

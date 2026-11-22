@@ -1,5 +1,6 @@
 //! 舊日誌清理：刪除同目錄下超過保留天數的檔案（只處理目前檔名模式產生的檔案）。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::{
     fs::{self},
     io::{self},
@@ -9,7 +10,6 @@ use std::{
 };
 
 use anyhow::Result;
-use chrono::{DateTime, Local};
 use rayon::prelude::*;
 
 use crate::core::logging;
@@ -18,14 +18,14 @@ use super::Rotate;
 
 impl Rotate {
     /// 清理舊檔案（超過 max_age 的檔案）
-    pub(super) fn cleanup_old_files(&self, now: DateTime<Local>) {
+    pub(super) fn cleanup_old_files(&self, now: TaipeiDateTime) {
         if self.on_rotate.swap(true, Ordering::Relaxed) {
             return;
         }
 
         match Self::files_in_directory(&self.cur_fn) {
             Ok(files) => {
-                let cut_off = (now - self.max_age()).timestamp() as u64;
+                let cut_off = (now - self.max_age()).timestamp().as_second() as u64;
                 let to_unlink: Vec<PathBuf> = files
                     .into_iter()
                     .filter_map(|file| {

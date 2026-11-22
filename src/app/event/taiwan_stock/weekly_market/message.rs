@@ -5,7 +5,7 @@
 
 use std::fmt::Write;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::{
     CrossingSection, FlowSection, HoldingSection, IndustrySection, RegimeSection, StrategySection,
@@ -33,7 +33,7 @@ pub(super) fn week_data_date(
     crossings: Option<&CrossingSection>,
     flows: &[FlowSection],
     etfs: Option<&EtfWeekSection>,
-) -> Option<NaiveDate> {
+) -> Option<Date> {
     let mut data_date = market.map(|section| section.state.date);
     if let Some(section) = industries.filter(|section| !section.industries.is_empty()) {
         data_date = Some(section.data_date);
@@ -93,7 +93,7 @@ pub(super) fn build_message(
 
 /// 組出持股段；範圍內沒有任何持股內容時回 `None`。`data_date` 為市場段的本週資料日（填息一段用）。
 pub(super) fn build_holdings_message(
-    data_date: Option<NaiveDate>,
+    data_date: Option<Date>,
     holdings: HoldingSection<'_>,
     stock_name: impl Fn(&str) -> String,
 ) -> Option<String> {
@@ -118,7 +118,7 @@ pub(super) fn build_holdings_message(
 }
 
 /// 標題（資料日）、各行與兩行聲明；沒有任何行時回 `None`。
-fn finish(title: &str, data_date: Option<NaiveDate>, lines: Vec<String>) -> Option<String> {
+fn finish(title: &str, data_date: Option<Date>, lines: Vec<String>) -> Option<String> {
     if lines.is_empty() {
         return None;
     }

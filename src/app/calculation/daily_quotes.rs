@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
-use chrono::NaiveDate;
 use futures::{StreamExt, stream};
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
 /// 計算所有上市櫃公司在指定日期的均線值與歷史高低點。
 ///
 /// 此函數會平行處理所有股票的計算，最後進行批次資料庫更新以極大化效能。
-pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
+pub async fn calculate_moving_average(date: Date) -> Result<()> {
     // 建立報價領域倉儲實例
     let repo = PgQuoteRepository::new();
     // 透過倉儲獲取指定日期的每日報價領域實體列表
@@ -84,7 +84,7 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
 pub async fn recalculate_moving_averages(
     repository: &dyn QuoteRepository,
     stock_symbols: &[String],
-    from: NaiveDate,
+    from: Date,
 ) -> Result<u64> {
     let mut updated = 0;
     let mut extremes = 0;
@@ -116,7 +116,7 @@ pub async fn recalculate_moving_averages(
 /// 手動回補用：替換過去某天的全市場行情（`backfill::quote::execute`）或整批補歷史後，
 /// 從那天起重算，之後最多 240 個交易日受影響的均線一併修正。
 pub async fn recalculate_moving_averages_since(
-    from: NaiveDate,
+    from: Date,
     stock_symbols: Option<Vec<String>>,
 ) -> Result<u64> {
     let repository = PgQuoteRepository::new();

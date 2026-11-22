@@ -7,7 +7,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::{
@@ -57,7 +58,7 @@ pub(crate) async fn dividend_yield_ranking(
     }
     // 先單獨取排行日期，才能區分「整張表／回溯窗沒有日期」（404）與
     // 「日期存在但市場或產業篩選後無股票」（200 空陣列）。
-    let data_date: Result<Option<(Option<NaiveDate>,)>, _> = sqlx::query_as(r#"SELECT MAX(date) FROM yield_rank WHERE $1::date IS NULL OR (date <= $1 AND date >= $1 - 30)"#).bind(date).fetch_optional(database::get_connection()).await;
+    let data_date: Result<Option<(Option<Date>,)>, _> = sqlx::query_as::<_, (Option<jiff_sqlx::Date>,)>(r#"SELECT MAX(date) FROM yield_rank WHERE $1::date IS NULL OR (date <= $1 AND date >= $1 - 30)"#).bind(date.map(ToSqlx::to_sqlx)).fetch_optional(database::get_connection()).await.map(|row| row.map(|(c0,)| (crate::infra::database::jiff_types::from_wire(c0),)));
     let data_date = match data_date {
         Ok(Some((Some(value),))) => value,
         Ok(Some((None,))) | Ok(None) => {
@@ -67,7 +68,7 @@ pub(crate) async fn dividend_yield_ranking(
     };
     // `$2 = 0` 是 API 內部的 all 哨兵，只展開為固定 `IN (2,4)`；所有排序
     // 欄位均寫死，呼叫端無法提供 SQL 片段或欄位名稱。
-    let rows: Result<Vec<YieldRankRow>, _> = sqlx::query_as(r#"SELECT y.security_code AS stock_symbol, s."Name" AS name, s.stock_exchange_market_id AS market_id, s.stock_industry_id AS industry_id, y.date, q."ClosingPrice" AS closing_price, d."sum" AS dividend, y.yield AS dividend_yield_percent FROM yield_rank y JOIN stocks s ON s.stock_symbol = y.security_code JOIN "DailyQuotes" q ON q."Serial" = y.daily_quotes_serial JOIN dividend d ON d.serial = y.dividend_serial WHERE y.date = $1 AND (($2 = 0 AND s.stock_exchange_market_id IN (2, 4)) OR ($2 <> 0 AND s.stock_exchange_market_id = $2)) AND ($3::int IS NULL OR s.stock_industry_id = $3) ORDER BY y.yield DESC, y.security_code ASC LIMIT $4"#).bind(data_date).bind(market_id).bind(params.industry_id).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
+    let rows: Result<Vec<YieldRankRow>, _> = sqlx::query_as(r#"SELECT y.security_code AS stock_symbol, s."Name" AS name, s.stock_exchange_market_id AS market_id, s.stock_industry_id AS industry_id, y.date, q."ClosingPrice" AS closing_price, d."sum" AS dividend, y.yield AS dividend_yield_percent FROM yield_rank y JOIN stocks s ON s.stock_symbol = y.security_code JOIN "DailyQuotes" q ON q."Serial" = y.daily_quotes_serial JOIN dividend d ON d.serial = y.dividend_serial WHERE y.date = $1 AND (($2 = 0 AND s.stock_exchange_market_id IN (2, 4)) OR ($2 <> 0 AND s.stock_exchange_market_id = $2)) AND ($3::int IS NULL OR s.stock_industry_id = $3) ORDER BY y.yield DESC, y.security_code ASC LIMIT $4"#).bind(data_date.to_sqlx()).bind(market_id).bind(params.industry_id).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
     match rows {
         Ok(rows) => Json(DividendYieldRankingResponse {
             data_as_of: data_date.to_string(),
@@ -194,7 +195,8 @@ struct YieldRankRow {
     /// 產業 id。
     industry_id: i32,
     /// 排行日期。
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     /// 計算用收盤價。
     closing_price: Option<Decimal>,
     /// 計算用年度股利。

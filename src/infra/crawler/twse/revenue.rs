@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
 
 use crate::{
@@ -9,10 +9,10 @@ use crate::{
 };
 
 /// 下載月營收
-pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<RevenueDto>> {
-    let year = date_time.year();
+pub async fn visit(date_time: TaipeiDateTime) -> Result<Vec<RevenueDto>> {
+    let year = i32::from(date_time.year());
     let republic_of_china_era = util::datetime::gregorian_year_to_roc_year(year);
-    let month = date_time.month();
+    let month = u32::try_from(date_time.month()).expect("月份是 1～12");
     let mut revenues = Vec::with_capacity(1024);
 
     for market in ["sii", "otc"].iter() {

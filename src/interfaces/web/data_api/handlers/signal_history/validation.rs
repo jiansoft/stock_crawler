@@ -1,6 +1,7 @@
 //! 訊號績效與其他統計端點共用的參數驗證：期間、`group_by`、相對強度區間與連續買超天數。
 
-use chrono::NaiveDate;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use super::{DEFAULT_PERIOD_DAYS, MAX_ALL_SIGNALS_PERIOD_DAYS, MAX_PERIOD_DAYS};
 
@@ -53,14 +54,14 @@ pub(in crate::interfaces::web::data_api::handlers) fn validate_rs_range(
 
 /// 起日：未指定為迄日往前 [`DEFAULT_PERIOD_DAYS`] 天；晚於迄日或期間超過上限回錯誤訊息。
 pub(in crate::interfaces::web::data_api::handlers) fn resolve_period(
-    from: Option<NaiveDate>,
-    to: NaiveDate,
-) -> Result<NaiveDate, &'static str> {
-    let from = from.unwrap_or(to - chrono::Duration::days(DEFAULT_PERIOD_DAYS));
+    from: Option<Date>,
+    to: Date,
+) -> Result<Date, &'static str> {
+    let from = from.unwrap_or(to - (DEFAULT_PERIOD_DAYS).days());
     if from > to {
         return Err("from 不可晚於 to");
     }
-    if (to - from).num_days() >= MAX_PERIOD_DAYS {
+    if i64::from((to - from).get_days()) >= MAX_PERIOD_DAYS {
         return Err("統計期間最長 3,653 天");
     }
     Ok(from)
@@ -68,11 +69,11 @@ pub(in crate::interfaces::web::data_api::handlers) fn resolve_period(
 
 /// 期間超過 [`MAX_ALL_SIGNALS_PERIOD_DAYS`] 時必須指定訊號來源。
 pub(super) fn require_indicator_for_long_period(
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     indicator: Option<&str>,
 ) -> Result<(), &'static str> {
-    if indicator.is_none() && (to - from).num_days() >= MAX_ALL_SIGNALS_PERIOD_DAYS {
+    if indicator.is_none() && i64::from((to - from).get_days()) >= MAX_ALL_SIGNALS_PERIOD_DAYS {
         return Err("統計期間超過 1,096 天時必須指定 indicator");
     }
     Ok(())

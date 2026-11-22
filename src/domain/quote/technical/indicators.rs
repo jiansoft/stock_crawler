@@ -1,6 +1,6 @@
 //! 技術指標計算：均線、RSI、KD 與 MACD（演算法見 [`super`] 模組說明）。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::MA_PERIODS;
 use super::bars::PriceBar;
@@ -14,7 +14,7 @@ const MACD_SIGNAL: usize = 9;
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndicatorPoint {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 收盤價。
     pub close: f64,
     /// 依 [`MA_PERIODS`] 順序的均線。

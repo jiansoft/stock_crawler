@@ -1,5 +1,8 @@
 //! 除權息日漲跌修正的 PostgreSQL 實作（[`ExRightChangeRepository`]）的測試。
 
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -7,12 +10,12 @@ use crate::infra::database::table::quote::daily_stock_price_stats::DailyStockPri
 
 type StatsRow = (i32, i32, i32, i32);
 
-async fn stats_rows(date: NaiveDate) -> Vec<StatsRow> {
+async fn stats_rows(date: Date) -> Vec<StatsRow> {
     sqlx::query_as(
         "SELECT stock_exchange_market_id, stocks_up, stocks_down, stocks_unchanged
          FROM daily_stock_price_stats WHERE date = $1 ORDER BY 1",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .fetch_all(database::get_connection())
     .await
     .expect("讀回統計")
@@ -31,7 +34,7 @@ async fn apply_references_fixes_quotes_and_stats() {
         return;
     }
     let pool = database::get_connection();
-    let date = NaiveDate::from_ymd_opt(1991, 7, 15).expect("有效日期");
+    let date = date(1991, 7, 15);
     let symbols = [
         "79979XA", "79979XB", "79979XC", "79979XD", "79979XE", "79979XF",
     ];
@@ -48,7 +51,7 @@ async fn apply_references_fixes_quotes_and_stats() {
                 .expect("清理測試資料");
         }
         sqlx::query("DELETE FROM daily_stock_price_stats WHERE date = $1")
-            .bind(date)
+            .bind(date.to_sqlx())
             .execute(pool)
             .await
             .expect("清理統計");
@@ -78,7 +81,7 @@ async fn apply_references_fixes_quotes_and_stats() {
             r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "Change", "ChangeRange")
                VALUES ($1, $2, $3, $4, CASE WHEN $4 = 0 THEN 0 ELSE $4 / ($3 - $4) * 100 END)"#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbol)
         .bind(close)
         .bind(change)
@@ -88,7 +91,7 @@ async fn apply_references_fixes_quotes_and_stats() {
         if estimated {
             sqlx::query("INSERT INTO estimate (security_code, date) VALUES ($1, $2)")
                 .bind(symbol)
-                .bind(date)
+                .bind(date.to_sqlx())
                 .execute(pool)
                 .await
                 .expect("寫入測試估價");
@@ -125,7 +128,7 @@ async fn apply_references_fixes_quotes_and_stats() {
            WHERE stock_symbol = ANY($1) AND "Date" = $2 ORDER BY 1"#,
     )
     .bind(symbols)
-    .bind(date)
+    .bind(date.to_sqlx())
     .fetch_all(pool)
     .await
     .expect("讀回日線");

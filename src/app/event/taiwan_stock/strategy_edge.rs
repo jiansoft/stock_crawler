@@ -15,10 +15,13 @@
 
 mod message;
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::Weekday;
 use std::collections::HashSet;
 
 use anyhow::{Context, Result, bail};
-use chrono::{Datelike, Local, Months, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 
 use self::message::log_records;
@@ -59,9 +62,9 @@ const OVERRIDDEN_KEYS: [&str; 5] = [
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EdgeWindow {
     /// 實際起日。
-    pub from: NaiveDate,
+    pub from: Date,
     /// 實際迄日。
-    pub to: NaiveDate,
+    pub to: Date,
     /// 跑了幾個偏移。
     pub offsets: usize,
     /// 扣成本年化報酬中位數（%）。
@@ -91,7 +94,7 @@ pub struct EdgeRecord {
     /// 策略名稱（`.env` 那一組沒有名稱時為空）。
     pub name: String,
     /// 檢查日。
-    pub checked: NaiveDate,
+    pub checked: Date,
     /// 近 [`RECENT_MONTHS`] 個月。
     pub recent: EdgeWindow,
     /// [`FULL_FROM`] 起全期；失敗時為 `None`（只看近期一段）。
@@ -152,7 +155,7 @@ pub fn verdict(window: &EdgeWindow) -> Verdict {
 
 /// 把策略條件改成檢查用的條件：起日換成 `from`、不設迄日（算到最新）、成交價固定為次日開盤加
 /// [`SLIPPAGE_BPS`] bps；其餘條件不變。
-pub fn edge_query(query: &str, from: NaiveDate) -> String {
+pub fn edge_query(query: &str, from: Date) -> String {
     let mut pairs: Vec<String> = query
         .split('&')
         .filter(|pair| !pair.is_empty())
@@ -169,13 +172,13 @@ pub fn edge_query(query: &str, from: NaiveDate) -> String {
 }
 
 /// `today` 是否為當月第一個交易日（今天是交易日，且當月較早的平日都是休市日）。
-pub fn is_first_trading_day(today: NaiveDate, holidays: &HashSet<NaiveDate>) -> bool {
-    let trading = |date: NaiveDate| {
-        !matches!(date.weekday(), Weekday::Sat | Weekday::Sun) && !holidays.contains(&date)
+pub fn is_first_trading_day(today: Date, holidays: &HashSet<Date>) -> bool {
+    let trading = |date: Date| {
+        !matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday) && !holidays.contains(&date)
     };
     trading(today)
         && (1..today.day())
-            .filter_map(|day| today.with_day(day))
+            .filter_map(|day| today.with().day(day).build().ok())
             .all(|date| !trading(date))
 }
 
@@ -183,12 +186,13 @@ pub fn is_first_trading_day(today: NaiveDate, holidays: &HashSet<NaiveDate>) -> 
 pub(super) async fn check(
     gateway: &dyn StrategyGateway,
     strategies: &[AlertStrategy],
-    today: NaiveDate,
+    today: Date,
 ) -> (Vec<EdgeRecord>, Vec<String>) {
     let recent_from = today
-        .checked_sub_months(Months::new(RECENT_MONTHS))
+        .checked_sub(i64::from(RECENT_MONTHS).months())
+        .ok()
         .unwrap_or(today);
-    let full_from = NaiveDate::parse_from_str(FULL_FROM, "%Y-%m-%d").unwrap_or(recent_from);
+    let full_from = Date::strptime("%Y-%m-%d", FULL_FROM).unwrap_or(recent_from);
     let mut records = Vec::new();
     let mut failures = Vec::new();
     for strategy in strategies {
@@ -268,14 +272,15 @@ async fn store(key: &str, records: &[EdgeRecord]) {
 ///
 /// 見 [`run`]。
 pub async fn execute() -> Result<()> {
-    let today = Local::now().date_naive();
-    let holidays: HashSet<NaiveDate> = match holiday_schedule::visit_or_backup(today.year()).await {
-        Ok(holidays) => holidays.into_iter().map(|holiday| holiday.date).collect(),
-        Err(error) => {
-            tracing::warn!("策略優勢檢查：讀取休市日失敗，只以週末判斷：{error:?}");
-            HashSet::new()
-        }
-    };
+    let today = today();
+    let holidays: HashSet<Date> =
+        match holiday_schedule::visit_or_backup(i32::from(today.year())).await {
+            Ok(holidays) => holidays.into_iter().map(|holiday| holiday.date).collect(),
+            Err(error) => {
+                tracing::warn!("策略優勢檢查：讀取休市日失敗，只以週末判斷：{error:?}");
+                HashSet::new()
+            }
+        };
     if !is_first_trading_day(today, &holidays) {
         tracing::debug!("策略優勢檢查：{today} 不是當月第一個交易日，略過");
         return Ok(());
@@ -288,7 +293,7 @@ pub async fn execute() -> Result<()> {
 /// # Errors
 ///
 /// 讀不到具名策略、策略 gateway 未註冊，或有策略的近期回測失敗時回傳錯誤（其餘策略照常檢查）。
-pub async fn run(today: NaiveDate) -> Result<()> {
+pub async fn run(today: Date) -> Result<()> {
     let presets = PgStrategyPresetRepository::new()
         .list()
         .await
@@ -314,7 +319,7 @@ pub async fn run(today: NaiveDate) -> Result<()> {
 async fn report(
     gateway: &dyn StrategyGateway,
     strategies: &[AlertStrategy],
-    today: NaiveDate,
+    today: Date,
     key: &str,
 ) -> Result<()> {
     let (records, failures) = check(gateway, strategies, today).await;

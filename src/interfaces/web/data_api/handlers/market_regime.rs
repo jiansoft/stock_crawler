@@ -103,7 +103,7 @@ fn breadth_item(breadth: &MarketBreadth) -> MarketRegimeBreadth {
 }
 
 /// 近 [`CROSS_WINDOW`] 個交易日穿越 [`CROSS_MA_DAYS`] 日均線的日子，由新到舊、同一天依均線天數。
-fn recent_crosses(points: &[(chrono::NaiveDate, f64)]) -> Vec<MovingAverageCross> {
+fn recent_crosses(points: &[(jiff::civil::Date, f64)]) -> Vec<MovingAverageCross> {
     let mut crosses: Vec<MovingAverageCross> = CROSS_MA_DAYS
         .iter()
         .flat_map(|&days| regime::crosses(points, days, CROSS_WINDOW))

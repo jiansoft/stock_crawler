@@ -1,13 +1,15 @@
 //! 技術指標計算、還原權值與訊號判斷的純函式測試。
 
-use chrono::NaiveDate;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 use super::detection::{ma_name, price_text};
 use super::indicators::{bar_high, bar_low, macd, rsi};
 use super::*;
 
-fn day(offset: usize) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 1, 1).expect("有效日期") + chrono::Days::new(offset as u64)
+fn day(offset: usize) -> Date {
+    date(2026, 1, 1) + (offset as i64).days()
 }
 
 /// 只有收盤價的日線（最高、最低等於收盤）。

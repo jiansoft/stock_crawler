@@ -1,10 +1,12 @@
 //! BigGo 即時報價的測試；連外的測試標 #[ignore]。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 use crate::infra::crawler::biggo::Envelope;
+use jiff::civil::Date;
 
-fn day(year: i32, month: u32, day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(year, month, day).unwrap()
+fn day(year: i32, month: u32, day: u32) -> Date {
+    ymd(year, month, day).unwrap()
 }
 
 fn parse(json: &str) -> CurrentPrice {

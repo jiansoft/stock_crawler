@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
@@ -5,7 +6,6 @@ use std::{
 };
 
 use anyhow::Result;
-use chrono::Local;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -129,7 +129,7 @@ where
             }
             fs.return_on_equity = roe;
             fs.return_on_assets = roa;
-            fs.updated_time = Local::now();
+            fs.updated_time = TaipeiDateTime::now();
             match repo.update_statement_roe_roa(fs).await {
                 Ok(()) => run.updated += 1,
                 Err(why) => tracing::error!("{why:?}"),

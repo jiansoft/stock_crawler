@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::domain::performance::entity::{CorporateAction, DividendEvent};
@@ -17,10 +17,10 @@ pub trait CagrSourceRepository: Send + Sync {
     ///
     /// 用於把「執行日 − N 個月」的名目目標日對齊到實際有報價的交易日。
     /// 資料庫中無任何早於該日的報價時回傳 `None`，代表該期間無法計算。
-    async fn fetch_trading_day_on_or_before(&self, date: NaiveDate) -> Result<Option<NaiveDate>>;
+    async fn fetch_trading_day_on_or_before(&self, date: Date) -> Result<Option<Date>>;
 
     /// 取得最新一個交易日。
-    async fn fetch_latest_trading_day(&self) -> Result<Option<NaiveDate>>;
+    async fn fetch_latest_trading_day(&self) -> Result<Option<Date>>;
 
     /// 取得計算母體：未下市的股票代號。
     async fn fetch_active_symbols(&self) -> Result<Vec<String>>;
@@ -31,19 +31,19 @@ pub trait CagrSourceRepository: Send + Sync {
     /// 欄位（ISIN 爬蟲雖有抓 `listing_date`，但在防腐層即被丟棄），因此改由
     /// 報價資料推斷。注意 `DailyQuotes` 存在 `1970-01-01` 這類預設哨兵值，
     /// 實作必須排除。
-    async fn fetch_first_quote_dates(&self) -> Result<Vec<(String, NaiveDate)>>;
+    async fn fetch_first_quote_dates(&self) -> Result<Vec<(String, Date)>>;
 
     /// 取得指定交易日全市場的收盤價（僅回傳大於零者）。
-    async fn fetch_closing_prices_on(&self, date: NaiveDate) -> Result<Vec<(String, Decimal)>>;
+    async fn fetch_closing_prices_on(&self, date: Date) -> Result<Vec<(String, Decimal)>>;
 
     /// 取得每檔股票在指定日期區間內的第一筆報價（日期與收盤價）。
     ///
     /// 用於 2.4 的寬限規則：名目期初日當天無報價時，往後找寬限期內的第一筆。
     async fn fetch_first_quote_within(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<(String, NaiveDate, Decimal)>>;
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<(String, Date, Decimal)>>;
 
     /// 取得指定日期之後所有股票的除權息事件。
     ///
@@ -58,7 +58,7 @@ pub trait CagrSourceRepository: Send + Sync {
     ///    （17,553 筆）、`'尚未公布'`、空字串，甚至有 `'1.39%'` 這類百分比
     ///    字串。**絕不可在 SQL 中做 `::date` 轉型**，必須取出原始字串後在
     ///    Rust 端解析，解析失敗者視為該日期不存在（`None`）。
-    async fn fetch_dividend_events_since(&self, since: NaiveDate) -> Result<Vec<DividendEvent>>;
+    async fn fetch_dividend_events_since(&self, since: Date) -> Result<Vec<DividendEvent>>;
 
     /// 批次取得指定 (股票代號, 日期) 組合的收盤價。
     ///
@@ -66,8 +66,8 @@ pub trait CagrSourceRepository: Send + Sync {
     /// 十年份的除權息事件約有數萬筆，逐筆查詢會產生數萬次往返。
     async fn fetch_closing_prices_at(
         &self,
-        pairs: &[(String, NaiveDate)],
-    ) -> Result<Vec<(String, NaiveDate, Decimal)>>;
+        pairs: &[(String, Date)],
+    ) -> Result<Vec<(String, Date, Decimal)>>;
 
     /// 取得指定日期之後所有已登錄的公司行動（分割／減資）。
     ///
@@ -75,8 +75,7 @@ pub trait CagrSourceRepository: Send + Sync {
     /// 公開端點可自動匯入。內容雖少（一年數十筆），但少了它，跨越分割日的
     /// 報酬率會嚴重失真 —— 2025-06-18 元大台灣50 的 1:4 分割會讓兩年期
     /// 報酬顯示為 −38%。
-    async fn fetch_corporate_actions_since(&self, since: NaiveDate)
-    -> Result<Vec<CorporateAction>>;
+    async fn fetch_corporate_actions_since(&self, since: Date) -> Result<Vec<CorporateAction>>;
 
     /// 找出指定期間內疑似減資或分割的「事件」，回傳 (股票代號, 發生日)。
     ///
@@ -88,9 +87,5 @@ pub trait CagrSourceRepository: Send + Sync {
     /// 若只回傳代號，就只能用最長期間算一次再套用到所有期間 —— 那會讓 2017 年
     /// 的減資把 3 個月期間的結果也標記為異常，語義完全錯誤。回傳事件讓呼叫端
     /// 用單次查詢的結果依日期切分到各期間。
-    async fn fetch_anomaly_events(
-        &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<(String, NaiveDate)>>;
+    async fn fetch_anomaly_events(&self, from: Date, to: Date) -> Result<Vec<(String, Date)>>;
 }

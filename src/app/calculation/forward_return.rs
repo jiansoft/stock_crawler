@@ -5,7 +5,7 @@
 //! 所以只要每個交易日都跑過一次，所有基準日的各天期都會補齊；重跑會覆寫同樣的值。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::domain::quote::forward_return::{self, FORWARD_HORIZONS, ForwardReturnRepository};
 use crate::infra::database::repository::quote::PgQuoteRepository;
@@ -15,12 +15,12 @@ use crate::infra::database::repository::quote::PgQuoteRepository;
 /// # Errors
 ///
 /// 查詢交易日或寫入失敗時回傳錯誤。
-pub async fn calculate_forward_returns(end: NaiveDate) -> Result<u64> {
+pub async fn calculate_forward_returns(end: Date) -> Result<u64> {
     run(&PgQuoteRepository::new(), end).await
 }
 
 /// [`calculate_forward_returns`] 的本體，倉儲可替換以便測試。
-pub(crate) async fn run(repo: &impl ForwardReturnRepository, end: NaiveDate) -> Result<u64> {
+pub(crate) async fn run(repo: &impl ForwardReturnRepository, end: Date) -> Result<u64> {
     let longest = FORWARD_HORIZONS.iter().copied().max().unwrap_or_default();
     let dates = repo
         .fetch_trading_dates(end, longest + 1)

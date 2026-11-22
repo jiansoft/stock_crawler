@@ -1,6 +1,7 @@
 //! 收盤衍生資料檢查：技術訊號、未來報酬與相對強度缺了就只重算缺的那一步並告警。
 
 use super::*;
+use jiff::civil::Date;
 
 /// 收盤匯總最後幾步產生的衍生資料（依計算順序：相對強度要用到未來報酬）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +28,7 @@ impl Derived {
 /// （收盤匯總在這兩步之前中斷、或這兩步失敗），就只重算缺的那一步並告警。
 ///
 /// 當天不是交易日（沒有日線）或交易日不足 5 天時不檢查。
-pub(super) async fn ensure_derived(date: NaiveDate) -> Result<()> {
+pub(super) async fn ensure_derived(date: Date) -> Result<()> {
     let report = check_derived(&PgQuoteRepository::new(), date, |derived| async move {
         match derived {
             Derived::Signals => calculation::technical_signal::calculate_technical_signals(date)
@@ -54,7 +55,7 @@ pub(super) async fn ensure_derived(date: NaiveDate) -> Result<()> {
 /// 不需要告警時回 `None`。倉儲與重算可替換以便測試。
 pub(crate) async fn check_derived<R, F, Fut>(
     repo: &R,
-    date: NaiveDate,
+    date: Date,
     recompute: F,
 ) -> Result<Option<(&'static str, String)>>
 where
@@ -109,7 +110,7 @@ pub(crate) fn missing_derived(counts: DerivedCounts) -> Vec<Derived> {
 
 /// 衍生資料告警內容：缺哪些、重算失敗的原因、重算後的狀況。
 pub(super) fn derived_report(
-    date: NaiveDate,
+    date: Date,
     before: &[Derived],
     errors: &[String],
     after: &[Derived],

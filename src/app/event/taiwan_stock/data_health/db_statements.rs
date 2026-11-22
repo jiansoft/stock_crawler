@@ -4,9 +4,9 @@
 //! 查詢只有資料庫自己的累計值看得到。累計值從統計重置起一直加，所以每次週報把當下的累計值存進
 //! Redis，下次用差額算出這一週；沒有上次的值（第一次、Redis 過期）或統計重置過時，改列自重置起的累計。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::collections::HashMap;
 
-use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use super::*;
@@ -28,15 +28,15 @@ const QUERY_HEAD_CHARS: usize = 48;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(super) struct SavedStatements {
     /// 存的時候的統計重置時間；與現在不同代表中間重置過，差額不能用。
-    pub(super) stats_reset: DateTime<Local>,
+    pub(super) stats_reset: TaipeiDateTime,
     /// 存的時間（週報顯示「自上次週報起」）。
-    pub(super) saved_at: DateTime<Local>,
+    pub(super) saved_at: TaipeiDateTime,
     /// 各語句的累計值。
     pub(super) totals: HashMap<i64, (i64, f64)>,
 }
 
 impl SavedStatements {
-    pub(super) fn new(stats: &StatementStats, saved_at: DateTime<Local>) -> Self {
+    pub(super) fn new(stats: &StatementStats, saved_at: TaipeiDateTime) -> Self {
         Self {
             stats_reset: stats.stats_reset,
             saved_at,
@@ -69,7 +69,7 @@ pub(super) struct TopStatements {
     /// `true` 為自上次週報起的差額，`false` 為自統計重置起的累計。
     pub(super) since_previous: bool,
     /// 期間起點。
-    pub(super) since: DateTime<Local>,
+    pub(super) since: TaipeiDateTime,
     /// 依期間內累計毫秒由多到少。
     pub(super) top: Vec<TopStatement>,
 }
@@ -138,7 +138,7 @@ pub(super) fn statement_line(
         } else {
             "統計重置 "
         },
-        top.since.format("%m-%d %H:%M")
+        top.since.strftime("%m-%d %H:%M")
     );
     if top.top.is_empty() {
         return format!("資料庫端耗時：{since}沒有新的語句");
@@ -186,7 +186,7 @@ pub(super) async fn load(key: &str) -> Option<SavedStatements> {
 
 /// 把這次的累計值存到 `key`，給下次週報算差額；失敗只記日誌。
 pub(super) async fn save(key: &str, stats: &StatementStats) {
-    let saved = SavedStatements::new(stats, Local::now());
+    let saved = SavedStatements::new(stats, TaipeiDateTime::now());
     let result = match serde_json::to_string(&saved) {
         Ok(text) => CLIENT
             .set(key, text, SNAPSHOT_TTL_SECONDS)

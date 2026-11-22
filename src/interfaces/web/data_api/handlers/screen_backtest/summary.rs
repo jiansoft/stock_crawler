@@ -1,7 +1,5 @@
 //! 條件選股回測的績效彙總：累積與年化報酬、最大回撤、勝率、波動率與夏普值，以及依年度的彙總。
 
-use chrono::Datelike;
-
 use super::{PeriodCost, PeriodRow, round2, round4};
 use crate::interfaces::web::data_api::dto::{BacktestSummary, BacktestYear};
 
@@ -245,7 +243,7 @@ pub(super) fn year_summary(chunk: &[(&PeriodRow, &PeriodCost)]) -> BacktestYear 
         .collect();
     let has_etf = chunk.iter().any(|(row, _)| row.etf_return.is_some());
     BacktestYear {
-        year: chunk[0].0.date.year(),
+        year: i32::from(chunk[0].0.date.year()),
         periods: chunk.len() as i64,
         total_return: cumulative(returns.iter().copied()),
         total_return_after_costs: cumulative(chunk.iter().map(|(_, cost)| cost.net_return)),

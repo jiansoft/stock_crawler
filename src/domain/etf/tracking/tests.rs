@@ -1,12 +1,14 @@
 //! 指定基準的年化追蹤誤差；比較相同起訖日期的含息日報酬，避免缺日造成錯配的測試。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::date;
 #[test]
 fn identical_returns_have_zero_error_and_missing_intervals_are_not_mismatched() {
-    let first = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    let first = date(2026, 1, 1);
     let series: Vec<_> = (0..160)
         .map(|i| PriceBar {
-            date: first + chrono::Days::new(i),
+            date: first + i64::from(i).days(),
             close: 100.0 + (i * i) as f64 / 100.0,
             high: 100.0,
             low: 100.0,
@@ -32,7 +34,7 @@ fn identical_returns_have_zero_error_and_missing_intervals_are_not_mismatched() 
 
 #[test]
 fn minimum_sample_and_sample_standard_deviation_match_known_returns() {
-    let date = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    let date = date(2026, 1, 1);
     let mut close = 100.0;
     let fund: Vec<_> = (0..121)
         .map(|i| {
@@ -40,7 +42,7 @@ fn minimum_sample_and_sample_standard_deviation_match_known_returns() {
                 close *= if i % 2 == 0 { 0.99 } else { 1.01 };
             }
             PriceBar {
-                date: date + chrono::Days::new(i),
+                date: date + i64::from(i).days(),
                 close,
                 high: close,
                 low: close,

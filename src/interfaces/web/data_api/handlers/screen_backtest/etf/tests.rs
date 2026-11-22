@@ -6,10 +6,11 @@ use super::super::{
     summary::summarize,
 };
 use super::*;
+use crate::core::util::datetime::ymd;
 
 /// 建立固定日期，涵蓋 0050 分割停牌期間。
-fn day(month: u32, day: u32) -> chrono::NaiveDate {
-    chrono::NaiveDate::from_ymd_opt(2025, month, day).unwrap()
+fn day(month: u32, day: u32) -> jiff::civil::Date {
+    ymd(2025, month, day).unwrap()
 }
 
 /// 期末與日頻使用同一組已還原價格，次日開盤仍從市場進場日起算。

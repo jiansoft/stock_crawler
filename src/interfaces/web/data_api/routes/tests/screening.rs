@@ -1,5 +1,7 @@
 //! 選股 endpoint 財務體質與營收動能篩選條件的資料庫語意整合測試。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
 use rust_decimal::Decimal;
 
 use super::support::{SEED_STOCK, SYMBOL, cleanup, get, pool_or_skip, seed};
@@ -13,16 +15,14 @@ use super::*;
     ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
 )]
 async fn stock_screen_financial_health_filters() {
-    use chrono::Datelike;
-
     let Some(pool) = pool_or_skip("stock_screen_financial_health_filters").await else {
         return;
     };
     cleanup(pool).await;
     seed(pool, &[SEED_STOCK]).await;
     // 新鮮度以查詢當天判斷，期間只能由今天推算；列屬於假代號，結束時清除。
-    let today = chrono::Local::now().date_naive();
-    let quarter = i16::try_from(today.month0() / 3 + 1).expect("季別 1–4");
+    let today = today();
+    let quarter = i16::from((today.month() - 1) / 3 + 1);
     sqlx::query(
         "INSERT INTO financial_health (stock_symbol, f_score_year, f_score, f_score_evaluated, quarter_year, quarter, gross_margin_percent, debt_ratio_percent, free_cash_flow_ttm) VALUES ($1, $2, 8, 9, $3, $4, 42.5, 35.25, 1200)",
     )
@@ -104,17 +104,15 @@ async fn stock_screen_financial_health_filters() {
     ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
 )]
 async fn stock_screen_revenue_momentum_filters() {
-    use chrono::{Datelike, Months};
-
     let Some(pool) = pool_or_skip("stock_screen_revenue_momentum_filters").await else {
         return;
     };
     cleanup(pool).await;
     seed(pool, &[SEED_STOCK]).await;
     // 新鮮度以查詢當天判斷，營收月份只能由今天往前推；列屬於假代號，結束時清除。
-    let today = chrono::Local::now().date_naive();
+    let today = today();
     let month_code = |back: u32| {
-        let month = today - Months::new(back);
+        let month = today - i64::from(back).months();
         i64::from(month.year()) * 100 + i64::from(month.month())
     };
     // 由新到舊：年增 10、20、5、-3、8 → 連續 3 個月；近 3 月合計 335 對 300 → 11.67%。

@@ -1,6 +1,9 @@
 //! 以真實 PostgreSQL 驗證條件選股核心查詢的執行計畫（EXPLAIN ANALYZE）。
 
 use super::*;
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 /// P0-4：以實際 PostgreSQL 對 Phase 2/3 核心查詢執行 EXPLAIN ANALYZE。
 ///
@@ -24,9 +27,9 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
 
     // SQL 與 production 使用相同 WHERE、JOIN、排序及 LIMIT；EXPLAIN 不寫資料。
     let valuation: Vec<String> = sqlx::query_scalar(r#"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT security_code, date, closing_price FROM estimate WHERE security_code = $1 AND ($2::date IS NULL OR (date <= $2 AND date >= $2 - 30)) ORDER BY date DESC LIMIT 1"#)
-        .bind(symbol).bind(Option::<NaiveDate>::None).fetch_all(pool).await.expect("valuation EXPLAIN");
+        .bind(symbol).bind(Option::<Date>::None.map(ToSqlx::to_sqlx)).fetch_all(pool).await.expect("valuation EXPLAIN");
     let breadth: Vec<String> = sqlx::query_scalar(r#"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) WITH endpoint AS (SELECT MAX(date) AS date FROM daily_stock_price_stats WHERE stock_exchange_market_id = $1 AND ($2::date IS NULL OR (date <= $2 AND date >= $2 - 30))) SELECT s.date FROM daily_stock_price_stats s CROSS JOIN endpoint e WHERE s.stock_exchange_market_id = $1 AND s.date <= e.date ORDER BY s.date DESC LIMIT $3"#)
-        .bind(0_i32).bind(Option::<NaiveDate>::None).bind(20_i64).fetch_all(pool).await.expect("breadth EXPLAIN");
+        .bind(0_i32).bind(Option::<Date>::None.map(ToSqlx::to_sqlx)).bind(20_i64).fetch_all(pool).await.expect("breadth EXPLAIN");
     let ranking: Vec<String> = sqlx::query_scalar(r#"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT y.security_code FROM yield_rank y JOIN stocks s ON s.stock_symbol = y.security_code JOIN "DailyQuotes" q ON q."Serial" = y.daily_quotes_serial JOIN dividend d ON d.serial = y.dividend_serial WHERE y.date = (SELECT MAX(date) FROM yield_rank) AND s.stock_exchange_market_id IN (2,4) ORDER BY y.yield DESC, y.security_code ASC LIMIT 20"#)
         .fetch_all(pool).await.expect("ranking EXPLAIN");
     let screen_sql = format!(
@@ -35,7 +38,7 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
     let screen: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(screen_sql.as_str()))
         .bind(0_i32)
         .bind(Option::<i32>::None)
-        .bind(chrono::Local::now().date_naive())
+        .bind(today().to_sqlx())
         .bind(Option::<Decimal>::None)
         .bind(Option::<Decimal>::None)
         .bind(Option::<Decimal>::None)
@@ -68,7 +71,12 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(Vec::<Decimal>::new())
         .bind(Option::<Decimal>::None)
         .bind(Vec::<String>::new())
-        .bind(Vec::<chrono::NaiveDate>::new())
+        .bind(
+            Vec::<jiff::civil::Date>::new()
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(Vec::<String>::new())
         .bind(false)
         .bind(Option::<Decimal>::None)

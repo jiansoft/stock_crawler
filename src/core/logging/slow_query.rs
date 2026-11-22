@@ -5,9 +5,11 @@
 
 mod origin;
 
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil;
+use jiff::civil::Date;
 use std::{collections::HashMap, sync::Mutex};
 
-use chrono::{Local, NaiveDate, NaiveDateTime};
 use once_cell::sync::Lazy;
 
 pub use origin::{Origin, in_api, in_job};
@@ -26,7 +28,7 @@ const SOURCE_FIELD: &str = "source";
 
 /// 行程內唯一的統計；起點是 [`init`] 被呼叫的時間（程式啟動時）。
 static STATS: Lazy<Mutex<SlowQueryStats>> =
-    Lazy::new(|| Mutex::new(SlowQueryStats::new(Local::now().naive_local())));
+    Lazy::new(|| Mutex::new(SlowQueryStats::new(TaipeiDateTime::now().datetime())));
 
 /// 單一類別的筆數與最長耗時。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -142,14 +144,14 @@ pub fn parse_log_line(line: &str) -> Option<(String, f64, Origin)> {
 #[derive(Debug)]
 pub(crate) struct SlowQueryStats {
     /// 行程開始統計的時間。
-    started: NaiveDateTime,
+    started: civil::DateTime,
     /// 目前累計的日期；跨日第一筆時歸零。
-    day: Option<NaiveDate>,
+    day: Option<Date>,
     tally: SlowQueryTally,
 }
 
 impl SlowQueryStats {
-    pub(crate) fn new(started: NaiveDateTime) -> Self {
+    pub(crate) fn new(started: civil::DateTime) -> Self {
         Self {
             started,
             day: None,
@@ -158,7 +160,13 @@ impl SlowQueryStats {
     }
 
     /// 記一筆慢查詢；`summary` 是 sqlx 的摘要（截斷時結尾帶「 …」）。
-    pub(crate) fn record(&mut self, now: NaiveDateTime, summary: &str, secs: f64, origin: Origin) {
+    pub(crate) fn record(
+        &mut self,
+        now: civil::DateTime,
+        summary: &str,
+        secs: f64,
+        origin: Origin,
+    ) {
         let day = now.date();
         if self.day != Some(day) {
             self.day = Some(day);
@@ -168,9 +176,9 @@ impl SlowQueryStats {
     }
 
     /// `today` 的彙總文字：總筆數、統計起點（當天啟動時）、依來源的筆數，以及筆數最多的前幾類與各自最長耗時。
-    pub(crate) fn summary(&self, today: NaiveDate) -> String {
+    pub(crate) fn summary(&self, today: Date) -> String {
         let since = if self.started.date() == today {
-            format!("（自 {} 起）", self.started.format("%H:%M"))
+            format!("（自 {} 起）", self.started.strftime("%H:%M"))
         } else {
             String::new()
         };
@@ -213,7 +221,7 @@ pub(super) fn observe(
         extra.push((SOURCE_FIELD.to_owned(), serde_json::Value::from(source)));
     }
     if let Ok(mut stats) = STATS.lock() {
-        stats.record(Local::now().naive_local(), &summary, secs, origin);
+        stats.record(TaipeiDateTime::now().datetime(), &summary, secs, origin);
     }
 }
 
@@ -229,7 +237,7 @@ fn slow_statement_fields(extra: &[(String, serde_json::Value)]) -> Option<(&str,
 }
 
 /// 今天的慢查詢彙總文字（見 [`SlowQueryStats::summary`]）。
-pub fn daily_summary(today: NaiveDate) -> String {
+pub fn daily_summary(today: Date) -> String {
     STATS
         .lock()
         .map(|stats| stats.summary(today))

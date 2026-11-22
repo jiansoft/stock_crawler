@@ -3,10 +3,9 @@
 //! 測試庫沒有預先載入這個擴充，交易內以同名的暫存表代替：暫存 schema 排在搜尋路徑最前面，
 //! 查詢會讀到暫存表；rollback 後不留痕跡。
 
-use chrono::DateTime;
-
 use super::statements::read_statements;
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::domain::health::StatementStat;
 
 #[tokio::test]
@@ -53,7 +52,9 @@ async fn read_statements_merges_users_and_skips_nested_and_other_databases() {
 
     assert_eq!(
         stats.stats_reset,
-        DateTime::parse_from_rfc3339("2026-10-19T22:22:34+08:00").unwrap()
+        "2026-10-19T22:22:34+08:00"
+            .parse::<TaipeiDateTime>()
+            .unwrap()
     );
     assert_eq!(
         stats.rows,

@@ -7,7 +7,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{DateTime, NaiveDate, Utc};
+use jiff::Timestamp;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::{
@@ -51,7 +53,7 @@ pub(crate) async fn market_breadth(Query(params): Query<MarketBreadthParams>) ->
     }
     // 統計表主鍵／唯一鍵以市場與日期定位。指定日期時只允許最新一筆落在
     // 31 天回溯窗內；一旦找到終點，再向前取 N 個「有資料的交易日」。
-    let rows: Result<Vec<MarketBreadthRow>, _> = sqlx::query_as(r#"WITH endpoint AS (SELECT MAX(date) AS date FROM daily_stock_price_stats WHERE stock_exchange_market_id = $1 AND ($2::date IS NULL OR (date <= $2 AND date >= $2 - 30))) SELECT s.date, s.undervalued, s.fair_valued, s.overvalued, s.highly_overvalued, s.below_5_day_moving_average, s.above_5_day_moving_average, s.below_20_day_moving_average, s.above_20_day_moving_average, s.below_60_day_moving_average, s.above_60_day_moving_average, s.below_120_day_moving_average, s.above_120_day_moving_average, s.below_240_day_moving_average, s.above_240_day_moving_average, s.stocks_up, s.stocks_down, s.stocks_unchanged, s.new_52_week_high, s.new_52_week_low, s.updated_at FROM daily_stock_price_stats s CROSS JOIN endpoint e WHERE s.stock_exchange_market_id = $1 AND s.date <= e.date ORDER BY s.date DESC LIMIT $3"#).bind(market_id).bind(date).bind(i64::from(days)).fetch_all(database::get_connection()).await;
+    let rows: Result<Vec<MarketBreadthRow>, _> = sqlx::query_as(r#"WITH endpoint AS (SELECT MAX(date) AS date FROM daily_stock_price_stats WHERE stock_exchange_market_id = $1 AND ($2::date IS NULL OR (date <= $2 AND date >= $2 - 30))) SELECT s.date, s.undervalued, s.fair_valued, s.overvalued, s.highly_overvalued, s.below_5_day_moving_average, s.above_5_day_moving_average, s.below_20_day_moving_average, s.above_20_day_moving_average, s.below_60_day_moving_average, s.above_60_day_moving_average, s.below_120_day_moving_average, s.above_120_day_moving_average, s.below_240_day_moving_average, s.above_240_day_moving_average, s.stocks_up, s.stocks_down, s.stocks_unchanged, s.new_52_week_high, s.new_52_week_low, s.updated_at FROM daily_stock_price_stats s CROSS JOIN endpoint e WHERE s.stock_exchange_market_id = $1 AND s.date <= e.date ORDER BY s.date DESC LIMIT $3"#).bind(market_id).bind(date.map(ToSqlx::to_sqlx)).bind(i64::from(days)).fetch_all(database::get_connection()).await;
     match rows {
         Ok(rows) if rows.is_empty() => error_response(StatusCode::NOT_FOUND, "查無市場廣度資料"),
         Ok(rows) => {
@@ -99,7 +101,7 @@ pub(crate) async fn market_index_history(
     // `'TAIEX'` 是程式內固定字面值（契約規定），不是呼叫端輸入；
     // `index-date_category-uidx` 以 (date, category) 為鍵，P0-4 已驗證此
     // 查詢走索引反向掃描（0.06ms）。`$1/$2` 為 NULL 時代表不限制區間。
-    let rows: Result<Vec<IndexPointRow>, _> = sqlx::query_as(r#"SELECT "date", index, change, trade_value, "transaction", trading_volume FROM index WHERE category = 'TAIEX' AND ($1::date IS NULL OR "date" >= $1) AND ($2::date IS NULL OR "date" <= $2) ORDER BY "date" DESC LIMIT $3"#).bind(from).bind(to).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
+    let rows: Result<Vec<IndexPointRow>, _> = sqlx::query_as(r#"SELECT "date", index, change, trade_value, "transaction", trading_volume FROM index WHERE category = 'TAIEX' AND ($1::date IS NULL OR "date" >= $1) AND ($2::date IS NULL OR "date" <= $2) ORDER BY "date" DESC LIMIT $3"#).bind(from.map(ToSqlx::to_sqlx)).bind(to.map(ToSqlx::to_sqlx)).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
     match rows {
         Ok(rows) => {
             // 清單固定新到舊（§3.1），第一筆即最新一筆；空清單時
@@ -132,7 +134,8 @@ fn build_market_breadth_response(history: Vec<MarketBreadth>) -> Option<MarketBr
 #[derive(sqlx::FromRow)]
 struct MarketBreadthRow {
     /// 統計日期。
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     /// 低估家數。
     undervalued: i32,
     /// 合理估值家數。
@@ -172,7 +175,8 @@ struct MarketBreadthRow {
     /// 創 52 週新低家數。
     new_52_week_low: i32,
     /// 最後更新時間。
-    updated_at: Option<DateTime<Utc>>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Timestamp>")]
+    updated_at: Option<Timestamp>,
 }
 
 impl MarketBreadthRow {
@@ -213,7 +217,8 @@ impl MarketBreadthRow {
 #[derive(sqlx::FromRow)]
 struct IndexPointRow {
     /// 指數日期。
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     /// 收盤指數。
     index: Option<Decimal>,
     /// 漲跌點數。

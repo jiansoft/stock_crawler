@@ -1,5 +1,6 @@
 //! 公開資訊觀測站「上市公司股利分派情形」採集器的測試；連外的測試標 #[ignore]。
 
+use crate::core::util::datetime::ymd;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -26,8 +27,8 @@ fn test_parse_allotments_with_fixture() {
     assert_eq!(annual.earnings_stock, dec!(1.0));
     assert_eq!(annual.cash_dividend(), dec!(1.5));
     assert_eq!(annual.stock_dividend(), dec!(1.0));
-    assert_eq!(annual.period_start, NaiveDate::from_ymd_opt(2025, 1, 1));
-    assert_eq!(annual.period_end, NaiveDate::from_ymd_opt(2025, 12, 31));
+    assert_eq!(annual.period_start, ymd(2025, 1, 1));
+    assert_eq!(annual.period_end, ymd(2025, 12, 31));
 
     // 資本公積發放的現金要算進公積現金股利，不能記成盈餘配息。
     let reserve = result
@@ -53,8 +54,8 @@ fn test_parse_allotments_with_fixture() {
 
 #[test]
 fn test_resolve_quarter_falls_back_to_period() {
-    let start = NaiveDate::from_ymd_opt(2025, 4, 1);
-    let end = NaiveDate::from_ymd_opt(2025, 6, 30);
+    let start = ymd(2025, 4, 1);
+    let end = ymd(2025, 6, 30);
 
     // 已知文字優先。
     assert_eq!(resolve_quarter("第3季", start, end).as_deref(), Some("Q3"));
@@ -67,8 +68,8 @@ fn test_resolve_quarter_falls_back_to_period() {
 #[test]
 fn test_parse_period() {
     let (start, end) = parse_period("1140101~1141231");
-    assert_eq!(start, NaiveDate::from_ymd_opt(2025, 1, 1));
-    assert_eq!(end, NaiveDate::from_ymd_opt(2025, 12, 31));
+    assert_eq!(start, ymd(2025, 1, 1));
+    assert_eq!(end, ymd(2025, 12, 31));
 
     let (start, end) = parse_period("");
     assert!(start.is_none());

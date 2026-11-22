@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 一檔持有部位。
 #[derive(Debug, Clone, PartialEq)]
@@ -30,7 +30,7 @@ pub struct EtfConstituent {
     /// ETF 代號。
     pub etf_symbol: String,
     /// 持股資料日期。
-    pub as_of: NaiveDate,
+    pub as_of: Date,
     /// 台股成分股代號；債券等沒有代號為空字串。
     pub holding_symbol: String,
     /// 名稱。
@@ -86,7 +86,7 @@ pub struct EtfLookThrough {
     /// 市值（元）。
     pub market_value: f64,
     /// 前十大持股的資料日期；沒有前十大時為 `None`。
-    pub holdings_as_of: Option<NaiveDate>,
+    pub holdings_as_of: Option<Date>,
     /// 前十大持股的權重合計（%），即可拆解的比例。
     pub covered_weight: f64,
 }

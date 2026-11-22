@@ -1,10 +1,11 @@
 //! 市場廣度：上市櫃合併站上 20／60／240 日均線的股票比例與創 52 週新高／新低的家數的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 
 fn day(d: u32, above_ma60: i32, new_high: i32, new_low: i32) -> BreadthDay {
     BreadthDay {
-        date: NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期"),
+        date: ymd(2026, 10, d).expect("合法日期"),
         above_ma20: 30,
         below_ma20: 70,
         above_ma60,

@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{DateTime, Local};
 use scraper::{Html, Selector};
 
 use crate::{
@@ -37,14 +37,14 @@ pub struct InternationalSecuritiesIdentificationNumber {
 pub async fn visit(
     mode: StockExchangeMarket,
 ) -> Result<Vec<InternationalSecuritiesIdentificationNumber>> {
-    visit_on(Local::now(), mode).await
+    visit_on(TaipeiDateTime::now(), mode).await
 }
 
 /// [`visit`] 的本體：`now` 落在週末時直接回空（來源不更新）。
 ///
 /// 排程入口自己帶入現在時間時用這個，週末判斷才能以固定日期測試。
 pub(crate) async fn visit_on(
-    now: DateTime<Local>,
+    now: TaipeiDateTime,
     mode: StockExchangeMarket,
 ) -> Result<Vec<InternationalSecuritiesIdentificationNumber>> {
     if now.is_weekend() {
@@ -76,12 +76,12 @@ async fn fetch_page(mode: StockExchangeMarket) -> Result<String> {
 pub async fn visit_all_listed_symbols(
     mode: StockExchangeMarket,
 ) -> Result<std::collections::HashSet<String>> {
-    all_listed_symbols_on(Local::now(), mode).await
+    all_listed_symbols_on(TaipeiDateTime::now(), mode).await
 }
 
 /// [`visit_all_listed_symbols`] 的本體：`now` 落在週末時直接回空集合。
 async fn all_listed_symbols_on(
-    now: DateTime<Local>,
+    now: TaipeiDateTime,
     mode: StockExchangeMarket,
 ) -> Result<std::collections::HashSet<String>> {
     if now.is_weekend() {

@@ -4,13 +4,12 @@
 //! 站點出問題時（例如 10-27 BigGo 一天 44 次 403、PcHome 92 次逾時）每筆 WARN 散落在日誌裡，
 //! 週報把最常出錯的網域列出來，單一網域一週超過 [`HOST_WARN_COUNT`] 次就標警示。只讀本機檔案。
 
+use jiff::civil::Date;
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-
-use super::*;
 
 /// 週報最多列出幾個網域。
 const LISTED_HOSTS: usize = 5;
@@ -64,11 +63,7 @@ pub(super) fn parse_http_line(line: &str) -> Option<(String, HostIssues)> {
 }
 
 /// 期間內（含起訖）warn／error 檔裡的 HTTP 異常，依網域加總；目錄或檔案讀不到時略過。
-pub(super) fn weekly_http_issues(
-    dir: &Path,
-    from: NaiveDate,
-    to: NaiveDate,
-) -> BTreeMap<String, HostIssues> {
+pub(super) fn weekly_http_issues(dir: &Path, from: Date, to: Date) -> BTreeMap<String, HostIssues> {
     let mut hosts: BTreeMap<String, HostIssues> = BTreeMap::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return hosts;
@@ -81,7 +76,7 @@ pub(super) fn weekly_http_issues(
         }
         let Some(date) = name
             .get(..10)
-            .and_then(|day| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+            .and_then(|day| Date::strptime("%Y-%m-%d", day).ok())
         else {
             continue;
         };

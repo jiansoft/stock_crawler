@@ -6,7 +6,9 @@ mod etf_look_through;
 use crate::domain::portfolio::view::HoldingView;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use chrono::{NaiveDate, Utc};
+use jiff::Timestamp;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 use super::super::allocation::{
     AllocationDrift, AllocationSection, Direction, allocation_sections, lines, section_from_result,
@@ -79,7 +81,7 @@ fn target(dimension: TargetDimension, key: &str, percent: f64) -> PortfolioTarge
         dimension,
         key: key.to_owned(),
         target_percent: percent,
-        updated_time: Utc::now(),
+        updated_time: Timestamp::now(),
     }
 }
 
@@ -343,6 +345,6 @@ fn message_includes_allocation_only_when_drifting() {
 }
 
 /// 週報的「今天」（ETF 成分資料是否過舊以此判斷）。
-fn today() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 24).expect("日期應合法")
+fn today() -> Date {
+    date(2026, 10, 24)
 }

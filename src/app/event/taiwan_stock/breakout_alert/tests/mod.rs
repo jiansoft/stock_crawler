@@ -1,5 +1,6 @@
 //! 全市場區間突破通知的單元與整合測試。
 
+use jiff::civil::Date;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -8,8 +9,8 @@ use async_trait::async_trait;
 use super::*;
 use crate::domain::quote::technical::StockTechnicalSignal;
 
-fn date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 30).expect("有效日期")
+fn date() -> Date {
+    jiff::civil::date(2026, 10, 30)
 }
 
 fn ranked(symbol: &str, name: &str, industry: &str) -> RankedSignal {
@@ -42,14 +43,14 @@ struct FakeQuery {
     outcomes_fail: bool,
     follow_ups: Vec<BreakoutFollowUp>,
     follow_ups_fail: bool,
-    got: Mutex<Option<(NaiveDate, String, SignalKind, i64)>>,
+    got: Mutex<Option<(Date, String, SignalKind, i64)>>,
 }
 
 #[async_trait]
 impl BreakoutFollowUpQuery for FakeQuery {
     async fn fetch_breakout_follow_ups(
         &self,
-        _date: NaiveDate,
+        _date: Date,
         days: i64,
     ) -> Result<Vec<BreakoutFollowUp>> {
         assert_eq!(days, 5);
@@ -64,7 +65,7 @@ fn follow_up(symbol: &str, name: &str, failed: bool) -> BreakoutFollowUp {
     BreakoutFollowUp {
         stock_symbol: symbol.to_owned(),
         name: name.to_owned(),
-        breakout_date: NaiveDate::from_ymd_opt(2026, 10, 27).expect("有效日期"),
+        breakout_date: jiff::civil::date(2026, 10, 27),
         failed,
     }
 }
@@ -73,7 +74,7 @@ fn follow_up(symbol: &str, name: &str, failed: bool) -> BreakoutFollowUp {
 impl RankedSignalQuery for FakeQuery {
     async fn fetch_ranked_signals(
         &self,
-        date: NaiveDate,
+        date: Date,
         indicator: &str,
         kind: SignalKind,
         limit: i64,
@@ -90,7 +91,7 @@ impl RankedSignalQuery for FakeQuery {
 impl TechnicalSignalQuery for FakeQuery {
     async fn fetch_signals(
         &self,
-        _date: NaiveDate,
+        _date: Date,
         _stock_symbols: &[String],
     ) -> Result<Vec<StockTechnicalSignal>> {
         Ok(Vec::new())
@@ -98,8 +99,8 @@ impl TechnicalSignalQuery for FakeQuery {
 
     async fn fetch_signal_outcomes(
         &self,
-        _from: NaiveDate,
-        _to: NaiveDate,
+        _from: Date,
+        _to: Date,
         _indicators: &[&str],
     ) -> Result<Vec<SignalOutcome>> {
         if self.outcomes_fail {

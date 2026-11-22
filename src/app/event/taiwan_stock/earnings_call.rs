@@ -14,11 +14,13 @@
 //!
 //! BigGo 的整理內容是其著作：只做個人通知，不寫進資料庫，也不經公開網站或 API 轉發。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::fmt::Write;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 
 use super::holdings;
 use crate::{
@@ -73,7 +75,7 @@ pub async fn execute() -> Result<()> {
         .await
         .context("fetch active holdings for earnings call notification failed")?;
 
-    let today = Local::now().date_naive();
+    let today = today();
     let mut summary = RunSummary {
         holdings: symbols.len(),
         ..Default::default()
@@ -168,8 +170,8 @@ async fn mark_notified(call_id: &str) {
 }
 
 /// 回看期間內（含今天）舉行的場次。
-fn recent_calls(calls: &[EarningsCall], today: NaiveDate) -> Vec<&EarningsCall> {
-    let since = today - chrono::Duration::days(LOOKBACK_DAYS);
+fn recent_calls(calls: &[EarningsCall], today: Date) -> Vec<&EarningsCall> {
+    let since = today - (LOOKBACK_DAYS).days();
     calls
         .iter()
         .filter(|call| call.date >= since && call.date <= today)

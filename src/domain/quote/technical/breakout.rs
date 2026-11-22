@@ -21,7 +21,7 @@
 //! （[`failed_breakout_signal`]）：只看最近一次突破，突破後到前一天的收盤都要守在突破價以上（含等於），
 //! 所以同一次突破只會記一次。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::RANGE_BREAKOUT_INDICATOR;
 use super::bars::PriceBar;
@@ -54,7 +54,7 @@ pub const FAILED_BREAKOUT_VOLUME_BARS: usize = RANGE_BREAKOUT_VOLUME_BARS + FAIL
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VolumeBar {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 成交量。
     pub volume: f64,
 }

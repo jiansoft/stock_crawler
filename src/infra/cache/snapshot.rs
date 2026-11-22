@@ -1,6 +1,8 @@
+use crate::core::util::datetime::today;
+use jiff::Timestamp;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
-use chrono::{Local, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
 use super::abnormal_price::report_abnormal_price;
@@ -115,7 +117,7 @@ impl Share {
             return false;
         }
 
-        let today = Local::now().date_naive();
+        let today = today();
         let emerging = match self.price_limit_on(symbol, today) {
             PriceLimit::Range { down, up } => return price >= down && price <= up,
             PriceLimit::Unlimited => true,
@@ -150,7 +152,7 @@ impl Share {
     /// 記錄各股票當天的漲跌幅限制（`date` 為台北時間的取得日期）；`Unknown` 不記錄。
     pub fn set_price_limits(
         &self,
-        date: NaiveDate,
+        date: Date,
         limits: impl IntoIterator<Item = (String, PriceLimit)>,
     ) {
         if let Ok(mut cache) = self.price_limits.write() {
@@ -163,7 +165,7 @@ impl Share {
     }
 
     /// 取得指定日期的漲跌幅限制；沒有記錄或不是當天的記錄回傳 `Unknown`。
-    pub fn price_limit_on(&self, symbol: &str, date: NaiveDate) -> PriceLimit {
+    pub fn price_limit_on(&self, symbol: &str, date: Date) -> PriceLimit {
         self.price_limits
             .read()
             .ok()
@@ -176,7 +178,7 @@ impl Share {
     /// 以新抓到的完整快照覆蓋快照快取，自動過濾與昨收價相差 10.5% 以上的異常價格，並保留舊有合法值。
     pub fn set_stock_snapshots(&self, mut snapshots: HashMap<String, RealtimeSnapshot>) {
         // 所有批次寫入在同一入口蓋章，避免各採集器自行決定資料時間。
-        let now = Utc::now();
+        let now = Timestamp::now();
         for snapshot in snapshots.values_mut() {
             snapshot.updated_at = now;
         }
@@ -241,7 +243,7 @@ impl Share {
             }
             if let Some(snapshot) = cache.get_mut(&symbol) {
                 snapshot.price = price;
-                snapshot.updated_at = Utc::now();
+                snapshot.updated_at = Timestamp::now();
             } else {
                 cache.insert(symbol.clone(), RealtimeSnapshot::new(symbol, price));
             }
@@ -279,7 +281,7 @@ impl Share {
             if let Some(snapshot) = cache.get_mut(&symbol) {
                 snapshot.price = price;
                 snapshot.source_site = source_site;
-                snapshot.updated_at = Utc::now();
+                snapshot.updated_at = Timestamp::now();
             } else {
                 let mut snapshot = RealtimeSnapshot::new(symbol.clone(), price);
                 snapshot.source_site = source_site;

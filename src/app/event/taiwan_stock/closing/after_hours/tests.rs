@@ -1,11 +1,15 @@
 //! 盤後資料完整性檢查的單元測試。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::{today, ymd};
+use jiff::civil::Date;
+use jiff::civil::date;
 use std::sync::Mutex;
 
 use super::*;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("固定日期合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("固定日期合法")
 }
 
 /// 一天的筆數：`(日, 指數, 籌碼, 外資持股)`。
@@ -48,12 +52,12 @@ fn missing_after_hours_compares_with_recent_days() {
 
 /// 依序回傳筆數的假倉儲。
 struct AfterHoursRepo {
-    dates: Vec<NaiveDate>,
+    dates: Vec<Date>,
     counts: Mutex<Vec<Vec<AfterHoursCounts>>>,
 }
 
 impl AfterHoursRepo {
-    fn new(dates: Vec<NaiveDate>, counts: Vec<Vec<AfterHoursCounts>>) -> Self {
+    fn new(dates: Vec<Date>, counts: Vec<Vec<AfterHoursCounts>>) -> Self {
         Self {
             dates,
             counts: Mutex::new(counts),
@@ -63,14 +67,14 @@ impl AfterHoursRepo {
 
 #[async_trait::async_trait]
 impl ForwardReturnRepository for AfterHoursRepo {
-    async fn fetch_trading_dates(&self, _until: NaiveDate, count: usize) -> Result<Vec<NaiveDate>> {
+    async fn fetch_trading_dates(&self, _until: Date, count: usize) -> Result<Vec<Date>> {
         Ok(self.dates.iter().copied().take(count).collect())
     }
 
     async fn upsert_forward_returns(
         &self,
-        _base: NaiveDate,
-        _end: NaiveDate,
+        _base: Date,
+        _end: Date,
         _horizon: usize,
     ) -> Result<u64> {
         Ok(0)
@@ -79,7 +83,7 @@ impl ForwardReturnRepository for AfterHoursRepo {
 
 #[async_trait::async_trait]
 impl AfterHoursDataQuery for AfterHoursRepo {
-    async fn count_after_hours(&self, dates: &[NaiveDate]) -> Result<Vec<AfterHoursCounts>> {
+    async fn count_after_hours(&self, dates: &[Date]) -> Result<Vec<AfterHoursCounts>> {
         assert_eq!(dates, self.dates.as_slice(), "以近期交易日查詢");
         Ok(self.counts.lock().expect("測試鎖").remove(0))
     }
@@ -193,7 +197,7 @@ async fn ensure_skips_day_without_quotes() {
         println!("跳過 ensure_skips_day_without_quotes：無資料庫連接");
         return;
     }
-    let date = NaiveDate::from_ymd_opt(1900, 1, 2).expect("固定日期合法");
+    let date = date(1900, 1, 2);
     ensure(date, &LATE_EVENING)
         .await
         .expect("不是交易日，不檢查");
@@ -205,7 +209,6 @@ async fn ensure_skips_day_without_quotes() {
 /// 23:00 排程入口（mock 證交所休市日表、臨時資料庫）：週末直接結束；平日但當天沒有日線時
 /// 不檢查盤後資料，只重跑一次官方本益比補寫（沒有缺值就不告警）；入口以今天為休市日執行。
 mod entries {
-    use chrono::TimeZone;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -216,17 +219,21 @@ mod entries {
     const TPEX: &str = "https://www.tpex.org.tw";
     const HOLIDAY_PATH: &str = "/rwd/zh/holidaySchedule/holidaySchedule";
 
-    fn at(year: i32, month: u32, day: u32) -> DateTime<Local> {
-        Local
-            .with_ymd_and_hms(year, month, day, 23, 0, 0)
-            .single()
-            .expect("合法時間")
+    fn at(year: i32, month: u32, day: u32) -> TaipeiDateTime {
+        TaipeiDateTime::from_datetime(
+            crate::core::util::datetime::ymd(year, month, day)
+                .and_then(|day| {
+                    crate::core::util::datetime::hms(23, 0, 0).map(|time| day.to_datetime(time))
+                })
+                .expect("合法時間"),
+        )
+        .expect("合法時間")
     }
 
-    async fn holiday_server(holidays: &[NaiveDate]) -> MockServer {
+    async fn holiday_server(holidays: &[Date]) -> MockServer {
         let data: Vec<serde_json::Value> = holidays
             .iter()
-            .map(|day| serde_json::json!([day.format("%Y-%m-%d").to_string(), "測試休市", ""]))
+            .map(|day| serde_json::json!([day.strftime("%Y-%m-%d").to_string(), "測試休市", ""]))
             .collect();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -256,7 +263,7 @@ mod entries {
             );
             return;
         }
-        let today = Local::now().date_naive();
+        let today = today();
         let server = holiday_server(&[today]).await;
         let uri = server.uri();
 

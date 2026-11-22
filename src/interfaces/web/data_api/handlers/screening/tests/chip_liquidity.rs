@@ -1,6 +1,7 @@
 //! 條件選股整合測試：法人連續買超天數與平均成交金額門檻。
 
 use super::*;
+use jiff::civil::date;
 
 /// 法人連續買超門檻：以固定歷史查詢日 1988-03-05 執行選股，資料日回推到 03-03；
 /// 外資連買 3 天、投信連買 2 天的股票在門檻以內出現並輸出天數，超過門檻即不符合。
@@ -40,7 +41,7 @@ async fn screen_at_filters_chip_streaks() {
     }
     crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let query_date = date(1988, 3, 5);
     let run = |foreign: Option<u8>, trust: Option<u8>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);
@@ -116,7 +117,7 @@ async fn screen_at_filters_avg_trade_value() {
             .expect("種入選股日線資料");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let query_date = date(1988, 3, 5);
     let run = |minimum: u32| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

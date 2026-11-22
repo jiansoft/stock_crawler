@@ -1,11 +1,13 @@
 //! 三大法人期間淨買賣與連續買賣超天數（讀 `chip_daily` 的全市場資料）的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::sync::Mutex;
 
 use super::*;
 
-fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn day(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("合法日期")
 }
 
 /// 期間：資料日為第一天、天數不超過已有的交易日；沒有交易日為 None。
@@ -24,13 +26,13 @@ fn flow_period_counts_trading_days() {
 /// 記錄查詢條件的假查詢。
 #[derive(Default)]
 struct FakeChip {
-    dates: Vec<NaiveDate>,
+    dates: Vec<Date>,
     got: Mutex<Vec<String>>,
 }
 
 #[async_trait]
 impl ChipFlowQuery for FakeChip {
-    async fn fetch_chip_dates(&self, _until: NaiveDate) -> Result<Vec<NaiveDate>> {
+    async fn fetch_chip_dates(&self, _until: Date) -> Result<Vec<Date>> {
         Ok(self.dates.clone())
     }
 
@@ -42,7 +44,7 @@ impl ChipFlowQuery for FakeChip {
         Ok(Vec::new())
     }
 
-    async fn fetch_streaks(&self, data_date: NaiveDate) -> Result<Vec<StockStreak>> {
+    async fn fetch_streaks(&self, data_date: Date) -> Result<Vec<StockStreak>> {
         self.got
             .lock()
             .expect("測試鎖")

@@ -2,7 +2,8 @@
 //! 依代號雜湊分桶同時執行。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use sqlx::Row;
 
 use crate::infra::database;
@@ -40,13 +41,13 @@ pub(super) const ANOMALY_BUCKETS: i32 = 4;
 /// 掃描 `from`～`to` 的疑似異常跳動，只處理代號雜湊落在第 `bucket` 桶的股票；
 /// `(1, 0)` 為不分桶。SQL 說明見 [`ANOMALY_EVENTS_SQL`]。
 pub(super) async fn fetch_anomaly_bucket(
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     (bucket_count, bucket): (i32, i32),
-) -> Result<Vec<(String, NaiveDate)>> {
+) -> Result<Vec<(String, Date)>> {
     let rows = sqlx::query(ANOMALY_EVENTS_SQL)
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .bind(ANOMALY_JUMP_THRESHOLD)
         .bind(LISTING_FREE_DAYS)
         .bind(bucket_count)
@@ -62,7 +63,7 @@ pub(super) async fn fetch_anomaly_bucket(
         .map(|row| {
             Ok((
                 row.try_get::<String, _>("stock_symbol")?,
-                row.try_get::<NaiveDate, _>("Date")?,
+                crate::infra::database::jiff_types::try_get::<Date, _>(&row, "Date")?,
             ))
         })
         .collect()

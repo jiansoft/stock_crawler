@@ -1,6 +1,8 @@
 //! 持股基本面、主力期間合計與市場估值的假倉儲。
 
 use super::*;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 /// 回傳固定持股基本面與主力期間合計的假倉儲；`fail` 時查詢失敗。
 #[derive(Default)]
@@ -21,14 +23,14 @@ impl FakePortfolio {
 
 #[async_trait]
 impl HoldingBrokerQuery for FakePortfolio {
-    async fn fetch_broker_dates(&self, _until: NaiveDate, _limit: usize) -> Result<Vec<NaiveDate>> {
+    async fn fetch_broker_dates(&self, _until: Date, _limit: usize) -> Result<Vec<Date>> {
         unreachable!("週摘要沿用法人一段的期間，不查主力交易日")
     }
 
     async fn fetch_broker_period(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         symbols: &[String],
     ) -> Result<Vec<BrokerPeriodNet>> {
         assert_eq!((from, to), (day(12), day(16)), "沿用法人一段的期間");
@@ -72,21 +74,18 @@ impl FakeValuation {
 
 #[async_trait]
 impl MarketValuationRepository for FakeValuation {
-    async fn refresh_market_valuation(&self, _from: NaiveDate, _to: NaiveDate) -> Result<u64> {
+    async fn refresh_market_valuation(&self, _from: Date, _to: Date) -> Result<u64> {
         Ok(0)
     }
 
     async fn fetch_market_valuation(
         &self,
         market_id: i32,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<Vec<MarketValuationDay>> {
         assert_eq!((market_id, to), (0, day(16)));
-        assert_eq!(
-            from,
-            NaiveDate::from_ymd_opt(2021, 10, 16).expect("合法日期")
-        );
+        assert_eq!(from, date(2021, 10, 16));
         if self.fail {
             return Err(anyhow!("valuation down"));
         }

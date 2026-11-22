@@ -10,10 +10,11 @@
 //!   [`MAX_STALE_DAYS`] 天（停牌）的股票不列入，避免樣本太少的百分位誤導。
 //! - 沒有任何持股落在高檔或低檔時不發送。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::holdings;
@@ -82,7 +83,7 @@ pub async fn execute() -> Result<()> {
     let symbols = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for valuation alert failed")?;
-    let today = Local::now().date_naive();
+    let today = today();
     let flags = collect_flags(
         &PgQuoteRepository::new(),
         symbols.iter().map(String::as_str),
@@ -117,7 +118,7 @@ pub async fn execute() -> Result<()> {
 async fn collect_flags<'a>(
     repo: &impl ValuationHistoryRepository,
     symbols: impl IntoIterator<Item = &'a str>,
-    today: NaiveDate,
+    today: Date,
 ) -> Vec<Flag> {
     let mut flags = Vec::new();
     for symbol in symbols {
@@ -130,11 +131,11 @@ async fn collect_flags<'a>(
 }
 
 /// 單檔的兩個倍數各自判斷；`rows` 依日期由新到舊。
-fn evaluate(symbol: &str, rows: &[DailyRatio], today: NaiveDate) -> Vec<Flag> {
+fn evaluate(symbol: &str, rows: &[DailyRatio], today: Date) -> Vec<Flag> {
     let Some(latest) = rows.first() else {
         return Vec::new();
     };
-    if (today - latest.date).num_days() > MAX_STALE_DAYS {
+    if i64::from((today - latest.date).get_days()) > MAX_STALE_DAYS {
         return Vec::new();
     }
     [Ratio::PriceEarning, Ratio::PriceToBook]

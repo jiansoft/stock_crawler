@@ -1,11 +1,11 @@
 //! 快取回應、判斷規則與 Redis 讀取的驗證。
 
 use super::*;
-use chrono::NaiveDate;
+use jiff::civil::date;
 
 /// 固定的策略優勢快取，包含可判斷與無資料的情況。
 fn record(median: Option<f64>, beat_rate: Option<f64>) -> EdgeRecord {
-    let date = NaiveDate::from_ymd_opt(2026, 10, 27).unwrap();
+    let date = date(2026, 10, 27);
     EdgeRecord {
         name: "最佳組合".to_owned(),
         checked: date,

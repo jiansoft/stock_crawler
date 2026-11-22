@@ -1,5 +1,6 @@
 //! 條件選股：肯尼斯費雪（`max_psr`、`min_avg_net_margin_3y`）。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -92,7 +93,7 @@ async fn screen_at_filters_by_psr_and_net_margin() {
         sqlx::query(sql).execute(pool).await.expect("種入費雪資料");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |max_psr: Option<f64>, min_margin: Option<f64>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

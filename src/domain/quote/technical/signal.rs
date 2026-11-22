@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::{FIFTY_TWO_WEEK_INDICATOR, RANGE_BREAKOUT_INDICATOR, RS50_INDICATOR, RS80_INDICATOR};
 
@@ -10,7 +10,7 @@ use super::{FIFTY_TWO_WEEK_INDICATOR, RANGE_BREAKOUT_INDICATOR, RS50_INDICATOR, 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StockTechnicalSignal {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 股票代號。
     pub stock_symbol: String,
     /// 訊號內容。
@@ -21,27 +21,23 @@ pub struct StockTechnicalSignal {
 #[async_trait]
 pub trait TechnicalSignalRepository: Send + Sync {
     /// 指定交易日有成交、未暫停交易的上市櫃股票代號。
-    async fn fetch_signal_symbols(&self, date: NaiveDate) -> Result<Vec<String>>;
+    async fn fetch_signal_symbols(&self, date: Date) -> Result<Vec<String>>;
 
     /// `from`～`to`（含）期間有成交的上市櫃股票代號，含之後下市的（歷史回補不能有存活者偏差）。
-    async fn fetch_traded_symbols(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<String>>;
+    async fn fetch_traded_symbols(&self, from: Date, to: Date) -> Result<Vec<String>>;
 
     /// 以 `signals` 覆蓋 `indicator` 來源在 `from`～`to`（含）的全部訊號（同一交易內先刪後寫），
     /// 其他來源不動；`signals` 須全部是該來源、日期在期間內。
     async fn replace_indicator_signals(
         &self,
         indicator: &str,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         signals: &[StockTechnicalSignal],
     ) -> Result<()>;
 
     /// 以 `signals` 覆蓋指定交易日的全部訊號（同一交易內先刪後寫）。
-    async fn replace_signals(
-        &self,
-        date: NaiveDate,
-        signals: &[StockTechnicalSignal],
-    ) -> Result<()>;
+    async fn replace_signals(&self, date: Date, signals: &[StockTechnicalSignal]) -> Result<()>;
 }
 
 /// 讀取已預先計算的技術訊號。
@@ -50,7 +46,7 @@ pub trait TechnicalSignalQuery: Send + Sync {
     /// 指定交易日、指定股票的訊號，依代號排序；資料表中無法辨識的來源或種類略過。
     async fn fetch_signals(
         &self,
-        date: NaiveDate,
+        date: Date,
         stock_symbols: &[String],
     ) -> Result<Vec<StockTechnicalSignal>>;
 
@@ -58,8 +54,8 @@ pub trait TechnicalSignalQuery: Send + Sync {
     /// [`OUTCOME_HORIZON`] 個交易日的還原報酬（全市場；尚未滿天期的不計）。
     async fn fetch_signal_outcomes(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         indicators: &[&str],
     ) -> Result<Vec<SignalOutcome>>;
 }
@@ -86,7 +82,7 @@ pub trait RankedSignalQuery: Send + Sync {
     /// 第二個值是當天該來源與種類的訊號總檔數。
     async fn fetch_ranked_signals(
         &self,
-        date: NaiveDate,
+        date: Date,
         indicator: &str,
         kind: SignalKind,
         limit: i64,
@@ -101,7 +97,7 @@ pub struct BreakoutFollowUp {
     /// 股票名稱。
     pub name: String,
     /// 最近一次突破的交易日。
-    pub breakout_date: NaiveDate,
+    pub breakout_date: Date,
     /// 突破之後到查詢日（含）是否出現假突破（`range_breakout`／`failed`）。
     pub failed: bool,
 }
@@ -113,7 +109,7 @@ pub trait BreakoutFollowUpQuery: Send + Sync {
     /// 與之後到 `date`（含）是否已跌回突破價；依代號排序。
     async fn fetch_breakout_follow_ups(
         &self,
-        date: NaiveDate,
+        date: Date,
         days: i64,
     ) -> Result<Vec<BreakoutFollowUp>>;
 }

@@ -9,10 +9,11 @@
 //! 折溢價都只在「剛發生」那天通知一次，持續溢價或折價不會天天重發。最新一筆不是今天（休市、
 //! 淨值尚未公布）時不判斷。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::{collections::HashMap, fmt::Write};
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 
 use super::holdings;
 use crate::{
@@ -78,12 +79,12 @@ impl PremiumAlert {
 ///
 /// 查詢持股或折溢價失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    run(Local::now().date_naive()).await?;
+    run(today()).await?;
     Ok(())
 }
 
 /// 以 `today` 為基準檢查持有的 ETF 並發送通知，回傳通知則數。
-async fn run(today: NaiveDate) -> Result<usize> {
+async fn run(today: Date) -> Result<usize> {
     let symbols: Vec<String> = holdings::crawl_holding_symbols()
         .await
         .context("fetch active holdings for ETF premium notification failed")?
@@ -137,7 +138,7 @@ async fn run(today: NaiveDate) -> Result<usize> {
 /// 依代號排序找出今天剛發生的溢價或連續折價；`premiums` 每檔由新到舊。
 pub(crate) fn detect(
     premiums: &HashMap<String, Vec<PremiumPoint>>,
-    today: NaiveDate,
+    today: Date,
 ) -> Vec<PremiumAlert> {
     let mut symbols: Vec<&String> = premiums.keys().collect();
     symbols.sort();
@@ -173,7 +174,7 @@ pub(crate) fn detect(
 /// 依代號排序找出今天單日申贖達門檻的 ETF。
 pub(crate) fn detect_flows(
     units: &HashMap<String, UnitsChangePoint>,
-    today: NaiveDate,
+    today: Date,
 ) -> Vec<PremiumAlert> {
     let mut symbols: Vec<&String> = units.keys().collect();
     symbols.sort();
@@ -198,8 +199,8 @@ pub(crate) fn detect_flows(
 /// 以交易日曆驗證連續性；缺任一天資料、方向反轉或舊資料不發送。
 fn detect_persistent(
     premiums: &HashMap<String, Vec<PremiumPoint>>,
-    today: NaiveDate,
-    calendar: &[NaiveDate],
+    today: Date,
+    calendar: &[Date],
 ) -> Vec<PremiumAlert> {
     if calendar.len() < 3 || calendar[0] != today {
         return Vec::new();
@@ -261,7 +262,7 @@ fn merge_persistent(alerts: &mut Vec<PremiumAlert>, persistent: Vec<PremiumAlert
 
 /// 組出通知訊息（Telegram MarkdownV2）；沒有通知時回 `None`。
 pub(crate) fn build_message(
-    date: NaiveDate,
+    date: Date,
     alerts: &[PremiumAlert],
     stock_name: impl Fn(&str) -> String,
 ) -> Option<String> {

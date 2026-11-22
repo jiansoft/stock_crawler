@@ -1,5 +1,6 @@
 //! 條件選股：低波動（`max_volatility_percent`、`max_beta`、`sort_by=volatility`／`beta`）。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -78,7 +79,7 @@ async fn screen_at_filters_and_sorts_by_volatility() {
         .expect("種入風險指標");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |max_volatility: Option<f64>, max_beta: Option<f64>, sort_by: &'static str| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

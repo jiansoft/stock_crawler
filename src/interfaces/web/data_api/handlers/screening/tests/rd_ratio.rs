@@ -1,5 +1,6 @@
 //! 條件選股：研發成長股（`min_rd_ratio_percent`、`sort_by=rd_ratio`）。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -92,7 +93,7 @@ async fn screen_at_filters_and_sorts_by_rd_ratio() {
         .expect("種入損益表");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |min_rd_ratio_percent: Option<f64>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

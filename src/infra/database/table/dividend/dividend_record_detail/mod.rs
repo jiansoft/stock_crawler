@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction};
 
@@ -25,9 +25,9 @@ pub struct DividendRecordDetail {
     /// 合計股利(元)
     pub total: Decimal,
     /// 建立時間。
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
 }
 
 impl DividendRecordDetail {
@@ -48,8 +48,8 @@ impl DividendRecordDetail {
             stock,
             stock_money,
             total,
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 

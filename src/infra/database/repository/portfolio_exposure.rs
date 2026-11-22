@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::{
     domain::portfolio::exposure::{EtfConstituent, EtfExposureQuery, ExposurePosition},
@@ -68,12 +68,27 @@ impl EtfExposureQuery for PgPortfolioRepository {
     async fn fetch_etf_constituents(&self, etf_symbols: &[String]) -> Result<Vec<EtfConstituent>> {
         crate::infra::cache::etf_analysis::ETF_ANALYSIS
             .constituents(etf_symbols, async {
-                let rows: Vec<(String, NaiveDate, String, String, f64)> =
-                    sqlx::query_as(CONSTITUENTS_SQL)
-                        .bind(etf_symbols)
-                        .fetch_all(database::get_connection())
-                        .await
-                        .context("Failed to fetch ETF constituents")?;
+                let rows: Vec<(String, Date, String, String, f64)> =
+                    sqlx::query_as::<_, (String, jiff_sqlx::Date, String, String, f64)>(
+                        CONSTITUENTS_SQL,
+                    )
+                    .bind(etf_symbols)
+                    .fetch_all(database::get_connection())
+                    .await
+                    .map(|rows| {
+                        rows.into_iter()
+                            .map(|(c0, c1, c2, c3, c4)| {
+                                (
+                                    c0,
+                                    crate::infra::database::jiff_types::from_wire(c1),
+                                    c2,
+                                    c3,
+                                    c4,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .context("Failed to fetch ETF constituents")?;
                 Ok(rows
                     .into_iter()
                     .map(

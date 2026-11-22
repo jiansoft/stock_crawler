@@ -1,5 +1,8 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, NaiveDate, TimeDelta};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use sqlx::{Postgres, Transaction, postgres::PgQueryResult};
 
 use crate::infra::database;
@@ -11,11 +14,12 @@ use crate::infra::database;
 #[derive(sqlx::FromRow, Default, Debug)]
 pub struct DailyMoneyHistoryDetail {
     /// 交易日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 建立時間。
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
     /// 股票代號。
     pub security_code: String,
     /// 持有股數（同股票同 member 聚合後）。
@@ -58,11 +62,11 @@ impl DailyMoneyHistoryDetail {
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
     /// 錯誤會由呼叫端決定是否回滾。
     pub async fn delete(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = "DELETE FROM daily_money_history_detail WHERE date = $1;";
-        let query = sqlx::query(sql).bind(date);
+        let query = sqlx::query(sql).bind(date.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
@@ -86,10 +90,10 @@ impl DailyMoneyHistoryDetail {
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
     /// 是否回滾由呼叫端控制。
     pub async fn upsert(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
-        let one_month_ago = date - TimeDelta::try_days(30).unwrap();
+        let one_month_ago = date - 30.days();
         let sql = r#"
 WITH ownership_data AS (
     -- 一次性計算個人與所屬家庭(member_id=0)的持有股數與成本，避免多次掃描
@@ -184,7 +188,9 @@ ON CONFLICT (date, security_code, household_id, member_id) DO UPDATE SET
     updated_time = NOW();
 "#;
 
-        let query = sqlx::query(sql).bind(date).bind(one_month_ago);
+        let query = sqlx::query(sql)
+            .bind(date.to_sqlx())
+            .bind(one_month_ago.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,

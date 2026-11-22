@@ -1,6 +1,9 @@
 //! 以本機 mock server 取代證交所與櫃買（G16）：抓取後以批次寫回股票主檔（P13）。
 
-use chrono::TimeZone;
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -93,11 +96,8 @@ async fn listed_and_otc_fetch_then_batch_update_stocks() {
         .respond_with(ResponseTemplate::new(200).set_body_json(tpex_qfii()))
         .mount(&server)
         .await;
-    let taipei = FixedOffset::east_opt(8 * 3600).expect("台北時區");
-    let date_time = taipei
-        .with_ymd_and_hms(2026, 9, 30, 15, 0, 0)
-        .single()
-        .expect("有效時間");
+    let date_time = TaipeiDateTime::from_datetime(jiff::civil::date(2026, 9, 30).at(15, 0, 0, 0))
+        .expect("合法時間");
     let uri = server.uri();
     let (listed_rows, otc_snapshot) = with_origins(
         &[
@@ -137,31 +137,28 @@ async fn listed_and_otc_fetch_then_batch_update_stocks() {
 }
 
 /// 台北時間指定日期 15:00；測試一律用 1991 年的歷史日期，不會碰到真實資料。
-fn taipei_local(year: i32, month: u32, day: u32) -> DateTime<Local> {
-    let naive = NaiveDate::from_ymd_opt(year, month, day)
-        .and_then(|date| date.and_hms_opt(15, 0, 0))
+fn taipei_local(year: i32, month: u32, day: u32) -> TaipeiDateTime {
+    let naive = ymd(year, month, day)
+        .map(|date| date.at(15, 0, 0, 0))
         .expect("有效日期");
-    Local
-        .from_local_datetime(&naive)
-        .single()
-        .expect("本地時間沒有歧義")
+    TaipeiDateTime::from_datetime(naive).expect("合法時間")
 }
 
 /// 指定資料日的上市 MI_QFIIS 回應（同 [`mi_qfiis`]，日期換掉）。
-fn mi_qfiis_on(date: NaiveDate) -> serde_json::Value {
+fn mi_qfiis_on(date: Date) -> serde_json::Value {
     let mut body = mi_qfiis();
-    body["date"] = serde_json::json!(date.format("%Y%m%d").to_string());
+    body["date"] = serde_json::json!(date.strftime("%Y%m%d").to_string());
     body
 }
 
 /// 指定資料日的櫃買 QFII 回應（同 [`tpex_qfii`]，日期換掉）。
-fn tpex_qfii_on(date: NaiveDate) -> serde_json::Value {
+fn tpex_qfii_on(date: Date) -> serde_json::Value {
     let mut body = tpex_qfii();
-    body["date"] = serde_json::json!(date.format("%Y%m%d").to_string());
+    body["date"] = serde_json::json!(date.strftime("%Y%m%d").to_string());
     body
 }
 
-async fn mount_sources(server: &MockServer, date: NaiveDate) {
+async fn mount_sources(server: &MockServer, date: Date) {
     Mock::given(method("GET"))
         .and(path("/rwd/zh/fund/MI_QFIIS"))
         .respond_with(ResponseTemplate::new(200).set_body_json(mi_qfiis_on(date)))
@@ -213,23 +210,23 @@ async fn cleanup_history(symbols: &[String]) {
     }
 }
 
-type SymbolDates = Vec<(String, NaiveDate)>;
+type SymbolDates = Vec<(String, Date)>;
 
 async fn history_and_trend(symbols: &[String]) -> (SymbolDates, SymbolDates) {
     let pool = crate::infra::database::get_connection();
-    let history = sqlx::query_as(
+    let history: SymbolDates = sqlx::query_as::<_, (String, jiff_sqlx::Date)>(
         r#"SELECT stock_symbol, "date" FROM qfii_history WHERE stock_symbol = ANY($1) ORDER BY stock_symbol, "date""#,
     )
     .bind(symbols)
     .fetch_all(pool)
-    .await
+    .await.map(|rows| rows.into_iter().map(|(c0, c1)| (c0, crate::infra::database::jiff_types::from_wire(c1))).collect::<Vec<_>>())
     .expect("讀回外資持股歷史");
-    let trend = sqlx::query_as(
+    let trend: SymbolDates = sqlx::query_as::<_, (String, jiff_sqlx::Date)>(
         r#"SELECT stock_symbol, "date" FROM qfii_trend WHERE stock_symbol = ANY($1) ORDER BY stock_symbol"#,
     )
     .bind(symbols)
     .fetch_all(pool)
-    .await
+    .await.map(|rows| rows.into_iter().map(|(c0, c1)| (c0, crate::infra::database::jiff_types::from_wire(c1))).collect::<Vec<_>>())
     .expect("讀回外資持股趨勢");
     (history, trend)
 }
@@ -257,7 +254,7 @@ async fn execute_at_saves_history_and_trend_then_skips_unchanged_rerun() {
         return;
     }
     let symbols = seed_stocks().await;
-    let date = NaiveDate::from_ymd_opt(1991, 6, 20).expect("有效日期");
+    let date = date(1991, 6, 20);
     let server = MockServer::start().await;
     mount_sources(&server, date).await;
     let uri = server.uri();
@@ -296,8 +293,8 @@ async fn backfill_history_fetches_weekdays_and_rebuilds_trend() {
         return;
     }
     let symbols = seed_stocks().await;
-    let friday = NaiveDate::from_ymd_opt(1991, 6, 21).expect("有效日期");
-    let sunday = NaiveDate::from_ymd_opt(1991, 6, 23).expect("有效日期");
+    let friday = date(1991, 6, 21);
+    let sunday = date(1991, 6, 23);
     let server = MockServer::start().await;
     mount_sources(&server, friday).await;
     let uri = server.uri();

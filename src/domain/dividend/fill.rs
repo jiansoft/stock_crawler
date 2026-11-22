@@ -9,19 +9,20 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{Days, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 股票面額（元）：股票股利每 10 元配 1 股。
 const PAR_VALUE: Decimal = Decimal::TEN;
 
 /// 往除權息日前多抓幾天日線，確保長假或停牌後仍找得到除權息前一日的收盤。
-pub const PRE_EX_LOOKBACK_DAYS: u64 = 30;
+pub const PRE_EX_LOOKBACK_DAYS: i64 = 30;
 
 /// 一次除權息：同一天的現金股利與股票股利合併成一次。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExRightEvent {
-    pub ex_date: NaiveDate,
+    pub ex_date: Date,
     /// 現金股利（元）；沒有為 0。
     pub cash_dividend: Decimal,
     /// 股票股利（元）；沒有為 0。
@@ -31,7 +32,7 @@ pub struct ExRightEvent {
 /// 單日收盤價。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DailyClose {
-    pub date: NaiveDate,
+    pub date: Date,
     pub close: Decimal,
 }
 
@@ -40,20 +41,20 @@ pub struct DailyClose {
 pub struct FillOutcome {
     pub event: ExRightEvent,
     /// 除權息前一個交易日。
-    pub pre_ex_date: NaiveDate,
+    pub pre_ex_date: Date,
     /// 除權息前一個交易日的收盤價（未依配股調整）。
     pub pre_ex_close: Decimal,
     /// 填息目標價：`pre_ex_close` 依配股調整，見 [`fill_target()`]。
     pub fill_target: Decimal,
     /// 填息日；尚未填息為 `None`。
-    pub fill_date: Option<NaiveDate>,
+    pub fill_date: Option<Date>,
     /// 除權息日起算第幾個交易日填息（除權息當日為 1）。
     pub trading_days_to_fill: Option<u32>,
     /// 除權息日到最新一筆收盤共幾個交易日（含除權息日）。
     pub trading_days_since_ex: u32,
     /// 最新一筆收盤價與日期。
     pub latest_close: Decimal,
-    pub latest_date: NaiveDate,
+    pub latest_date: Date,
 }
 
 impl FillOutcome {
@@ -160,13 +161,13 @@ pub fn summarize(outcomes: &[FillOutcome]) -> FillSummary {
 #[async_trait]
 pub trait DividendFillQuery: Send + Sync {
     /// 股票最新一筆日線的日期；沒有日線為 `None`。
-    async fn fetch_latest_quote_date(&self, symbol: &str) -> Result<Option<NaiveDate>>;
+    async fn fetch_latest_quote_date(&self, symbol: &str) -> Result<Option<Date>>;
 
     /// 股票的每次除權息（同一天的現金與股票股利合併），由新到舊；除權息日格式錯誤的略過。
     async fn fetch_ex_right_events(&self, symbol: &str) -> Result<Vec<ExRightEvent>>;
 
     /// `since`（含）起的日收盤，依日期升冪。
-    async fn fetch_daily_closes(&self, symbol: &str, since: NaiveDate) -> Result<Vec<DailyClose>>;
+    async fn fetch_daily_closes(&self, symbol: &str, since: Date) -> Result<Vec<DailyClose>>;
 }
 
 /// 除權息日在 `since`（不含）～`until`（含）之間的每次除權息的填息結果，依除權息日由舊到新；
@@ -178,8 +179,8 @@ pub trait DividendFillQuery: Send + Sync {
 pub async fn recent_outcomes(
     query: &impl DividendFillQuery,
     symbol: &str,
-    since: NaiveDate,
-    until: NaiveDate,
+    since: Date,
+    until: Date,
 ) -> Result<Vec<FillOutcome>> {
     let mut events: Vec<ExRightEvent> = query
         .fetch_ex_right_events(symbol)
@@ -192,7 +193,7 @@ pub async fn recent_outcomes(
         return Ok(Vec::new());
     };
     let closes = query
-        .fetch_daily_closes(symbol, oldest.ex_date - Days::new(PRE_EX_LOOKBACK_DAYS))
+        .fetch_daily_closes(symbol, oldest.ex_date - PRE_EX_LOOKBACK_DAYS.days())
         .await?;
     Ok(events
         .into_iter()

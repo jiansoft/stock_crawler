@@ -1,5 +1,6 @@
 //! 條件選股：便宜價（`max_pb_percentile`、`sort_by=pb_percentile`）。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -81,7 +82,7 @@ async fn screen_at_filters_and_sorts_by_pb_percentile() {
         .expect("種入淨值比分位");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |max_pb_percentile: Option<f64>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

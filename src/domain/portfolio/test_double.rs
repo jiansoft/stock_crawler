@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::entity::{ReceivedDividend, ReceivedDividendItem, StockOwnershipDetail};
@@ -18,7 +18,7 @@ pub(crate) struct FakePayoutRepository {
     /// 每次查詢都回傳的分配（不依期間過濾，交給 `split_by_payable_date`）。
     pub(crate) allocations: Vec<PayoutAllocation>,
     /// 每次查詢的 `(member_id, from, to, today)`。
-    pub(crate) queries: Mutex<Vec<(HoldingView, NaiveDate, NaiveDate, NaiveDate)>>,
+    pub(crate) queries: Mutex<Vec<(HoldingView, Date, Date, Date)>>,
     /// 為 `true` 時查詢回傳錯誤。
     pub(crate) fail: bool,
 }
@@ -33,7 +33,7 @@ impl FakePayoutRepository {
     }
 
     /// 目前為止的查詢紀錄。
-    pub(crate) fn queries(&self) -> Vec<(HoldingView, NaiveDate, NaiveDate, NaiveDate)> {
+    pub(crate) fn queries(&self) -> Vec<(HoldingView, Date, Date, Date)> {
         self.queries.lock().expect("queries").clone()
     }
 }
@@ -85,9 +85,9 @@ impl PortfolioRepository for FakePayoutRepository {
     async fn fetch_payout_allocations(
         &self,
         view: &HoldingView,
-        from: NaiveDate,
-        to: NaiveDate,
-        today: NaiveDate,
+        from: Date,
+        to: Date,
+        today: Date,
     ) -> Result<Vec<PayoutAllocation>> {
         self.queries
             .lock()

@@ -6,10 +6,11 @@
 //! 這是整條流程唯一會改動資料庫的地方，採 best-effort：單筆失敗只記錄錯誤並繼續，
 //! 不讓某一檔的問題拖垮整次掃描。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use chrono::{Local, NaiveDate};
 
 use crate::{app::calculation::dividend_record, domain::dividend::repository::DividendRepository};
 
@@ -113,7 +114,7 @@ pub(super) async fn apply_plan(
         }
     }
 
-    log_unresolved(&plan.unresolved, Local::now().date_naive());
+    log_unresolved(&plan.unresolved, today());
 
     Ok(outcome)
 }
@@ -123,7 +124,7 @@ pub(super) async fn apply_plan(
 /// 兩階段都判不出來的事件才會走到這裡。需要人處理的逐筆以 warn 最多列
 /// [`UNRESOLVED_SAMPLE_LIMIT`] 筆；金額尚未公告、離除權息日還遠的事件屬於正常的
 /// 等待狀態（見 [`is_awaiting_amount`]），只記 info。
-fn log_unresolved(events: &[UnresolvedEvent], today: NaiveDate) {
+fn log_unresolved(events: &[UnresolvedEvent], today: Date) {
     if events.is_empty() {
         return;
     }
@@ -180,14 +181,14 @@ fn log_unresolved(events: &[UnresolvedEvent], today: NaiveDate) {
 ///
 /// 條件是 Yahoo 已查過但沒有這次配息、預告表的金額也還沒公布，且離除權息日超過
 /// [`AWAITING_AMOUNT_WARN_DAYS`] 天。Yahoo 抓取失敗等其他原因不算，照常告警。
-fn is_awaiting_amount(event: &UnresolvedEvent, today: NaiveDate) -> bool {
+fn is_awaiting_amount(event: &UnresolvedEvent, today: Date) -> bool {
     let announcement = &event.announcement;
     let amount_pending = (announcement.is_cash && announcement.cash_dividend.is_none())
         || (announcement.is_stock && announcement.stock_dividend_ratio.is_none());
 
     event.reason == UnresolvedReason::NoMatchingYahooDividend
         && amount_pending
-        && (announcement.ex_date - today).num_days() > AWAITING_AMOUNT_WARN_DAYS
+        && i64::from((announcement.ex_date - today).get_days()) > AWAITING_AMOUNT_WARN_DAYS
 }
 
 #[cfg(test)]

@@ -6,23 +6,23 @@
 use std::collections::HashSet;
 use std::sync::RwLock;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 當天已出現過的鍵；換日時清空。
 #[derive(Debug, Default)]
 pub struct DailySeen {
-    day: Option<NaiveDate>,
+    day: Option<Date>,
     keys: HashSet<String>,
 }
 
 impl DailySeen {
     /// 只讀檢查，讓已出現過的鍵不必取得寫鎖。
-    pub fn contains_today(&self, key: &str, today: NaiveDate) -> bool {
+    pub fn contains_today(&self, key: &str, today: Date) -> bool {
         self.day == Some(today) && self.keys.contains(key)
     }
 
     /// 這個鍵今天是否第一次出現（是的話記下來）。
-    pub fn first_today(&mut self, key: &str, today: NaiveDate) -> bool {
+    pub fn first_today(&mut self, key: &str, today: Date) -> bool {
         if self.day != Some(today) {
             self.day = Some(today);
             self.keys.clear();
@@ -37,7 +37,7 @@ pub struct ConcurrentDailySeen(RwLock<DailySeen>);
 
 impl ConcurrentDailySeen {
     /// 原子地判斷並記錄當天第一筆；鎖毒化時允許重新記錄警告。
-    pub fn first_today(&self, key: &str, today: NaiveDate) -> bool {
+    pub fn first_today(&self, key: &str, today: Date) -> bool {
         if self
             .0
             .read()

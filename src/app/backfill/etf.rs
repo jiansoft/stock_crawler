@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::{
     app::backfill,
     app::backfill::acl::EtfAclMapper,
@@ -7,12 +8,11 @@ use crate::{
 };
 
 use anyhow::Result;
-use chrono::Local;
 use scopeguard::defer;
 
 /// 執行台股 ETF 資訊的同步與更新。
 pub async fn execute() -> Result<()> {
-    if Local::now().is_weekend() {
+    if TaipeiDateTime::now().is_weekend() {
         return Ok(());
     }
 

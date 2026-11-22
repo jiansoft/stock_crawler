@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local};
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 
 use crate::core::util::map::Keyable;
@@ -53,9 +53,9 @@ pub struct Dividend {
     /// 股票股利發放日
     pub payable_date2: String,
     /// 建立時間。
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
 }
 
 impl Keyable for Dividend {
@@ -94,8 +94,8 @@ impl Dividend {
             ex_dividend_date2: "".to_string(),
             payable_date1: "".to_string(),
             payable_date2: "".to_string(),
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 }

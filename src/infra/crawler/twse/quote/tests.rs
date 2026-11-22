@@ -1,6 +1,8 @@
 //! 上市每日收盤行情（MI_INDEX）解析與抓取的測試。
 
-use chrono::{TimeDelta, Timelike};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::ToSpan;
+use jiff::civil::date;
 use std::time::Duration;
 
 use crate::infra::cache::SHARE;
@@ -86,7 +88,7 @@ async fn test_parse_listed_response() {
         tables: vec![table],
     };
 
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
     let result = parse_listed_response(response, date).await.unwrap();
 
     assert_eq!(result.len(), 1);
@@ -113,7 +115,7 @@ async fn test_parse_listed_response_with_null_cells() {
     let response: ListedResponse =
         serde_json::from_str(raw).expect("含 null 儲存格的回應仍應反序列化成功");
 
-    let date = NaiveDate::from_ymd_opt(2019, 6, 10).unwrap();
+    let date = date(2019, 6, 10);
     let result = parse_listed_response(response, date).await.unwrap();
 
     assert_eq!(result.len(), 1);
@@ -130,7 +132,7 @@ async fn test_parse_listed_response_no_data_without_tables() {
         serde_json::from_str(raw).expect("沒有 tables 的回應仍應反序列化成功");
     assert!(response.tables.is_empty());
 
-    let date = NaiveDate::from_ymd_opt(2026, 10, 23).unwrap();
+    let date = date(2026, 10, 23);
     let result = parse_listed_response(response, date).await.unwrap();
     assert!(result.is_empty());
 }
@@ -212,7 +214,7 @@ async fn test_parse_listed_response_skips_minor_bad_rows() {
         }],
     };
 
-    let date = NaiveDate::from_ymd_opt(2026, 6, 12).unwrap();
+    let date = date(2026, 6, 12);
     let result = parse_listed_response(response, date).await.unwrap();
 
     // 壞列被拒絕、其餘 19 筆完整保留；沒有任何一筆以零值混入。
@@ -238,7 +240,7 @@ async fn test_parse_listed_response_fails_when_too_many_bad_rows() {
         }],
     };
 
-    let date = NaiveDate::from_ymd_opt(2026, 6, 12).unwrap();
+    let date = date(2026, 6, 12);
     let err = parse_listed_response(response, date).await.unwrap_err();
 
     assert!(err.to_string().contains("source format may have changed"));
@@ -250,15 +252,15 @@ async fn test_visit() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    let mut now = Local::now();
+    let mut now = TaipeiDateTime::now();
     if now.hour() < 15 {
-        now -= TimeDelta::try_days(1).unwrap();
+        now -= 1.days();
     }
-    //now -= Duration::days(3);
+    //now -= 3.days();
 
     tracing::debug!("開始 visit");
 
-    match visit(now.date_naive()).await {
+    match visit(now.date()).await {
         Err(why) => {
             tracing::debug!("Failed to visit because: {:?}", why);
         }

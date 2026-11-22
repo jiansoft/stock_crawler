@@ -1,15 +1,16 @@
 //! `MoneyFlowRecalculated` 事件處理：重新計算並發送 Telegram 市值變化通知的測試。
 
+use jiff::civil::date;
 use super::*;
 
 #[test]
 fn test_build_money_change_message_includes_hugo() {
     use crate::domain::money_flow::entity::MoneyFlowMemberWithPreviousDay;
-    use chrono::NaiveDate;
+    use jiff::civil::Date;
     use rust_decimal_macros::dec;
 
-    let date = NaiveDate::parse_from_str("2026-04-02", "%Y-%m-%d").unwrap();
-    let previous_date = NaiveDate::parse_from_str("2026-04-01", "%Y-%m-%d").unwrap();
+    let date = Date::strptime("%Y-%m-%d", "2026-04-02").unwrap();
+    let previous_date = Date::strptime("%Y-%m-%d", "2026-04-01").unwrap();
     let rows = vec![
         MoneyFlowMemberWithPreviousDay {
             household_id: 1,            date,
@@ -56,7 +57,7 @@ fn test_build_money_change_message_includes_hugo() {
 #[test]
 fn rows_in_view_follows_recipient_scope() {
     let row = |member_id: i64| MoneyFlowMemberWithPreviousDay {
-            household_id: 1,        date: chrono::NaiveDate::from_ymd_opt(2026, 11, 17).expect("合法日期"),
+            household_id: 1,        date: date(2026, 11, 17),
         previous_date: None,
         member_id,
         market_value: rust_decimal::Decimal::ONE,

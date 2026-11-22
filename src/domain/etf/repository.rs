@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::domain::quote::technical::PriceBar;
 
@@ -44,7 +44,7 @@ pub trait EtfRepository: Send + Sync {
     async fn nav_series(
         &self,
         stock_symbols: &[String],
-        from: NaiveDate,
+        from: Date,
     ) -> Result<HashMap<String, Vec<PriceBar>>>;
 
     /// 寫入（或更正）績效；也刪除已下市 ETF 的績效。
@@ -58,7 +58,7 @@ pub trait EtfRepository: Send + Sync {
     async fn holding_periods(
         &self,
         stock_symbols: &[String],
-        recorded_since: NaiveDate,
+        recorded_since: Date,
     ) -> Result<Vec<EtfHoldingPeriods>>;
 
     /// 全部 ETF 最近 `days` 個有單位數的交易日的淨申購合計與折溢價；沒有單位數的歷史回補日不計。

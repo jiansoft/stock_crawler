@@ -49,7 +49,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 pub(crate) use self::attribution::{
     __path_screen_backtest_attribution, screen_backtest_attribution,
@@ -124,13 +124,17 @@ const RANK_BY: [&str; 15] = [
 /// [`BACKTEST_SQL`](sql::BACKTEST_SQL) 的一列：換股日、基準與依相對強度由高到低的候選股（與報酬一一對應）。
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 struct CandidateRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     /// SQL 市場交易日曆決定的進場日，避免以停牌中的 0050 推算。
-    entry_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    entry_date: Option<Date>,
     /// 平均成交金額的起日（含當天往前第 20 個交易日），補查續抱持股的成交金額時使用。
-    liquidity_start: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    liquidity_start: Date,
     /// 換股結束日（持有期滿收盤賣出）；未滿或尚未結束為 `None`。
-    exit_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    exit_date: Option<Date>,
     /// 最後一個換股日、還沒滿持有天數（沒有報酬）；代表策略目前的持股。
     pending: bool,
     /// 換股日之後到迄日經過的交易日數。
@@ -157,11 +161,11 @@ struct CandidateRow {
 /// 一期的結果；`symbols` 是全部持股，依相對強度由高到低。
 #[derive(Debug, Clone, Default, PartialEq)]
 struct PeriodRow {
-    date: NaiveDate,
+    date: Date,
     /// SQL 市場交易日曆決定的進場日，避免以停牌中的 0050 推算。
-    entry_date: Option<NaiveDate>,
+    entry_date: Option<Date>,
     /// 換股結束日（持有期滿收盤賣出）；未滿或尚未結束為 `None`。
-    exit_date: Option<NaiveDate>,
+    exit_date: Option<Date>,
     /// 還沒滿持有天數的最後一期（見 [`CandidateRow::pending`]）。
     pending: bool,
     /// 大盤濾網沒過、這期被迫空手。

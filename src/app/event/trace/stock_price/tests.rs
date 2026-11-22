@@ -1,5 +1,7 @@
 //! 盤中價格追蹤的測試：追蹤目標、到價通知、排程（週末、休市日、休市日表讀不到）。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::{today, ymd};
 use std::collections::HashMap;
 
 use rust_decimal_macros::dec;
@@ -88,7 +90,6 @@ fn test_get_cached_snapshot() {
 /// 以本機 mock server 取代證交所休市日表（G15）：週末與休市日直接結束、不啟動追蹤，
 /// 休市日表讀不到時回錯誤（排程會告警），而不是當成交易日照常啟動。
 mod schedule {
-    use chrono::TimeZone;
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -98,11 +99,15 @@ mod schedule {
     const TWSE: &str = "https://www.twse.com.tw";
     const HOLIDAY_PATH: &str = "/rwd/zh/holidaySchedule/holidaySchedule";
 
-    fn at(year: i32, month: u32, day: u32) -> DateTime<Local> {
-        Local
-            .with_ymd_and_hms(year, month, day, 9, 30, 0)
-            .single()
-            .expect("本地時間沒有歧義")
+    fn at(year: i32, month: u32, day: u32) -> TaipeiDateTime {
+        TaipeiDateTime::from_datetime(
+            crate::core::util::datetime::ymd(year, month, day)
+                .and_then(|day| {
+                    crate::core::util::datetime::hms(9, 30, 0).map(|time| day.to_datetime(time))
+                })
+                .expect("合法時間"),
+        )
+        .expect("合法時間")
     }
 
     /// 1991 年的休市日表：只有 1991-10-10 國慶日。
@@ -156,7 +161,7 @@ mod schedule {
     async fn is_holiday_matches_closed_dates_only() {
         let server = holiday_server("1991", holidays_1991()).await;
         let uri = server.uri();
-        let day = |month, day| NaiveDate::from_ymd_opt(1991, month, day).expect("有效日期");
+        let day = |month, day| ymd(1991, month, day).expect("有效日期");
         let results = with_origins(&[(TWSE, uri.as_str())], async {
             (
                 is_holiday(day(10, 10)).await.expect("查詢成功"),
@@ -185,12 +190,12 @@ mod schedule {
     /// 排程入口以現在時間執行：把今天設為休市日，不論哪天跑都不啟動追蹤。
     #[tokio::test]
     async fn execute_uses_current_time() {
-        let today = Local::now().date_naive();
+        let today = today();
         let server = holiday_server(
             &today.year().to_string(),
             ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "stat": "ok", "date": format!("{}0101", today.year()), "queryYear": today.year(), "total": 1,
-                "data": [[today.format("%Y-%m-%d").to_string(), "測試休市", ""]]
+                "data": [[today.strftime("%Y-%m-%d").to_string(), "測試休市", ""]]
             })),
         )
         .await;

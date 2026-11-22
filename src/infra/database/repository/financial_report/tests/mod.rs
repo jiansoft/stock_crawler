@@ -1,6 +1,6 @@
 //! 三大財務報表倉儲的單元與整合測試；落後官方季報的查詢見 `lagging`。
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use sqlx::Row;
@@ -144,7 +144,7 @@ async fn fetch_row(
     value_columns: &[&str],
     period_type: &str,
     quarter: &str,
-) -> (Vec<Option<String>>, DateTime<Utc>, DateTime<Utc>) {
+) -> (Vec<Option<String>>, Timestamp, Timestamp) {
     let selects = value_columns
         .iter()
         .map(|column| format!("{column}::text AS {column}"))
@@ -171,8 +171,8 @@ async fn fetch_row(
 
     (
         values,
-        row.try_get("fetched_at").expect("fetched_at"),
-        row.try_get("updated_at").expect("updated_at"),
+        crate::infra::database::jiff_types::try_get(&row, "fetched_at").expect("fetched_at"),
+        crate::infra::database::jiff_types::try_get(&row, "updated_at").expect("updated_at"),
     )
 }
 

@@ -1,11 +1,14 @@
 //! 無效輸入、缺價、長期精度、年化報酬邊界與無效事件的測試。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 /// 8. 非法輸入一律回傳 `None`。
 #[test]
 fn test_invalid_inputs_return_none() {
-    let lookup = |_: NaiveDate| None;
+    let lookup = |_: Date| None;
     let base = SimulationInput {
         principal: dec!(10000),
         base_date: date(2020, 1, 2),
@@ -57,7 +60,7 @@ fn test_reinvest_falls_back_to_cash_when_price_missing() {
         event(Some(with_price), dec!(2), None, Decimal::ZERO),
         event(Some(without_price), dec!(2), None, Decimal::ZERO),
     ];
-    let lookup = move |d: NaiveDate| {
+    let lookup = move |d: Date| {
         if d == with_price {
             Some(dec!(50))
         } else {
@@ -94,16 +97,9 @@ fn test_reinvest_falls_back_to_cash_when_price_missing() {
 fn test_long_horizon_precision() {
     let base = date(2010, 1, 4);
     // 刻意讓日數差恰為 3650 天，使 years 正好等於 10。
-    let end = base + Duration::days(3650);
+    let end = base + 3650.days();
     let events: Vec<DividendEvent> = (1..=20)
-        .map(|i| {
-            event(
-                Some(base + Duration::days(180 * i)),
-                dec!(1),
-                None,
-                Decimal::ZERO,
-            )
-        })
+        .map(|i| event(Some(base + (180 * i).days()), dec!(1), None, Decimal::ZERO))
         .collect();
     let case = Case {
         base_date: base,

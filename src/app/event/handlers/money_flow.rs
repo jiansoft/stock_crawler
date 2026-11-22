@@ -22,7 +22,7 @@ use super::EventDispatcher;
 
 impl EventDispatcher {
     /// 處理 `MoneyFlowRecalculated` 事件：重新計算並發送 Telegram 市值變化通知。
-    pub(super) async fn handle_money_flow_recalculated(date: chrono::NaiveDate) -> Result<()> {
+    pub(super) async fn handle_money_flow_recalculated(date: jiff::civil::Date) -> Result<()> {
         let money_flow_repo = PgMoneyFlowRepository::new();
         // 透過倉儲獲取會員收盤與前日市值之對照資料
         let rows = money_flow_repo

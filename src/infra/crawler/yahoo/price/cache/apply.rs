@@ -1,5 +1,6 @@
 //! 把單一類股的最新快照寫回共用即時快取，並對價格異動的股票發佈 trace 價格事件。
 
+use crate::core::util::datetime::today;
 use std::collections::{HashMap, HashSet};
 
 use rust_decimal::Decimal;
@@ -41,7 +42,7 @@ pub(super) fn apply_category_snapshots(
     // 驗證前先記下本輪的漲跌停價：Yahoo 類股報價自帶當日漲跌幅限制，比固定的 10.5% 門檻準確，
     // 也讓其他備援站點的報價能用同一份限制驗證。
     SHARE.set_price_limits(
-        chrono::Local::now().date_naive(),
+        today(),
         category_snapshots
             .iter()
             .map(|(symbol, snapshot)| (symbol.clone(), snapshot.price_limit)),

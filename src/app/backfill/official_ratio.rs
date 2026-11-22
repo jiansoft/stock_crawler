@@ -13,10 +13,12 @@
 //! 上櫃處理所有交易日。請求之間停頓 [`REQUEST_PAUSE`]，避免被交易所擋。單日失敗只記錄、
 //! 不中斷整段；全部失敗才回錯誤。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::{future::Future, time::Duration};
 
 use anyhow::{Result, bail};
-use chrono::{Local, NaiveDate};
 
 use crate::{
     domain::{
@@ -89,7 +91,7 @@ pub struct Summary {
 
 /// 排程入口：補最近 [`RECENT_DAYS`] 天（台北時間，含今天）兩個市場的缺值；沒有交易日時不發請求。
 pub async fn execute() -> Result<()> {
-    let (from, to) = recent_window(Local::now().date_naive());
+    let (from, to) = recent_window(today());
     let summary = backfill_range(from, to).await?;
     tracing::info!(
         "官方本益比淨值比補值結束: requests={} failed={} fetched={} updated={} synced_latest={}",
@@ -111,8 +113,8 @@ pub async fn execute() -> Result<()> {
 }
 
 /// 排程回補的日期區間：`today` 往前共 [`RECENT_DAYS`] 天。
-fn recent_window(today: NaiveDate) -> (NaiveDate, NaiveDate) {
-    (today - chrono::Duration::days(RECENT_DAYS - 1), today)
+fn recent_window(today: Date) -> (Date, Date) {
+    (today - (RECENT_DAYS - 1).days(), today)
 }
 
 /// 逐日回補 `from`～`to` 兩個市場的缺值。
@@ -120,7 +122,7 @@ fn recent_window(today: NaiveDate) -> (NaiveDate, NaiveDate) {
 /// # Errors
 ///
 /// 查詢缺值日期或寫入失敗，或有發請求卻全部失敗時回傳錯誤。
-pub async fn backfill_range(from: NaiveDate, to: NaiveDate) -> Result<Summary> {
+pub async fn backfill_range(from: Date, to: Date) -> Result<Summary> {
     run(&PgQuoteRepository::new(), from, to, fetch, || {
         tokio::time::sleep(REQUEST_PAUSE)
     })
@@ -128,7 +130,7 @@ pub async fn backfill_range(from: NaiveDate, to: NaiveDate) -> Result<Summary> {
 }
 
 /// 依市場呼叫對應的爬蟲。
-async fn fetch(market: Market, date: NaiveDate) -> Result<Vec<OfficialRatio>> {
+async fn fetch(market: Market, date: Date) -> Result<Vec<OfficialRatio>> {
     match market {
         Market::Listed => twse::valuation_ratio::visit(date).await,
         Market::Otc => tpex::valuation_ratio::visit(date).await,
@@ -138,13 +140,13 @@ async fn fetch(market: Market, date: NaiveDate) -> Result<Vec<OfficialRatio>> {
 /// 回補流程本體；`fetch` 與 `pause` 可注入，測試時換成假資料與不等待。
 async fn run<F, FF, P, PF>(
     repo: &impl OfficialRatioRepository,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     fetch: F,
     pause: P,
 ) -> Result<Summary>
 where
-    F: Fn(Market, NaiveDate) -> FF,
+    F: Fn(Market, Date) -> FF,
     FF: Future<Output = Result<Vec<OfficialRatio>>>,
     P: Fn() -> PF,
     PF: Future<Output = ()>,

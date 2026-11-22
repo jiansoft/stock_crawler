@@ -22,11 +22,12 @@
 //! - 回應不是 JSON（token 失效時為 HTTP 400 空內容）時，換一組 token 重試一次。
 //! - 回傳型別統一成專案內部的 `declare::StockQuotes`。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use chrono::{Local, NaiveDate};
 use reqwest::header::{COOKIE, HeaderMap, HeaderValue};
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -83,9 +84,9 @@ struct StockLastKline {
 
 impl StockLastKline {
     /// K 線所屬日期；欄位缺失或格式不符時為 `None`。
-    fn date(&self) -> Option<NaiveDate> {
+    fn date(&self) -> Option<Date> {
         let datetime = self.kline_datetime.as_deref()?;
-        NaiveDate::parse_from_str(datetime.get(..10)?, "%Y-%m-%d").ok()
+        Date::strptime("%Y-%m-%d", datetime.get(..10)?).ok()
     }
 }
 
@@ -171,7 +172,7 @@ fn parse_query_recent_daily_price(
 fn today_kline(
     response: QueryRecentDailyPriceResponse,
     stock_symbol: &str,
-    today: NaiveDate,
+    today: Date,
 ) -> Result<StockLastKline> {
     let kline = response.stock_last_kline.ok_or_else(|| {
         anyhow!(
@@ -245,7 +246,7 @@ impl StockInfo for Winvest {
     /// - `Err`: API 或解析錯誤，或最新日 K 不是今天。
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal> {
         let response = fetch_data(stock_symbol).await?;
-        let kline = today_kline(response, stock_symbol, Local::now().date_naive())?;
+        let kline = today_kline(response, stock_symbol, today())?;
         Ok(Decimal::try_from(kline.close_price)?)
     }
 
@@ -264,7 +265,7 @@ impl StockInfo for Winvest {
     /// - `Err`: API 或解析錯誤，或最新日 K 不是今天。
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes> {
         let response = fetch_data(stock_symbol).await?;
-        let kline = today_kline(response, stock_symbol, Local::now().date_naive())?;
+        let kline = today_kline(response, stock_symbol, today())?;
 
         Ok(declare::StockQuotes {
             stock_symbol: stock_symbol.to_string(),

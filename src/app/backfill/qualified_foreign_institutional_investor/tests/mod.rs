@@ -1,5 +1,8 @@
 //! 外資持股回補的單元測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use crate::domain::registry::entity::Stock;
@@ -15,7 +18,7 @@ fn to_history_stamps_every_row_with_the_data_date() {
         shares_held: 17_951_023_616,
         share_holding_percentage: dec!(69.22),
     }];
-    let date = NaiveDate::from_ymd_opt(2026, 8, 28).unwrap();
+    let date = date(2026, 8, 28);
 
     let history = to_history(&rows, date);
 
@@ -40,8 +43,8 @@ fn dto(symbol: &str) -> QfiiDto {
     }
 }
 
-fn day(month: u32, day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, month, day).unwrap()
+fn day(month: u32, day: u32) -> Date {
+    ymd(2026, month, day).unwrap()
 }
 
 /// 週末略過；起訖同一天只有那一天。
@@ -149,8 +152,8 @@ async fn run_history_saves_trading_days_only() {
 
 #[tokio::test]
 async fn backfill_history_rejects_reversed_range() {
-    let start = NaiveDate::from_ymd_opt(2026, 9, 30).unwrap();
-    let end = NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+    let start = date(2026, 9, 30);
+    let end = date(2026, 9, 1);
     assert!(backfill_history(start, end).await.is_err());
 }
 

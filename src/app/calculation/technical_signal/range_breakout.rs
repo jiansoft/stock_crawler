@@ -10,8 +10,8 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
 use futures::{StreamExt, stream};
+use jiff::civil::Date;
 
 use super::{CONCURRENCY, PgQuoteRepository};
 use crate::domain::quote::technical::{
@@ -24,12 +24,12 @@ use crate::domain::quote::technical::{
 /// # Errors
 ///
 /// 讀取股票清單、除權息事件、任一檔日線或成交量、或寫入失敗時回傳錯誤；讀取失敗時不寫入。
-pub async fn backfill_range_breakout(from: NaiveDate, to: NaiveDate) -> Result<usize> {
+pub async fn backfill_range_breakout(from: Date, to: Date) -> Result<usize> {
     backfill_with(&PgQuoteRepository::new(), from, to).await
 }
 
 /// [`backfill_range_breakout`] 的本體，倉儲可替換以便測試。
-pub(crate) async fn backfill_with<R>(repo: &R, from: NaiveDate, to: NaiveDate) -> Result<usize>
+pub(crate) async fn backfill_with<R>(repo: &R, from: Date, to: Date) -> Result<usize>
 where
     R: PriceBarRepository + TechnicalSignalRepository,
 {
@@ -40,7 +40,7 @@ where
         .await
         .context("讀取除權息事件失敗")?;
     // 日曆天數一定不少於交易日數；多讀判斷所需的根數，讓 `from` 當天也有完整的整理區間與假突破回看。
-    let limit = (to - from).num_days() + 1 + FAILED_BREAKOUT_BARS as i64;
+    let limit = i64::from((to - from).get_days()) + 1 + FAILED_BREAKOUT_BARS as i64;
     let results: Vec<_> = stream::iter(symbols)
         .map(|symbol| async move {
             let fetched = futures::join!(
@@ -70,13 +70,13 @@ where
 /// 缺成交量的日子由判斷函式略過。
 fn symbol_signals(
     symbol: &str,
-    from: NaiveDate,
+    from: Date,
     bars: &[technical::PriceBar],
     volumes: &[technical::VolumeBar],
     adjustments: &[PriceAdjustment],
 ) -> Vec<StockTechnicalSignal> {
     let bars = technical::adjust_bars(bars, adjustments);
-    let volume_index: HashMap<NaiveDate, usize> = volumes
+    let volume_index: HashMap<Date, usize> = volumes
         .iter()
         .enumerate()
         .map(|(index, bar)| (bar.date, index))

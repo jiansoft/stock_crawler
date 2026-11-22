@@ -3,6 +3,7 @@
 //! 檔案分工：本檔是依等級分流的輪轉檔案 logger 與主控台輸出；[`layer`] 把 tracing 事件接到
 //! 這個 logger，[`seq`] 負責轉送 Seq。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::{
     fmt::Write as _,
     fs::{self},
@@ -14,7 +15,6 @@ use std::{
     thread,
 };
 
-use chrono::{Local, format::DelayedFormat};
 use once_cell::sync::Lazy;
 use tokio::{
     runtime::Builder,
@@ -247,11 +247,11 @@ impl Logger {
         while let Some(message) = rx.recv().await {
             decrement_atomic_usize(&stats.queued_messages);
             stats.processed_messages.fetch_add(1, Ordering::Relaxed);
-            let now = Local::now();
+            let now = TaipeiDateTime::now();
 
             // Seq 轉送已移至 FileLogLayer::on_event，此處只負責寫檔。
 
-            if let Err(why) = writeln!(&mut msg, "{} {}", now.format("%F %X%.6f"), message) {
+            if let Err(why) = writeln!(&mut msg, "{} {}", now.strftime("%F %X%.6f"), message) {
                 error_console(format!("Failed to writeln a message. because:{:#?}", why));
                 continue;
             }
@@ -266,7 +266,7 @@ impl Logger {
         }
 
         if !msg.is_empty() {
-            let now = Local::now();
+            let now = TaipeiDateTime::now();
             flush_log_buffer(&mut rotate, now, &mut msg);
         }
     }
@@ -309,7 +309,7 @@ pub fn init_file_rotation(max_size_mb: u64, max_age_days: i64) {
 /// 一律走 `Rotate::write_msg`，讓跨日切檔與單檔大小輪轉都能生效
 /// （先前直接取 writer 寫入，導致 `current_size` 永遠為 0、大小輪轉從未觸發）。
 /// 無論成功與否都清空緩衝，避免寫檔持續失敗時 buffer 無界成長。
-fn flush_log_buffer(rotate: &mut Rotate, now: chrono::DateTime<Local>, msg: &mut String) {
+fn flush_log_buffer(rotate: &mut Rotate, now: TaipeiDateTime, msg: &mut String) {
     if let Err(why) = rotate.write_msg(now, msg.as_bytes()) {
         error_console(format!("Failed to write msg:{}\r\nbecause:{:#?}", msg, why));
     }
@@ -346,7 +346,7 @@ pub fn diagnostics_snapshot() -> LoggerRuntimeStatus {
 pub fn info_console(log: String) {
     println!(
         "{} Info {}",
-        Local::now().format("%Y-%m-%d %H:%M:%S.%3f"),
+        TaipeiDateTime::now().strftime("%Y-%m-%d %H:%M:%S.%3f"),
         log
     );
 }
@@ -355,7 +355,7 @@ pub fn info_console(log: String) {
 pub fn error_console(log: String) {
     println!(
         "{} Error {}",
-        DelayedFormat::to_string(&Local::now().format("%Y-%m-%d %H:%M:%S.%3f")),
+        TaipeiDateTime::now().strftime("%Y-%m-%d %H:%M:%S.%3f"),
         log
     );
 }

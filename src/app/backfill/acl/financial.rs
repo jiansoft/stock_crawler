@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 
 /// 更新每股淨值命令。
@@ -43,7 +44,6 @@ impl FinancialStatementAclMapper {
     pub fn from_wespai(
         dto: crate::infra::crawler::wespai::profit::Profit,
     ) -> crate::domain::financial::entity::FinancialStatement {
-        use chrono::Local;
         crate::domain::financial::entity::FinancialStatement {
             serial: 0,
             security_code: dto.security_code,
@@ -59,8 +59,8 @@ impl FinancialStatementAclMapper {
             profit_before_tax: dto.profit_before_tax,
             return_on_equity: dto.return_on_equity,
             return_on_assets: dto.return_on_assets,
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 
@@ -68,7 +68,6 @@ impl FinancialStatementAclMapper {
     pub fn from_yahoo_profile(
         dto: crate::infra::crawler::yahoo::profile::Profile,
     ) -> crate::domain::financial::entity::FinancialStatement {
-        use chrono::Local;
         crate::domain::financial::entity::FinancialStatement {
             serial: 0,
             security_code: dto.stock_symbol,
@@ -84,8 +83,8 @@ impl FinancialStatementAclMapper {
             profit_before_tax: dto.profit_before_tax,
             return_on_equity: dto.return_on_equity,
             return_on_assets: dto.return_on_assets,
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 
@@ -93,7 +92,6 @@ impl FinancialStatementAclMapper {
     pub fn from_eps(
         dto: crate::infra::crawler::twse::eps::Eps,
     ) -> crate::domain::financial::entity::FinancialStatement {
-        use chrono::Local;
         crate::domain::financial::entity::FinancialStatement {
             serial: 0,
             security_code: dto.stock_symbol,
@@ -109,8 +107,8 @@ impl FinancialStatementAclMapper {
             profit_before_tax: Default::default(),
             return_on_equity: Default::default(),
             return_on_assets: Default::default(),
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 
@@ -118,7 +116,6 @@ impl FinancialStatementAclMapper {
     pub fn from_annual_profit(
         dto: crate::infra::crawler::share::AnnualProfit,
     ) -> crate::domain::financial::entity::FinancialStatement {
-        use chrono::Local;
         crate::domain::financial::entity::FinancialStatement {
             serial: 0,
             security_code: dto.stock_symbol,
@@ -134,8 +131,8 @@ impl FinancialStatementAclMapper {
             profit_before_tax: dto.profit_before_tax,
             return_on_equity: Default::default(),
             return_on_assets: Default::default(),
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 }

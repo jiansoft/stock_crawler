@@ -1,6 +1,7 @@
 //! 資料庫伺服器狀態：啟動時間與 `pg_stat_statements` 統計重置時間的測試。
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
 
 /// 連不上的主機在逾時內回傳錯誤，不會卡住。
 #[tokio::test]
@@ -49,7 +50,7 @@ async fn probe_reads_started_at() {
     };
 
     assert!(
-        status.started_at <= Local::now(),
+        status.started_at <= TaipeiDateTime::now(),
         "啟動時間不應晚於現在：{status:?}"
     );
 }

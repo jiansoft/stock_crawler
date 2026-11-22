@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::{
@@ -56,11 +56,11 @@ struct MarginTable {
 /// # Errors
 ///
 /// HTTP 請求或 JSON 反序列化失敗時回傳錯誤；休市或尚未公布回傳空集合。
-pub async fn visit_institutional(date: NaiveDate) -> Result<HashMap<String, InstitutionalFlow>> {
+pub async fn visit_institutional(date: Date) -> Result<HashMap<String, InstitutionalFlow>> {
     let url = format!(
         "https://www.{}/rwd/zh/fund/T86?date={}&selectType=ALLBUT0999&response=json",
         twse::HOST,
-        date.format("%Y%m%d")
+        date.strftime("%Y%m%d")
     );
     let response = util::http::get_json::<T86Response>(&url).await?;
     Ok(parse_institutional(response))
@@ -71,11 +71,11 @@ pub async fn visit_institutional(date: NaiveDate) -> Result<HashMap<String, Inst
 /// # Errors
 ///
 /// HTTP 請求或 JSON 反序列化失敗時回傳錯誤；休市或尚未公布回傳空集合。
-pub async fn visit_margin(date: NaiveDate) -> Result<HashMap<String, MarginBalance>> {
+pub async fn visit_margin(date: Date) -> Result<HashMap<String, MarginBalance>> {
     let url = format!(
         "https://www.{}/rwd/zh/marginTrading/MI_MARGN?date={}&selectType=ALL&response=json",
         twse::HOST,
-        date.format("%Y%m%d")
+        date.strftime("%Y%m%d")
     );
     let response = util::http::get_json::<MarginResponse>(&url).await?;
     Ok(parse_margin(response))

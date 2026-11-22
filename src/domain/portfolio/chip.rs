@@ -7,7 +7,7 @@
 use super::view::HoldingView;
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -214,29 +214,26 @@ impl HoldingChip {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChipTradingDay {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 前一個有籌碼資料的交易日。
-    pub previous: Option<NaiveDate>,
+    pub previous: Option<Date>,
     /// 後一個有籌碼資料的交易日。
-    pub next: Option<NaiveDate>,
+    pub next: Option<Date>,
 }
 
 /// 持股籌碼日報的讀取介面。
 #[async_trait]
 pub trait HoldingChipQuery: Send + Sync {
     /// 不晚於 `date`（`None` 為今天）最近一個有籌碼資料的交易日；完全沒有資料回 `None`。
-    async fn resolve_chip_day(&self, date: Option<NaiveDate>) -> Result<Option<ChipTradingDay>>;
+    async fn resolve_chip_day(&self, date: Option<Date>) -> Result<Option<ChipTradingDay>>;
 
     /// `date` 收盤時仍持有的普通股（不含 ETF）與當天籌碼，依代號排序。
     ///
     /// 持股批次的買進日不晚於當天，且未賣出、或賣出日（同會員同代號買進日之後最早一筆未撤銷的
     /// 賣出紀錄）晚於當天；找不到賣出紀錄的已賣出批次視為買進當天就不再持有。
     /// 範圍由 `view` 決定（家庭全體或單一成員）。
-    async fn fetch_holding_chips(
-        &self,
-        date: NaiveDate,
-        view: &HoldingView,
-    ) -> Result<Vec<HoldingChip>>;
+    async fn fetch_holding_chips(&self, date: Date, view: &HoldingView)
+    -> Result<Vec<HoldingChip>>;
 }
 
 /// 一檔股票在一段期間內的主力（買賣超前幾名分點）買賣超合計。
@@ -256,13 +253,13 @@ pub struct BrokerPeriodNet {
 #[async_trait]
 pub trait HoldingBrokerQuery: Send + Sync {
     /// `until`（含）之前最近 `limit` 個有主力資料的交易日，由新到舊。
-    async fn fetch_broker_dates(&self, until: NaiveDate, limit: usize) -> Result<Vec<NaiveDate>>;
+    async fn fetch_broker_dates(&self, until: Date, limit: usize) -> Result<Vec<Date>>;
 
     /// `from`～`to`（含）期間 `symbols` 的主力買賣超合計，依代號排序；期間內沒有主力資料的股票不回傳。
     async fn fetch_broker_period(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         symbols: &[String],
     ) -> Result<Vec<BrokerPeriodNet>>;
 }

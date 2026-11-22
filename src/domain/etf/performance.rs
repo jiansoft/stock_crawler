@@ -8,7 +8,9 @@
 //! - 最大回撤取近 1 年收盤從前高到後低的最大跌幅。
 //! - 淨值含息報酬（[`compute_nav_returns`]）用同一套期間規則，序列換成以現金配息還原的正式淨值。
 
-use chrono::{Datelike, Months, NaiveDate};
+use crate::core::util::datetime::ymd;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use crate::domain::quote::technical::PriceBar;
 
@@ -18,7 +20,7 @@ pub struct EtfPerformance {
     /// ETF 代號。
     pub stock_symbol: String,
     /// 計算基準日（最後一個有成交的交易日）。
-    pub calc_date: Option<NaiveDate>,
+    pub calc_date: Option<Date>,
     /// 1 週報酬。
     pub ret_1w: Option<f64>,
     /// 1 個月報酬。
@@ -44,7 +46,7 @@ pub struct EtfPerformance {
     /// 近 1 年最大回撤（負值）。
     pub mdd_1y: Option<f64>,
     /// 最大回撤的谷底日。
-    pub mdd_date: Option<NaiveDate>,
+    pub mdd_date: Option<Date>,
     /// 近 1 年對基準的 beta。
     pub beta_1y: Option<f64>,
     /// 近 1 年夏普值。
@@ -61,7 +63,7 @@ pub struct EtfPerformance {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EtfNavReturns {
     /// 計算基準日（最後一筆淨值的日期）。
-    pub calc_date: NaiveDate,
+    pub calc_date: Date,
     /// 1 週報酬。
     pub ret_1w: Option<f64>,
     /// 1 個月報酬。
@@ -122,22 +124,23 @@ pub fn compute_performance(
     let as_of = last.date;
     perf.calc_date = Some(as_of);
 
-    let months_back = |months: u32| as_of.checked_sub_months(Months::new(months));
+    let months_back = |months: u32| as_of.checked_sub(i64::from(months).months()).ok();
     perf.ret_1w = as_of
-        .checked_sub_days(chrono::Days::new(7))
+        .checked_sub(7.days())
+        .ok()
         .and_then(|from| period_return(bars, from));
     perf.ret_1m = months_back(1).and_then(|from| period_return(bars, from));
     perf.ret_3m = months_back(3).and_then(|from| period_return(bars, from));
     perf.ret_6m = months_back(6).and_then(|from| period_return(bars, from));
-    perf.ret_ytd = NaiveDate::from_ymd_opt(as_of.year() - 1, 12, 31)
-        .and_then(|from| period_return(bars, from));
+    perf.ret_ytd =
+        ymd(i32::from(as_of.year() - 1), 12, 31).and_then(|from| period_return(bars, from));
     perf.ret_1y = months_back(12).and_then(|from| period_return(bars, from));
     perf.ret_2y = annualized(bars, months_back(24), 2.0);
     perf.ret_3y = annualized(bars, months_back(36), 3.0);
     perf.ret_5y = annualized(bars, months_back(60), 5.0);
     perf.ret_10y = annualized(bars, months_back(120), 10.0);
 
-    let year_start = NaiveDate::from_ymd_opt(as_of.year(), 1, 1);
+    let year_start = ymd(i32::from(as_of.year()), 1, 1);
     let this_year: Vec<f64> = bars
         .iter()
         .filter(|bar| Some(bar.date) >= year_start)
@@ -170,7 +173,7 @@ pub fn compute_performance(
 }
 
 /// 最新收盤相對 `from` 當天或之前最後一個交易日收盤的報酬（%）。
-fn period_return(bars: &[PriceBar], from: NaiveDate) -> Option<f64> {
+fn period_return(bars: &[PriceBar], from: Date) -> Option<f64> {
     let first = bars.first()?;
     if first.date > from {
         return None;
@@ -180,15 +183,15 @@ fn period_return(bars: &[PriceBar], from: NaiveDate) -> Option<f64> {
     (base.close > 0.0).then(|| (last.close / base.close - 1.0) * 100.0)
 }
 
-fn annualized(bars: &[PriceBar], from: Option<NaiveDate>, years: f64) -> Option<f64> {
+fn annualized(bars: &[PriceBar], from: Option<Date>, years: f64) -> Option<f64> {
     let total = period_return(bars, from?)? / 100.0;
     (total > -1.0).then(|| ((1.0 + total).powf(1.0 / years) - 1.0) * 100.0)
 }
 
 /// 由前高到後低的最大跌幅（%，負值）與谷底日；不到兩筆或從未下跌時為 `None`。
-fn max_drawdown(window: &[&PriceBar]) -> Option<(f64, NaiveDate)> {
+fn max_drawdown(window: &[&PriceBar]) -> Option<(f64, Date)> {
     let mut peak = f64::MIN;
-    let mut worst: Option<(f64, NaiveDate)> = None;
+    let mut worst: Option<(f64, Date)> = None;
     for bar in window {
         peak = peak.max(bar.close);
         if peak <= 0.0 {
@@ -202,7 +205,7 @@ fn max_drawdown(window: &[&PriceBar]) -> Option<(f64, NaiveDate)> {
     worst
 }
 
-fn daily_returns(window: &[&PriceBar]) -> Vec<(NaiveDate, f64)> {
+fn daily_returns(window: &[&PriceBar]) -> Vec<(Date, f64)> {
     window
         .windows(2)
         .filter(|pair| pair[0].close > 0.0)
@@ -218,8 +221,8 @@ fn mean_std(values: &[f64]) -> (f64, f64) {
 }
 
 /// 以同一天都有報酬的日子計算 beta；共同樣本不足或基準沒有波動時為 `None`。
-fn beta(returns: &[(NaiveDate, f64)], benchmark: &[(NaiveDate, f64)]) -> Option<f64> {
-    let bench: std::collections::HashMap<NaiveDate, f64> = benchmark.iter().copied().collect();
+fn beta(returns: &[(Date, f64)], benchmark: &[(Date, f64)]) -> Option<f64> {
+    let bench: std::collections::HashMap<Date, f64> = benchmark.iter().copied().collect();
     let pairs: Vec<(f64, f64)> = returns
         .iter()
         .filter_map(|(date, r)| bench.get(date).map(|b| (*r, *b)))

@@ -7,10 +7,10 @@
 //!
 //! 兩者一次回傳全部上櫃股票，日期用民國年（`115/10/05`）；休市或尚未公布時沒有資料。
 
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use anyhow::Result;
-use chrono::{Datelike, NaiveDate};
 use serde::Deserialize;
 
 use crate::{
@@ -48,11 +48,11 @@ impl TpexResponse {
 }
 
 /// 民國日期參數（`115/10/05`）。
-fn roc_date(date: NaiveDate) -> String {
+fn roc_date(date: Date) -> String {
     format!(
         "{}/{}",
-        util::datetime::gregorian_year_to_roc_year(date.year()),
-        date.format("%m/%d")
+        util::datetime::gregorian_year_to_roc_year(i32::from(date.year())),
+        date.strftime("%m/%d")
     )
 }
 
@@ -61,7 +61,7 @@ fn roc_date(date: NaiveDate) -> String {
 /// # Errors
 ///
 /// HTTP 請求或 JSON 反序列化失敗時回傳錯誤；休市或尚未公布回傳空集合。
-pub async fn visit_institutional(date: NaiveDate) -> Result<HashMap<String, InstitutionalFlow>> {
+pub async fn visit_institutional(date: Date) -> Result<HashMap<String, InstitutionalFlow>> {
     let url = format!(
         "https://{}/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&se=EW&t=D&d={}",
         tpex::HOST,
@@ -76,7 +76,7 @@ pub async fn visit_institutional(date: NaiveDate) -> Result<HashMap<String, Inst
 /// # Errors
 ///
 /// HTTP 請求或 JSON 反序列化失敗時回傳錯誤；休市或尚未公布回傳空集合。
-pub async fn visit_margin(date: NaiveDate) -> Result<HashMap<String, MarginBalance>> {
+pub async fn visit_margin(date: Date) -> Result<HashMap<String, MarginBalance>> {
     let url = format!(
         "https://{}/web/stock/margin_trading/margin_balance/margin_bal_result.php?l=zh-tw&d={}",
         tpex::HOST,

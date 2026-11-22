@@ -10,10 +10,11 @@
 //! 條件選股回測的大盤濾網（`market_filter_ma`）與市場廣度濾網（`market_filter_breadth`）也是看
 //! 這兩件事，這則通知讓環境轉換當天就知道。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 
 use crate::{
     core::{alert, util::text},
@@ -43,7 +44,7 @@ const ALERT_BREADTH_PERCENT: f64 = 30.0;
 ///
 /// 讀取加權指數失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let today = Local::now().date_naive();
+    let today = today();
     if let Some(message) = run(
         &PgMarketIndexRepository::new(),
         &PgMarketValuationRepository::new(),
@@ -60,7 +61,7 @@ pub async fn execute() -> Result<()> {
 async fn run(
     index: &(impl IndexCloseQuery + BreadthQuery),
     valuation_repo: &impl MarketValuationRepository,
-    today: NaiveDate,
+    today: Date,
 ) -> Result<Option<String>> {
     let points = regime::load_taiex(index, Some(today))
         .await
@@ -91,7 +92,7 @@ async fn run(
 /// 或站上 60 日均線的比例跨過 [`ALERT_BREADTH_PERCENT`]；都沒有時回 `None`。`breadth` 為今天與
 /// 前一個交易日的統計（由新到舊），沒有時不看廣度；`valuation` 只附在訊息裡，不影響是否發送。
 fn build_message(
-    points: &[(NaiveDate, f64)],
+    points: &[(Date, f64)],
     breadth: &[BreadthDay],
     valuation: Option<&ValuationLevel>,
 ) -> Option<String> {
@@ -142,7 +143,7 @@ fn build_message(
     {
         lines.push(format!(
             "• 估值水位 {}：{summary}",
-            level.date.format("%m-%d")
+            level.date.strftime("%m-%d")
         ));
     }
 

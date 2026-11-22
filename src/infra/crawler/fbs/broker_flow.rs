@@ -16,8 +16,9 @@
 //!   買賣相抵為 0 的分點會列在買超側。
 //! - 查無代號時頁面沒有 `oMainTable` 表格，視為錯誤。
 
+use crate::core::util::datetime::ymd;
 use anyhow::{Context, Result, anyhow};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rust_decimal::Decimal;
@@ -59,7 +60,7 @@ pub struct BrokerFlow {
     /// 股票代號。
     pub stock_symbol: String,
     /// 資料日期（頁面的「最後更新日」）。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 買超前幾名，依買超張數由大到小。
     pub buyers: Vec<BrokerNet>,
     /// 賣超前幾名，依賣超張數由大到小。
@@ -115,7 +116,7 @@ fn parse(html: &str, stock_symbol: &str) -> Result<BrokerFlow> {
     let date = UPDATED_RE
         .captures(html)
         .and_then(|caps| {
-            NaiveDate::from_ymd_opt(
+            ymd(
                 caps[1].parse().ok()?,
                 caps[2].parse().ok()?,
                 caps[3].parse().ok()?,

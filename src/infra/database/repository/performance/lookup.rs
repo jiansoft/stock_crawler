@@ -1,7 +1,8 @@
 //! CAGR 倉儲的查詢：個股各期間結果、樣本涵蓋統計、最新基準日與缺少某期間的基準日。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use sqlx::Row;
 
 use super::{SELECT_COLUMNS, cagr_column, rows_to_domain};
@@ -16,7 +17,7 @@ use crate::infra::database::table::performance::stock_cagr::StockCagr as TableSt
 /// 期間代碼在資料庫是字串，字典序（M3 < M6 < Y1 < Y10 < Y1H …）與時間長度
 /// 不一致，故排序改在領域層以 [`CagrPeriod::months`] 進行。
 pub(super) async fn fetch_by_symbol(
-    date: NaiveDate,
+    date: Date,
     stock_symbol: &str,
 ) -> Result<Vec<DomainStockCagr>> {
     let sql = format!(
@@ -28,7 +29,7 @@ WHERE date = $1 AND stock_symbol = $2
     );
 
     let rows = sqlx::query_as::<_, TableStockCagr>(sqlx::AssertSqlSafe(sql.as_str()))
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(stock_symbol)
         .fetch_all(database::get_connection())
         .await
@@ -45,7 +46,7 @@ WHERE date = $1 AND stock_symbol = $2
 /// 五個計數以單一查詢的 `COUNT(*) FILTER` 完成，避免多次往返造成
 /// 各計數取自不同時點的資料而彼此矛盾。
 pub(super) async fn fetch_coverage(
-    date: NaiveDate,
+    date: Date,
     period: CagrPeriod,
     metric: CagrMetric,
 ) -> Result<CagrCoverage> {
@@ -65,7 +66,7 @@ WHERE date = $1 AND period = $2
     );
 
     let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(period.code())
         .fetch_one(database::get_connection())
         .await
@@ -81,17 +82,19 @@ WHERE date = $1 AND period = $2
 }
 
 /// 取得最新一個已完成計算的基準日。
-pub(super) async fn fetch_latest_date() -> Result<Option<NaiveDate>> {
-    let row: (Option<NaiveDate>,) = sqlx::query_as("SELECT MAX(date) FROM stock_cagr")
-        .fetch_one(database::get_connection())
-        .await
-        .context("Failed to fetch latest date in PgCagrRepository::fetch_latest_date")?;
+pub(super) async fn fetch_latest_date() -> Result<Option<Date>> {
+    let row: (Option<Date>,) =
+        sqlx::query_as::<_, (Option<jiff_sqlx::Date>,)>("SELECT MAX(date) FROM stock_cagr")
+            .fetch_one(database::get_connection())
+            .await
+            .map(|(c0,)| (crate::infra::database::jiff_types::from_wire(c0),))
+            .context("Failed to fetch latest date in PgCagrRepository::fetch_latest_date")?;
 
     Ok(row.0)
 }
 
 /// 取得還沒有指定期間任何一列結果的基準日（回填單一期間時用）。
-pub(super) async fn fetch_dates_missing_period(period: CagrPeriod) -> Result<Vec<NaiveDate>> {
+pub(super) async fn fetch_dates_missing_period(period: CagrPeriod) -> Result<Vec<Date>> {
     // 以 NOT EXISTS 而非 LEFT JOIN：只要該日期出現過任何一列指定期間的
     // 結果就算已回填，不需要逐檔比對母體。
     let sql = r#"
@@ -105,10 +108,15 @@ pub(super) async fn fetch_dates_missing_period(period: CagrPeriod) -> Result<Vec
         ORDER BY s.date
     "#;
 
-    let rows: Vec<(NaiveDate,)> = sqlx::query_as(sql)
+    let rows: Vec<(Date,)> = sqlx::query_as::<_, (jiff_sqlx::Date,)>(sql)
         .bind(period.code())
         .fetch_all(database::get_connection())
         .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(c0,)| (crate::infra::database::jiff_types::from_wire(c0),))
+                .collect::<Vec<_>>()
+        })
         .context(
             "Failed to fetch dates missing period in PgCagrRepository::fetch_dates_missing_period",
         )?;

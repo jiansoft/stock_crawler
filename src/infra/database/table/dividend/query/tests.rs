@@ -1,7 +1,5 @@
 //! 股利資料表查詢的測試。
 
-use chrono::TimeZone;
-
 use super::*;
 
 #[tokio::test]
@@ -69,7 +67,8 @@ async fn test_fetch_dividends_summary_by_date() {
     dotenvy::dotenv().ok();
     tracing::debug!("開始 fetch_dividends_summary_by_date");
 
-    let datetime = Local.with_ymd_and_hms(2022, 3, 9, 0, 0, 0).unwrap();
+    let datetime = TaipeiDateTime::from_datetime(jiff::civil::date(2022, 3, 9).at(0, 0, 0, 0))
+        .expect("合法時間");
 
     let r = Dividend::fetch_dividends_summary_by_date("2330", 2022, datetime).await;
     if let Ok(result) = r {
@@ -93,7 +92,8 @@ async fn test_fetch_yearly_dividends_sum_by_date() {
     let mut e = Dividend::new();
     e.security_code = "2887".to_string();
     e.year = 2022;
-    let datetime = Local.with_ymd_and_hms(2022, 3, 9, 0, 0, 0).unwrap();
+    let datetime = TaipeiDateTime::from_datetime(jiff::civil::date(2022, 3, 9).at(0, 0, 0, 0))
+        .expect("合法時間");
 
     let r = e.fetch_yearly_dividends_sum_by_date(datetime).await;
     if let Ok(result) = r {
@@ -167,10 +167,14 @@ mod fake_dividends {
             ..Default::default()
         };
         let purchased = |month: u32, day: u32| {
-            Local
-                .with_ymd_and_hms(1999, month, day, 0, 0, 0)
-                .single()
-                .expect("合法時間")
+            TaipeiDateTime::from_datetime(
+                crate::core::util::datetime::ymd(1999, month, day)
+                    .and_then(|day| {
+                        crate::core::util::datetime::hms(0, 0, 0).map(|time| day.to_datetime(time))
+                    })
+                    .expect("合法時間"),
+            )
+            .expect("合法時間")
         };
 
         let years = Dividend::fetch_years_by_security_code(SYMBOL).await;

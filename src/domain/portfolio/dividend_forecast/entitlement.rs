@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::{Basis, ForecastItem};
@@ -16,9 +16,9 @@ pub struct Entitlement {
     /// 股票名稱。
     pub name: String,
     /// 除息日。
-    pub ex_date: NaiveDate,
+    pub ex_date: Date,
     /// 發放日。
-    pub pay_date: NaiveDate,
+    pub pay_date: Date,
     /// 每股現金股利。
     pub cash_per_share: Decimal,
     /// 除息日參與分配的股數。
@@ -48,7 +48,7 @@ impl Entitlement {
 /// 以目前持股推算（`estimated`）、沒有現金、缺除息日或發放日的列不取；同一除息日有多列
 /// （例如月配 ETF 的季別與月別）時取金額大者，與 [`forecast`](super::forecast) 對股利列的去重一致。
 pub fn entitlements(allocations: &[PayoutAllocation]) -> Vec<Entitlement> {
-    let mut by_row: HashMap<(&str, NaiveDate, &str), Entitlement> = HashMap::new();
+    let mut by_row: HashMap<(&str, Date, &str), Entitlement> = HashMap::new();
     for allocation in allocations {
         if allocation.estimated || allocation.cash_amount <= Decimal::ZERO {
             continue;

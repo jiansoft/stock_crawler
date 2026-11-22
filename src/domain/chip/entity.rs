@@ -1,6 +1,6 @@
 //! 籌碼資料實體：三大法人、融資融券、集保股權分散、董監持股與設質、券商分點主力進出。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +36,7 @@ pub struct MarginRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HolderDistributionRecord {
     /// 資料日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 證券代號。
     pub stock_symbol: String,
     /// 千張大戶人數。
@@ -57,7 +57,7 @@ pub struct HolderDistributionRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HolderLevelRecord {
     /// 資料日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 證券代號。
     pub stock_symbol: String,
     /// 持股分級（1～15 依持股數由小到大，16 差異數調整，17 合計）。
@@ -74,7 +74,7 @@ pub struct HolderLevelRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InsiderHoldingRecord {
     /// 資料月份（該月 1 日）。
-    pub month: NaiveDate,
+    pub month: Date,
     /// 股票代號。
     pub stock_symbol: String,
     /// 職稱。
@@ -108,7 +108,7 @@ pub struct BrokerNetRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrokerFlowRecord {
     /// 資料日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 股票代號。
     pub stock_symbol: String,
     /// 合計買超張數。

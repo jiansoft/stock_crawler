@@ -6,9 +6,9 @@ mod identity;
 mod payout;
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::infra::database;
 use anyhow::Context;
-use chrono::TimeZone;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -48,8 +48,8 @@ pub(super) fn build_dividend(
         ex_dividend_date_stock: "-".to_string(),
         payable_date_cash: payable_date_cash.to_string(),
         payable_date_stock: "-".to_string(),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     }
 }
 
@@ -145,10 +145,14 @@ async fn annual_total_row_is_excluded_but_year_only_dividend_is_kept() {
     .await
     .expect("測試資料寫入失敗");
 
-    let holding_date = Local
-        .with_ymd_and_hms(TEST_PAYOUT_YEAR - 1, 1, 1, 0, 0, 0)
-        .single()
-        .expect("測試持有日轉換失敗");
+    let holding_date = TaipeiDateTime::from_datetime(
+        crate::core::util::datetime::ymd(TEST_PAYOUT_YEAR - 1, 1, 1)
+            .and_then(|day| {
+                crate::core::util::datetime::hms(0, 0, 0).map(|time| day.to_datetime(time))
+            })
+            .expect("合法時間"),
+    )
+    .expect("合法時間");
 
     let mixed = repo
         .fetch_dividends_summary_by_date(MIXED_YEAR_SYMBOL, TEST_PAYOUT_YEAR, holding_date)

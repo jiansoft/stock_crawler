@@ -1,5 +1,6 @@
 //! taiwan_capitalization_weighted_stock_index的測試；連外的測試標 #[ignore]。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::result::Result::Ok;
 
 use crate::infra::cache::SHARE;
@@ -44,7 +45,7 @@ async fn test_visit() {
     SHARE.load().await;
     tracing::debug!("開始 visit");
 
-    match visit(Local::now()).await {
+    match visit(TaipeiDateTime::now()).await {
         Err(why) => {
             tracing::debug!("Failed to visit because: {:?}", why);
         }

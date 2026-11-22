@@ -1,5 +1,6 @@
 // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
 use super::*;
+use crate::core::util::datetime::today;
 
 use jiff::Timestamp;
 use jiff::civil::Weekday;
@@ -245,7 +246,7 @@ async fn market_peer_warmup_fills_shared_cache() {
         .await
         .expect("預熱 task 不應 panic");
 
-    let (since, until) = stats_window(chrono::Local::now().date_naive(), MARKET_PEER_YEARS);
+    let (since, until) = stats_window(today(), MARKET_PEER_YEARS);
     dividend_fill_stats::market_fill_samples(since, until, async {
         panic!("預熱後應直接命中快取，不應再查詢")
     })

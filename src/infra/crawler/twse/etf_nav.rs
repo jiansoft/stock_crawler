@@ -17,10 +17,12 @@
 //! 同一份檔案裡數值有時是 JSON number、有時是字串，字串還可能帶千分位逗號；
 //! `-` 與空字串代表沒有資料。投信約在 17:00 前更新完當天的預估淨值。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil;
+use jiff::civil::Date;
 use std::str::FromStr;
 
 use anyhow::Result;
-use chrono::{FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use serde_json::Value;
 
@@ -53,7 +55,7 @@ fn parse_row(row: &Value) -> Option<EtfNavRecord> {
     if symbol.is_empty() {
         return None;
     }
-    let date = NaiveDate::parse_from_str(row.get("i")?.as_str()?.trim(), "%Y%m%d").ok()?;
+    let date = Date::strptime("%Y%m%d", row.get("i")?.as_str()?.trim()).ok()?;
     let outstanding_units = number(row, "c")?.trunc().to_i64()?;
     let units_change = number(row, "d")
         .and_then(|value| value.trunc().to_i64())
@@ -61,8 +63,8 @@ fn parse_row(row: &Value) -> Option<EtfNavRecord> {
     let source_time = row
         .get("j")
         .and_then(Value::as_str)
-        .and_then(|time| NaiveTime::parse_from_str(time.trim(), "%H:%M:%S").ok())
-        .and_then(|time| taipei().from_local_datetime(&date.and_time(time)).single());
+        .and_then(|time| civil::Time::strptime("%H:%M:%S", time.trim()).ok())
+        .and_then(|time| TaipeiDateTime::from_datetime(date.to_datetime(time)).ok());
     Some(EtfNavRecord {
         date,
         stock_symbol: symbol.to_string(),
@@ -74,10 +76,6 @@ fn parse_row(row: &Value) -> Option<EtfNavRecord> {
         previous_nav: positive(number(row, "h")),
         source_time,
     })
-}
-
-fn taipei() -> FixedOffset {
-    FixedOffset::east_opt(8 * 3600).expect("UTC+8 合法")
 }
 
 /// 數值欄位：number 或字串（可帶千分位），`-`、空字串或無法解析為 `None`。

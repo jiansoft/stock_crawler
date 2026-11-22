@@ -1,7 +1,7 @@
 //! 目標配置的歷史版本（`portfolio_target_revision`）：儲存前留存覆蓋前的整組、列出與取得版本。
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,8 @@ struct RevisionItem {
 struct RevisionRow {
     id: i64,
     dimension: String,
-    saved_time: DateTime<Utc>,
+    #[sqlx(try_from = "jiff_sqlx::Timestamp")]
+    saved_time: Timestamp,
     targets: String,
     actor_source: String,
     actor_ref: String,

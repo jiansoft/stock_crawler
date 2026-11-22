@@ -1,5 +1,6 @@
 //! 集保戶股權分散表的測試；連外的測試標 #[ignore]。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -14,7 +15,7 @@ fn summarize_fixture() {
     assert_eq!(
         distributions["2330"],
         HolderDistribution {
-            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            date: date(2026, 10, 2),
             major_holders: 1_485,
             major_percent: dec!(84.77),
             total_holders: 3_010_913,
@@ -47,7 +48,7 @@ fn parse_keeps_every_level() {
     assert_eq!(
         *of_2330[11],
         HolderLevel {
-            date: NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(),
+            date: date(2026, 10, 2),
             stock_symbol: "2330".to_string(),
             level: 12,
             holders: 582,

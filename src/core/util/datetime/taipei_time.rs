@@ -38,6 +38,15 @@ pub fn ymd(year: i32, month: u32, day: u32) -> Option<Date> {
     Date::new(year, month, day).ok()
 }
 
+/// 以 chrono `NaiveTime::from_hms_opt` 的參數型別建立時刻；超出範圍時回傳 `None`。
+#[must_use]
+pub fn hms(hour: u32, minute: u32, second: u32) -> Option<Time> {
+    let hour = i8::try_from(hour).ok()?;
+    let minute = i8::try_from(minute).ok()?;
+    let second = i8::try_from(second).ok()?;
+    Time::new(hour, minute, second, 0).ok()
+}
+
 /// 臺灣時間的時間點，取代 `chrono::DateTime<Local>`。
 ///
 /// 內部存 [`Timestamp`]；取年月日、時分等欄位時一律以臺灣時區（UTC+8）解讀。
@@ -102,6 +111,54 @@ impl TaipeiDateTime {
         self.datetime().time()
     }
 
+    /// 臺灣時間的年。
+    #[must_use]
+    pub fn year(self) -> i16 {
+        self.datetime().year()
+    }
+
+    /// 臺灣時間的月（1～12）。
+    #[must_use]
+    pub fn month(self) -> i8 {
+        self.datetime().month()
+    }
+
+    /// 臺灣時間的日（1～31）。
+    #[must_use]
+    pub fn day(self) -> i8 {
+        self.datetime().day()
+    }
+
+    /// 臺灣時間的時（0～23）。
+    #[must_use]
+    pub fn hour(self) -> i8 {
+        self.datetime().hour()
+    }
+
+    /// 臺灣時間的分（0～59）。
+    #[must_use]
+    pub fn minute(self) -> i8 {
+        self.datetime().minute()
+    }
+
+    /// 臺灣時間的秒（0～59）。
+    #[must_use]
+    pub fn second(self) -> i8 {
+        self.datetime().second()
+    }
+
+    /// 臺灣時間的星期。
+    #[must_use]
+    pub fn weekday(self) -> jiff::civil::Weekday {
+        self.datetime().weekday()
+    }
+
+    /// 與 chrono `to_rfc3339` 相同的字串（同 JSON 格式），例如 `2026-11-22T13:05:09.123456+08:00`。
+    #[must_use]
+    pub fn to_rfc3339(self) -> String {
+        format!("{self:?}")
+    }
+
     /// 依 strftime 格式輸出臺灣時間（取代 chrono 的 `format`）；`%z`、`%:z` 輸出 `+0800`、`+08:00`。
     #[must_use]
     pub fn strftime<'f, F>(self, format: &'f F) -> jiff::fmt::strtime::Display<'f>
@@ -152,7 +209,7 @@ impl TaipeiDateTime {
 }
 
 /// chrono 的秒以下位數規則：0 不輸出，否則依可整除的程度輸出 3、6 或 9 位。
-struct ChronoFraction(i32);
+pub(super) struct ChronoFraction(pub(super) i32);
 
 impl fmt::Display for ChronoFraction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -245,6 +302,46 @@ impl Sub<SignedDuration> for TaipeiDateTime {
 
 impl SubAssign<SignedDuration> for TaipeiDateTime {
     fn sub_assign(&mut self, rhs: SignedDuration) {
+        *self = *self - rhs;
+    }
+}
+
+impl Add<Span> for TaipeiDateTime {
+    type Output = Self;
+
+    /// 以臺灣時間的日曆加上日、月等單位（UTC+8 沒有夏令時間，一天固定 24 小時）。
+    ///
+    /// # Panics
+    ///
+    /// 結果超出可表示的範圍時 panic（與 chrono 的 `+` 相同）。
+    fn add(self, rhs: Span) -> Self {
+        self.checked_add_span(rhs)
+            .expect("TaipeiDateTime 加上 Span 超出可表示的範圍")
+    }
+}
+
+impl AddAssign<Span> for TaipeiDateTime {
+    fn add_assign(&mut self, rhs: Span) {
+        *self = *self + rhs;
+    }
+}
+
+impl Sub<Span> for TaipeiDateTime {
+    type Output = Self;
+
+    /// 以臺灣時間的日曆減去日、月等單位。
+    ///
+    /// # Panics
+    ///
+    /// 結果超出可表示的範圍時 panic（與 chrono 的 `-` 相同）。
+    fn sub(self, rhs: Span) -> Self {
+        self.checked_add_span(rhs.negate())
+            .expect("TaipeiDateTime 減去 Span 超出可表示的範圍")
+    }
+}
+
+impl SubAssign<Span> for TaipeiDateTime {
+    fn sub_assign(&mut self, rhs: Span) {
         *self = *self - rhs;
     }
 }

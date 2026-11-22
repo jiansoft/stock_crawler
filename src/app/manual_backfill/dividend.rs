@@ -14,7 +14,8 @@
 //!   以交易所除權除息計算結果核對 `MANUAL_EX_RIGHT_FROM`～`MANUAL_EX_RIGHT_TO` 的股利日期與金額；
 //!   預設只試算，`MANUAL_EX_RIGHT_APPLY=1` 才寫入。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 
 use crate::app::backfill::dividend;
 use crate::app::calculation::dividend_record;
@@ -97,15 +98,13 @@ async fn test_backfill_historical_dividends_for_stock() {
 #[tokio::test]
 #[ignore]
 async fn test_backfill_historical_dividends_for_multiple_dividend_stocks() {
-    use chrono::Datelike;
-
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
     let year = std::env::var("MANUAL_HISTORICAL_DIVIDEND_YEAR")
         .ok()
         .and_then(|value| value.parse::<i32>().ok())
-        .unwrap_or_else(|| chrono::Local::now().year());
+        .unwrap_or_else(|| i32::from(TaipeiDateTime::now().year()));
 
     let summary = dividend::backfill_historical_dividends_for_multiple_dividend_stocks(year)
         .await
@@ -171,7 +170,7 @@ async fn test_reconcile_ex_right_results() {
 
     let parse = |name: &str, default: &str| {
         let value = std::env::var(name).unwrap_or_else(|_| default.to_string());
-        NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+        Date::strptime("%Y-%m-%d", &value)
             .unwrap_or_else(|_| panic!("{name} should be YYYY-MM-DD, got {value}"))
     };
     let from = parse("MANUAL_EX_RIGHT_FROM", "2019-01-01");

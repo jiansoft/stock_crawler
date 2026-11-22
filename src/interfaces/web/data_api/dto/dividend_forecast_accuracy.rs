@@ -72,7 +72,7 @@ impl From<AccuracyItem> for DividendForecastAccuracyItem {
         Self {
             stock_symbol: item.stock_symbol,
             name: item.name,
-            month: item.month.format("%Y-%m").to_string(),
+            month: item.month.strftime("%Y-%m").to_string(),
             basis: item.basis,
             forecast: money(item.forecast),
             actual: item.actual.map(money),

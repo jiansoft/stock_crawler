@@ -1,6 +1,8 @@
 //! 櫃買中心個股日成交資訊（`afterTrading/tradingStock`）的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 fn fixture() -> TradingStockResponse {
@@ -34,10 +36,7 @@ fn parse_maps_every_row_and_converts_thousand_units() {
 
     let first = &quotes[0];
     assert_eq!(first.symbol, "00679B");
-    assert_eq!(
-        first.date,
-        NaiveDate::from_ymd_opt(2019, 3, 4).expect("日期")
-    );
+    assert_eq!(first.date, date(2019, 3, 4));
     assert_eq!(first.opening_price, dec!(37.96));
     assert_eq!(first.highest_price, dec!(38.09));
     assert_eq!(first.lowest_price, dec!(37.75));
@@ -106,14 +105,8 @@ fn malformed_rows_and_non_positive_closes_are_skipped() {
 
 #[test]
 fn parse_roc_date_rejects_gregorian_years() {
-    assert_eq!(
-        parse_roc_date("108/03/04"),
-        NaiveDate::from_ymd_opt(2019, 3, 4)
-    );
-    assert_eq!(
-        parse_roc_date(" 99/01/04 "),
-        NaiveDate::from_ymd_opt(2010, 1, 4)
-    );
+    assert_eq!(parse_roc_date("108/03/04"), ymd(2019, 3, 4));
+    assert_eq!(parse_roc_date(" 99/01/04 "), ymd(2010, 1, 4));
     assert_eq!(parse_roc_date("2019/03/04"), None);
     assert_eq!(parse_roc_date("108/13/04"), None);
     assert_eq!(parse_roc_date("--"), None);

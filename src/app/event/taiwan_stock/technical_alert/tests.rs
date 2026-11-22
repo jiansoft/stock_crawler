@@ -1,5 +1,6 @@
 //! 持股技術訊號通知的單元測試。
 
+use jiff::civil::Date;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -8,8 +9,8 @@ use async_trait::async_trait;
 use super::*;
 use crate::domain::quote::technical::{SignalKind, TechnicalSignal};
 
-fn date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 13).expect("有效日期")
+fn date() -> Date {
+    jiff::civil::date(2026, 10, 13)
 }
 
 fn signal(
@@ -34,10 +35,10 @@ fn signal(
 struct FakeQuery {
     signals: Vec<StockTechnicalSignal>,
     fail: bool,
-    got: Mutex<Option<(NaiveDate, Vec<String>)>>,
+    got: Mutex<Option<(Date, Vec<String>)>>,
     outcomes: Vec<SignalOutcome>,
     outcomes_fail: bool,
-    got_outcomes: Mutex<Option<(NaiveDate, NaiveDate, Vec<String>)>>,
+    got_outcomes: Mutex<Option<(Date, Date, Vec<String>)>>,
 }
 
 fn outcome(indicator: &str, kind: &str, samples: i64) -> SignalOutcome {
@@ -54,7 +55,7 @@ fn outcome(indicator: &str, kind: &str, samples: i64) -> SignalOutcome {
 impl TechnicalSignalQuery for FakeQuery {
     async fn fetch_signals(
         &self,
-        date: NaiveDate,
+        date: Date,
         stock_symbols: &[String],
     ) -> Result<Vec<StockTechnicalSignal>> {
         *self.got.lock().expect("測試鎖") = Some((date, stock_symbols.to_vec()));
@@ -66,8 +67,8 @@ impl TechnicalSignalQuery for FakeQuery {
 
     async fn fetch_signal_outcomes(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         indicators: &[&str],
     ) -> Result<Vec<SignalOutcome>> {
         *self.got_outcomes.lock().expect("測試鎖") = Some((
@@ -237,7 +238,7 @@ async fn run_queries_holdings_and_builds_message() {
     assert_eq!(
         repo.got_outcomes.lock().expect("測試鎖").clone(),
         Some((
-            NaiveDate::from_ymd_opt(2025, 10, 14).expect("有效日期"),
+            jiff::civil::date(2025, 10, 14),
             date(),
             NOTIFY_INDICATORS.iter().map(|s| (*s).to_owned()).collect()
         ))

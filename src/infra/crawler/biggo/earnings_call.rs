@@ -12,7 +12,7 @@
 //! 摘要等欄位是法說會結束後才陸續產生的，剛舉行的場次可能還是空字串。
 
 use anyhow::{Context, Result, anyhow};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use super::{api_symbol, fetch};
@@ -26,7 +26,7 @@ pub struct EarningsCall {
     /// BigGo 的場次識別（例如 `TW_2330.TW_2026-07-16`）。
     pub call_id: String,
     /// 舉行日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 標題（例如 `台積電 2026-07-16 法說會`）。
     pub title: String,
     /// 是否已有逐字稿；沒有逐字稿的場次也不會有 AI 整理內容。
@@ -39,7 +39,7 @@ pub struct EarningsCallDetail {
     /// BigGo 的場次識別。
     pub call_id: String,
     /// 舉行日期。
-    pub date: Option<NaiveDate>,
+    pub date: Option<Date>,
     /// 標題。
     pub title: String,
     /// 摘要；尚未產生時為空字串。
@@ -136,7 +136,7 @@ fn parse_list(data: Option<RawList>) -> Result<Vec<EarningsCall>> {
         .unwrap_or_default()
         .into_iter()
         .map(|item| {
-            let date = NaiveDate::parse_from_str(&item.date, "%Y-%m-%d").with_context(|| {
+            let date = Date::strptime("%Y-%m-%d", &item.date).with_context(|| {
                 format!(
                     "Unexpected BigGo earnings call date {:?} for {}",
                     item.date, item.call_id
@@ -158,7 +158,7 @@ fn parse_detail(data: RawDetail) -> EarningsCallDetail {
         call_id: data.call_id,
         date: data
             .date
-            .and_then(|date| NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok()),
+            .and_then(|date| Date::strptime("%Y-%m-%d", &date).ok()),
         title: data.title,
         summary: data.summary.unwrap_or_default(),
         operations: data.operations.unwrap_or_default(),

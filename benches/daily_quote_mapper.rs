@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use jiff::civil::date;
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -21,7 +21,7 @@ fn bench_acl_chain(c: &mut Criterion) {
         .enumerate()
         .map(|(i, f)| (f.as_str(), i))
         .collect();
-    let date = NaiveDate::from_ymd_opt(2026, 6, 25).unwrap();
+    let date = date(2026, 6, 25);
     // from_with_map 已改為 Result（typed 解析錯誤）；fixture 是真實 TWSE 資料，
     // 理應全數可解析，失敗代表 fixture 或解析器壞掉。
     let dtos: Vec<DailyQuoteDto> = rows

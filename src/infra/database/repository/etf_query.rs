@@ -140,11 +140,11 @@ fn overview(row: &PgRow) -> sqlx::Result<EtfOverview> {
         dividend_frequency: row.try_get("dividend_frequency")?,
         issuer: row.try_get("issuer")?,
         benchmark: row.try_get("benchmark")?,
-        quote_date: row.try_get("quote_date")?,
+        quote_date: crate::infra::database::jiff_types::try_get(row, "quote_date")?,
         closing_price: row.try_get("closing_price")?,
         change_range: row.try_get("change_range")?,
         trade_value: row.try_get("trade_value")?,
-        nav_date: row.try_get("nav_date")?,
+        nav_date: crate::infra::database::jiff_types::try_get(row, "nav_date")?,
         nav: row.try_get("nav")?,
         premium_rate: row.try_get("premium_rate")?,
         premium_avg_20d: row.try_get("premium_avg_20d")?,
@@ -152,7 +152,7 @@ fn overview(row: &PgRow) -> sqlx::Result<EtfOverview> {
         net_flow: row.try_get("net_flow")?,
         dividend_12m: row.try_get("dividend_12m")?,
         yield_12m: row.try_get("yield_12m")?,
-        next_ex_date: row.try_get("next_ex_date")?,
+        next_ex_date: crate::infra::database::jiff_types::try_get(row, "next_ex_date")?,
         next_dividend: row.try_get("next_dividend")?,
         ret_1m: row.try_get("ret_1m")?,
         ret_ytd: row.try_get("ret_ytd")?,
@@ -165,7 +165,7 @@ fn overview(row: &PgRow) -> sqlx::Result<EtfOverview> {
 fn profile(row: &PgRow) -> sqlx::Result<EtfProfileView> {
     Ok(EtfProfileView {
         full_name: row.try_get("full_name")?,
-        inception_date: row.try_get("inception_date")?,
+        inception_date: crate::infra::database::jiff_types::try_get(row, "inception_date")?,
         is_active: row.try_get("is_active")?,
         management_fee: row.try_get("management_fee")?,
         custodian_fee: row.try_get("custodian_fee")?,
@@ -176,7 +176,7 @@ fn profile(row: &PgRow) -> sqlx::Result<EtfProfileView> {
 
 fn performance(row: &PgRow) -> sqlx::Result<EtfPerformanceView> {
     Ok(EtfPerformanceView {
-        calc_date: row.try_get("calc_date")?,
+        calc_date: crate::infra::database::jiff_types::try_get(row, "calc_date")?,
         ret_1w: row.try_get("ret_1w")?,
         ret_1m: row.try_get("ret_1m")?,
         ret_3m: row.try_get("ret_3m")?,
@@ -189,7 +189,7 @@ fn performance(row: &PgRow) -> sqlx::Result<EtfPerformanceView> {
         mdd_1y: row.try_get("mdd_1y")?,
         beta_1y: row.try_get("beta_1y")?,
         sharpe_1y: row.try_get("sharpe_1y")?,
-        nav_calc_date: row.try_get("nav_calc_date")?,
+        nav_calc_date: crate::infra::database::jiff_types::try_get(row, "nav_calc_date")?,
         nav_ret_1m: row.try_get("nav_ret_1m")?,
         nav_ret_ytd: row.try_get("nav_ret_ytd")?,
         nav_ret_1y: row.try_get("nav_ret_1y")?,
@@ -200,7 +200,7 @@ fn performance(row: &PgRow) -> sqlx::Result<EtfPerformanceView> {
 fn weight(row: &PgRow) -> sqlx::Result<EtfWeightRow> {
     Ok(EtfWeightRow {
         kind: row.try_get("kind")?,
-        as_of: row.try_get("as_of")?,
+        as_of: crate::infra::database::jiff_types::try_get(row, "as_of")?,
         symbol: row.try_get("symbol")?,
         label: row.try_get("label")?,
         weight: row.try_get("weight")?,
@@ -209,7 +209,7 @@ fn weight(row: &PgRow) -> sqlx::Result<EtfWeightRow> {
 
 fn nav_day(row: &PgRow) -> sqlx::Result<EtfNavDay> {
     Ok(EtfNavDay {
-        date: row.try_get("date")?,
+        date: crate::infra::database::jiff_types::try_get(row, "date")?,
         nav: row.try_get("nav")?,
         market_price: row.try_get("market_price")?,
         premium_rate: row.try_get("premium_rate")?,
@@ -309,17 +309,32 @@ impl EtfQueryRepository for PgEtfQueryRepository {
             return Ok(None);
         };
         let rows: Vec<(
-            chrono::NaiveDate,
+            jiff::civil::Date,
             i16,
             String,
             String,
             rust_decimal::Decimal,
-        )> = sqlx::query_as(HOLDING_HISTORY_SQL)
-            .bind(stock_symbol)
-            .bind(periods)
-            .fetch_all(pool)
-            .await
-            .with_context(|| format!("Failed to fetch ETF holding history {stock_symbol}"))?;
+        )> = sqlx::query_as::<_, (jiff_sqlx::Date, i16, String, String, rust_decimal::Decimal)>(
+            HOLDING_HISTORY_SQL,
+        )
+        .bind(stock_symbol)
+        .bind(periods)
+        .fetch_all(pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(c0, c1, c2, c3, c4)| {
+                    (
+                        crate::infra::database::jiff_types::from_wire(c0),
+                        c1,
+                        c2,
+                        c3,
+                        c4,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .with_context(|| format!("Failed to fetch ETF holding history {stock_symbol}"))?;
         let mut history = EtfHoldingHistory {
             stock_symbol: stock_symbol.to_owned(),
             name,

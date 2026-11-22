@@ -1,6 +1,8 @@
 //! 殖利率排行倉儲的測試。
 
 use super::*;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 #[tokio::test]
@@ -17,7 +19,7 @@ async fn test_pg_yield_rank_repository_contract() {
     }
 
     let repo = PgYieldRankRepository::new();
-    let test_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+    let test_date = date(2020, 1, 1);
 
     // 呼叫重建函式驗證基本 SQL 是否正常執行
     let result = repo.rebuild_by_date(test_date).await;
@@ -92,13 +94,13 @@ async fn test_rebuild_by_date_dilutes_dividend_after_ex_rights() {
         .expect("種入收盤");
     }
 
-    let date = NaiveDate::from_ymd_opt(1988, 8, 10).expect("固定日期合法");
+    let date = date(1988, 8, 10);
     let result = PgYieldRankRepository::new().rebuild_by_date(date).await;
     let rows: Vec<(String, f64)> = sqlx::query_as(
         "SELECT security_code, yield::float8 FROM yield_rank
          WHERE date = $1 AND security_code = ANY($2) ORDER BY security_code",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .bind(RIGHTS_SYMBOLS)
     .fetch_all(pool)
     .await

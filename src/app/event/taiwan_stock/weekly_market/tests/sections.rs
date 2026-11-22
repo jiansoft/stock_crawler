@@ -2,6 +2,9 @@
 
 use super::fakes::*;
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 產業中位數排名、一週變化（少於 5 檔與未分類不列）、轉強轉弱。
 #[tokio::test]
@@ -102,10 +105,10 @@ async fn regime_section_lists_crosses() {
     // 再之前往前每天高 1（一路下跌、都在均線下方）；只有 102 天，240 日均線資料不足。
     let mut closes = vec![100.0, 400.0];
     closes.extend((2..102u32).map(|offset| 200.0 + f64::from(offset)));
-    let points: Vec<(NaiveDate, f64)> = closes
+    let points: Vec<(Date, f64)> = closes
         .iter()
         .enumerate()
-        .map(|(offset, close)| (day(16) - chrono::Days::new(offset as u64), *close))
+        .map(|(offset, close)| (day(16) - (offset as i64).days(), *close))
         .collect();
     // 市場廣度由新到舊：10-16 站上 60 日線 40%、5 個交易日前（10-09）65%；新高新低只加總前 5 天。
     let breadth: Vec<BreadthDay> = [(16, 40), (15, 45), (14, 50), (13, 55), (12, 60), (9, 65)]
@@ -312,7 +315,7 @@ fn strategy_lines_append_edge_check() {
     use super::strategy::{StrategyPosition, StrategySection, lines};
     use crate::app::event::taiwan_stock::strategy_alert::tests::rebalance;
     use crate::app::event::taiwan_stock::strategy_edge::{EdgeRecord, EdgeWindow, weekly_lines};
-    let day = |d| NaiveDate::from_ymd_opt(2026, 11, d).unwrap();
+    let day = |d| ymd(2026, 11, d).unwrap();
     let edges = vec![EdgeRecord {
         name: "最佳組合".to_owned(),
         checked: day(2),

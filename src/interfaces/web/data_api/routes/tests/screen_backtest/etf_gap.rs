@@ -1,6 +1,7 @@
 //! 0050 在進場日停牌時，單次及期末回測均使用原定端點補算。
 
 use super::*;
+use jiff_sqlx::ToSqlx;
 
 /// 暫停交易缺報酬時以最近有效收盤補算，次日開盤使用市場進場日與原定出場開盤。
 #[tokio::test]
@@ -10,7 +11,7 @@ async fn screen_backtest_etf_suspension_fills_both_execution_models() {
         return;
     };
     sqlx::query("DELETE FROM daily_forward_return WHERE stock_symbol='0050' AND date=$1")
-        .bind(day(1))
+        .bind(day(1).to_sqlx())
         .execute(pool)
         .await
         .unwrap();

@@ -127,14 +127,14 @@ pub const EARLIEST_QUERYABLE_DATE: (i32, u32, u32) = (2011, 1, 1);
 ///
 /// 區間內沒有任何減資則回傳空陣列，這是正常情況而非錯誤。
 pub async fn visit(
-    start: chrono::NaiveDate,
-    end: chrono::NaiveDate,
+    start: jiff::civil::Date,
+    end: jiff::civil::Date,
 ) -> Result<Vec<CorporateAction>> {
     let url = format!(
         "https://www.{host}/rwd/zh/reducation/TWTAUU?response=json&startDate={start}&endDate={end}",
         host = twse::HOST,
-        start = start.format("%Y%m%d"),
-        end = end.format("%Y%m%d"),
+        start = start.strftime("%Y%m%d"),
+        end = end.strftime("%Y%m%d"),
     );
 
     let response = util::http::get_json::<TwtauuResponse>(&url).await?;
@@ -148,7 +148,7 @@ pub async fn visit(
 ///
 /// 把「查詢被拒」與「查無資料」分開：兩者都不帶 `data`，若一律視為空結果，
 /// 參數錯誤就會被靜默吞掉，呼叫端會以為回補成功但其實一筆都沒寫。
-fn ensure_queryable(stat: &str, start: chrono::NaiveDate, end: chrono::NaiveDate) -> Result<()> {
+fn ensure_queryable(stat: &str, start: jiff::civil::Date, end: jiff::civil::Date) -> Result<()> {
     if stat == STAT_OK || stat.contains(STAT_NO_DATA) {
         return Ok(());
     }
@@ -173,7 +173,7 @@ fn parse_capital_reductions(response: TwtauuResponse) -> Vec<CorporateAction> {
     // 以 (代號, 生效日) 為鍵去重，值另存公告日供「取最新」比較。
     // 公告日無法解析時以空字串參與比較，字典序上一定輸給任何實際日期，
     // 因此有公告日的那一列會勝出。
-    let mut latest: HashMap<(String, chrono::NaiveDate), (String, CorporateAction)> =
+    let mut latest: HashMap<(String, jiff::civil::Date), (String, CorporateAction)> =
         HashMap::new();
 
     for row in rows {

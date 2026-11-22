@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::entity::{
     BrokerFlowRecord, HolderDistributionRecord, HolderLevelRecord, InsiderHoldingRecord,
@@ -46,15 +46,15 @@ impl RecordingChipRepository {
 
 #[async_trait]
 impl ChipRepository for RecordingChipRepository {
-    async fn save_institutional(&self, date: NaiveDate, flows: &[InstitutionalNet]) -> Result<u64> {
+    async fn save_institutional(&self, date: Date, flows: &[InstitutionalNet]) -> Result<u64> {
         self.record(format!("institutional {date} {}", flows.len()), flows.len())
     }
 
-    async fn save_margin(&self, date: NaiveDate, margins: &[MarginRecord]) -> Result<u64> {
+    async fn save_margin(&self, date: Date, margins: &[MarginRecord]) -> Result<u64> {
         self.record(format!("margin {date} {}", margins.len()), margins.len())
     }
 
-    async fn refresh_streaks(&self, from: NaiveDate, to: NaiveDate) -> Result<u64> {
+    async fn refresh_streaks(&self, from: Date, to: Date) -> Result<u64> {
         self.record(format!("streaks {from} {to}"), 5)
     }
 

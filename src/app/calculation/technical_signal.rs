@@ -7,8 +7,8 @@
 //! [`backfill_range_breakout`](crate::app::calculation::technical_signal::backfill_range_breakout)。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
 use futures::{StreamExt, stream};
+use jiff::civil::Date;
 
 use crate::domain::quote::technical::{
     self, PriceAdjustment, PriceBar, PriceBarRepository, StockTechnicalSignal,
@@ -29,12 +29,12 @@ const CONCURRENCY: usize = 4;
 ///
 /// 查詢股票清單、除權息事件、任一檔日線讀取或寫入失敗時回傳錯誤；讀取失敗時不寫入，
 /// 保留資料表原本的內容。
-pub async fn calculate_technical_signals(date: NaiveDate) -> Result<usize> {
+pub async fn calculate_technical_signals(date: Date) -> Result<usize> {
     compute_and_save(&PgQuoteRepository::new(), date).await
 }
 
 /// [`calculate_technical_signals`] 的本體，倉儲可替換以便測試。
-pub(crate) async fn compute_and_save<R>(repo: &R, date: NaiveDate) -> Result<usize>
+pub(crate) async fn compute_and_save<R>(repo: &R, date: Date) -> Result<usize>
 where
     R: PriceBarRepository + TechnicalSignalRepository,
 {
@@ -78,7 +78,7 @@ where
 /// （當日沒有成交）時沒有訊號。區間突破與假突破另外需要同一批交易日的成交量 `volumes`。
 pub(crate) fn signals_for(
     symbol: &str,
-    date: NaiveDate,
+    date: Date,
     bars: &[PriceBar],
     volumes: &[VolumeBar],
     adjustments: &[PriceAdjustment],

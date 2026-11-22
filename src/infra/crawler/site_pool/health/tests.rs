@@ -1,6 +1,7 @@
 //! 站點健康狀態的單元測試。
 
 use super::*;
+use crate::core::util::datetime::today;
 
 const NAMES: [&str; 4] = ["A", "B", "C", "D"];
 
@@ -46,7 +47,7 @@ fn record_site_outcome_reports_trips() {
     let started_at = Instant::now();
     for name in ["TestOutcomeFirstTrip", "TestOutcomeSecondTrip"] {
         if name == "TestOutcomeSecondTrip" {
-            assert!(TRIPPED_TODAY.first_today(name, Local::now().date_naive()));
+            assert!(TRIPPED_TODAY.first_today(name, today()));
         }
         assert!(!record_site_outcome(name, true, started_at));
         for _ in 1..FAILURE_THRESHOLD {

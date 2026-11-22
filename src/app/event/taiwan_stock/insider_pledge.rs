@@ -22,7 +22,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
 use super::holdings;
@@ -67,7 +67,7 @@ struct Insider {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Snapshot {
     /// 資料月份（該月 1 日）。
-    month: NaiveDate,
+    month: Date,
     /// 內部人，依資料出現順序。
     insiders: Vec<Insider>,
 }
@@ -89,7 +89,7 @@ enum Change {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Report {
     stock_symbol: String,
-    month: NaiveDate,
+    month: Date,
     /// 沒有前一期、這次只建立基準。
     baseline: bool,
     changes: Vec<Change>,

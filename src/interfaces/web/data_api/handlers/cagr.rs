@@ -7,7 +7,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::{database_error, error_response, parse_optional_date, repository_error};
@@ -272,8 +272,8 @@ fn normalize_cagr_keyword(keyword: Option<&str>) -> Result<Option<String>, &'sta
 /// 決定實際查詢的基準日：未指定時取最新一個已完成計算的日期。
 async fn resolve_cagr_date(
     repository: &PgCagrRepository,
-    date: Option<NaiveDate>,
-) -> anyhow::Result<Option<NaiveDate>> {
+    date: Option<Date>,
+) -> anyhow::Result<Option<Date>> {
     match date {
         Some(value) => Ok(Some(value)),
         None => repository.fetch_latest_date().await,
@@ -360,8 +360,8 @@ fn cagr_period_item(
 /// 取本頁可算項目中最常見的期初交易日。
 ///
 /// 同票數時取較晚的日期，讓結果與資料列順序無關（可重現）。
-fn representative_base_date(items: &[DomainCagrRankingItem]) -> Option<NaiveDate> {
-    let mut counts: std::collections::HashMap<NaiveDate, usize> = std::collections::HashMap::new();
+fn representative_base_date(items: &[DomainCagrRankingItem]) -> Option<Date> {
+    let mut counts: std::collections::HashMap<Date, usize> = std::collections::HashMap::new();
     for item in items.iter().filter(|item| item.cagr.data_complete) {
         if let Some(value) = item.cagr.base_date {
             *counts.entry(value).or_default() += 1;

@@ -1,5 +1,7 @@
 //! MoneyDJ 股利政策表（除權除息日程）採集器的測試；連外的測試標 #[ignore]。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -20,12 +22,12 @@ fn test_parse_schedules_with_fixture() {
     let both = &result[0];
     assert_eq!(both.stock_symbol, "2442");
     assert_eq!(both.name, "新美齊");
-    assert_eq!(both.ex_date, NaiveDate::from_ymd_opt(2026, 9, 8).unwrap());
+    assert_eq!(both.ex_date, date(2026, 9, 8));
     assert!(both.is_cash);
     assert!(both.is_stock);
     assert_eq!(both.cash_dividend, Some(dec!(2.03186184)));
     assert_eq!(both.stock_dividend, Some(dec!(0.711151634)));
-    assert_eq!(both.cash_payable_date, NaiveDate::from_ymd_opt(2026, 10, 8));
+    assert_eq!(both.cash_payable_date, ymd(2026, 10, 8));
 
     // ETF 的連結前綴是 AP，代號一樣要正確取出。
     let etf = result
@@ -50,16 +52,10 @@ fn test_parse_schedules_with_fixture() {
 /// 跨年發放：12 月除息、隔年 1 月發放，年份要加一。
 #[test]
 fn test_parse_payable_date_rolls_over_year() {
-    let ex_date = NaiveDate::from_ymd_opt(2026, 12, 20).unwrap();
+    let ex_date = date(2026, 12, 20);
 
-    assert_eq!(
-        parse_payable_date("01/15", ex_date),
-        NaiveDate::from_ymd_opt(2027, 1, 15)
-    );
-    assert_eq!(
-        parse_payable_date("12/25", ex_date),
-        NaiveDate::from_ymd_opt(2026, 12, 25)
-    );
+    assert_eq!(parse_payable_date("01/15", ex_date), ymd(2027, 1, 15));
+    assert_eq!(parse_payable_date("12/25", ex_date), ymd(2026, 12, 25));
     assert_eq!(parse_payable_date("", ex_date), None);
     assert_eq!(parse_payable_date("2026/12/25", ex_date), None);
 }

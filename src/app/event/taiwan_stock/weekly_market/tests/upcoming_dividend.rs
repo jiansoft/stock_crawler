@@ -3,6 +3,8 @@
 //! 逐日查詢、只留持股與金額換算由 `app::calculation::upcoming_dividends` 的測試驗證。
 
 use crate::domain::portfolio::view::HoldingView;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -317,7 +319,7 @@ fn lines_show_month_income() {
 }
 
 /// 指定發放日的入帳明細。
-fn paid_on(date: NaiveDate, shares: i64) -> PayoutAllocation {
+fn paid_on(date: Date, shares: i64) -> PayoutAllocation {
     PayoutAllocation {
         cash_payable: Some(date),
         ..allocation(1, shares)
@@ -327,8 +329,8 @@ fn paid_on(date: NaiveDate, shares: i64) -> PayoutAllocation {
 /// 本月入帳：發放日不晚於今天算已入帳、之後算待入帳；去年同月另查一次；其他月份不計。
 #[tokio::test]
 async fn month_income_splits_received_pending_and_last_year() {
-    let last_year = NaiveDate::from_ymd_opt(2025, 10, 15).expect("有效日期");
-    let next_month = NaiveDate::from_ymd_opt(2026, 11, 2).expect("有效日期");
+    let last_year = date(2025, 10, 15);
+    let next_month = date(2026, 11, 2);
     let repo = FakePayoutRepository::with_allocations(vec![
         paid_on(day(5), 1000),
         paid_on(day(17), 500),
@@ -350,8 +352,8 @@ async fn month_income_splits_received_pending_and_last_year() {
             last_year: dec!(3000),
         })
     );
-    let october_2025 = NaiveDate::from_ymd_opt(2025, 10, 1).expect("有效日期");
-    let end_2025 = NaiveDate::from_ymd_opt(2025, 10, 31).expect("有效日期");
+    let october_2025 = date(2025, 10, 1);
+    let end_2025 = date(2025, 10, 31);
     assert_eq!(
         repo.queries(),
         [
@@ -369,7 +371,7 @@ async fn month_income_splits_received_pending_and_last_year() {
 /// 兩個月都沒有現金入帳時不列；查詢失敗回傳錯誤。
 #[tokio::test]
 async fn month_income_is_none_without_cash_and_errors_on_failure() {
-    let next_month = NaiveDate::from_ymd_opt(2026, 11, 2).expect("有效日期");
+    let next_month = date(2026, 11, 2);
     let repo = FakePayoutRepository::with_allocations(vec![paid_on(next_month, 1000)]);
     assert_eq!(
         month_income(&repo, &HoldingView::default_household(), day(17))

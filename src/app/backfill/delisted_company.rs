@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use std::collections::HashSet;
 
 use crate::{
@@ -9,7 +10,6 @@ use crate::{
     infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::{Context, Result};
-use chrono::Local;
 use scopeguard::defer;
 
 /// 單一市場 ISIN 名冊的合理最小筆數（安全閥）。
@@ -34,7 +34,7 @@ const MAX_DELIST_PER_RUN: usize = 100;
 ///    ISIN 現行名冊中消失，因此「資料庫未下市、卻不在任何市場名冊上」
 ///    的證券即可推定已下市。
 pub async fn execute() -> Result<()> {
-    if Local::now().is_weekend() {
+    if TaipeiDateTime::now().is_weekend() {
         return Ok(());
     }
     tracing::info!("更新下市的股票開始");

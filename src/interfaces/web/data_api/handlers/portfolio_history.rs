@@ -14,7 +14,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Days, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::{database_error, error_response, repository_error};
@@ -84,24 +86,27 @@ ORDER BY date
 "#;
 
 /// 往基準日前多抓的指數天數，涵蓋長假。
-const INDEX_LOOKBACK_DAYS: u64 = 15;
+const INDEX_LOOKBACK_DAYS: i64 = 15;
 
 #[derive(sqlx::FromRow)]
 struct ValueRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     market_value: Decimal,
 }
 
 #[derive(sqlx::FromRow)]
 struct FlowRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     buys: Decimal,
     sells: Decimal,
 }
 
 #[derive(sqlx::FromRow)]
 struct IndexRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     close: Decimal,
 }
 
@@ -147,8 +152,8 @@ pub(crate) async fn portfolio_history(
 
     let flows: Vec<FlowRow> = match sqlx::query_as(FLOWS_SQL)
         .bind(&members)
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .bind(view.member_id().is_none())
         .fetch_all(pool)
         .await
@@ -157,8 +162,8 @@ pub(crate) async fn portfolio_history(
         Err(error) => return database_error(error),
     };
     let index: Vec<IndexRow> = match sqlx::query_as(INDEX_SQL)
-        .bind(from - Days::new(INDEX_LOOKBACK_DAYS))
-        .bind(to)
+        .bind((from - INDEX_LOOKBACK_DAYS.days()).to_sqlx())
+        .bind(to.to_sqlx())
         .fetch_all(pool)
         .await
     {

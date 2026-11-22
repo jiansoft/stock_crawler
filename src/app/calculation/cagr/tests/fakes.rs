@@ -1,18 +1,20 @@
 //! CAGR 測試用的假資料來源、假倉儲與固定資料。
 
 use super::*;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 /// 以記憶體資料模擬 [`CagrSourceRepository`]，讓整段編排流程不需資料庫即可驗證。
 #[derive(Default)]
 pub(super) struct FakeSource {
     /// 全市場交易日，須由早至晚排序。
-    pub(super) trading_days: Vec<NaiveDate>,
+    pub(super) trading_days: Vec<Date>,
     pub(super) symbols: Vec<String>,
     /// 每檔股票的收盤價序列。
-    pub(super) prices: HashMap<String, BTreeMap<NaiveDate, Decimal>>,
+    pub(super) prices: HashMap<String, BTreeMap<Date, Decimal>>,
     pub(super) events: Vec<DividendEvent>,
     pub(super) corporate_actions: Vec<CorporateAction>,
-    pub(super) anomalies: Vec<(String, NaiveDate)>,
+    pub(super) anomalies: Vec<(String, Date)>,
     /// 各方法的呼叫次數，用來驗證「一次撈齊」而非 N+1 的設計。
     pub(super) calls: Mutex<HashMap<&'static str, usize>>,
 }
@@ -39,7 +41,7 @@ impl FakeSource {
 
 #[async_trait]
 impl CagrSourceRepository for FakeSource {
-    async fn fetch_trading_day_on_or_before(&self, date: NaiveDate) -> Result<Option<NaiveDate>> {
+    async fn fetch_trading_day_on_or_before(&self, date: Date) -> Result<Option<Date>> {
         self.record("fetch_trading_day_on_or_before");
         Ok(self
             .trading_days
@@ -49,7 +51,7 @@ impl CagrSourceRepository for FakeSource {
             .copied())
     }
 
-    async fn fetch_latest_trading_day(&self) -> Result<Option<NaiveDate>> {
+    async fn fetch_latest_trading_day(&self) -> Result<Option<Date>> {
         self.record("fetch_latest_trading_day");
         Ok(self.trading_days.iter().max().copied())
     }
@@ -59,7 +61,7 @@ impl CagrSourceRepository for FakeSource {
         Ok(self.symbols.clone())
     }
 
-    async fn fetch_first_quote_dates(&self) -> Result<Vec<(String, NaiveDate)>> {
+    async fn fetch_first_quote_dates(&self) -> Result<Vec<(String, Date)>> {
         self.record("fetch_first_quote_dates");
         Ok(self
             .prices
@@ -70,7 +72,7 @@ impl CagrSourceRepository for FakeSource {
             .collect())
     }
 
-    async fn fetch_closing_prices_on(&self, date: NaiveDate) -> Result<Vec<(String, Decimal)>> {
+    async fn fetch_closing_prices_on(&self, date: Date) -> Result<Vec<(String, Decimal)>> {
         self.record("fetch_closing_prices_on");
         Ok(self
             .prices
@@ -81,9 +83,9 @@ impl CagrSourceRepository for FakeSource {
 
     async fn fetch_first_quote_within(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<(String, NaiveDate, Decimal)>> {
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<(String, Date, Decimal)>> {
         self.record("fetch_first_quote_within");
         Ok(self
             .prices
@@ -97,7 +99,7 @@ impl CagrSourceRepository for FakeSource {
             .collect())
     }
 
-    async fn fetch_dividend_events_since(&self, since: NaiveDate) -> Result<Vec<DividendEvent>> {
+    async fn fetch_dividend_events_since(&self, since: Date) -> Result<Vec<DividendEvent>> {
         self.record("fetch_dividend_events_since");
         Ok(self
             .events
@@ -107,10 +109,7 @@ impl CagrSourceRepository for FakeSource {
             .collect())
     }
 
-    async fn fetch_corporate_actions_since(
-        &self,
-        since: NaiveDate,
-    ) -> Result<Vec<CorporateAction>> {
+    async fn fetch_corporate_actions_since(&self, since: Date) -> Result<Vec<CorporateAction>> {
         self.record("fetch_corporate_actions_since");
         Ok(self
             .corporate_actions
@@ -122,8 +121,8 @@ impl CagrSourceRepository for FakeSource {
 
     async fn fetch_closing_prices_at(
         &self,
-        pairs: &[(String, NaiveDate)],
-    ) -> Result<Vec<(String, NaiveDate, Decimal)>> {
+        pairs: &[(String, Date)],
+    ) -> Result<Vec<(String, Date, Decimal)>> {
         self.record("fetch_closing_prices_at");
         Ok(pairs
             .iter()
@@ -136,11 +135,7 @@ impl CagrSourceRepository for FakeSource {
             .collect())
     }
 
-    async fn fetch_anomaly_events(
-        &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<(String, NaiveDate)>> {
+    async fn fetch_anomaly_events(&self, from: Date, to: Date) -> Result<Vec<(String, Date)>> {
         self.record("fetch_anomaly_events");
         Ok(self
             .anomalies
@@ -157,7 +152,7 @@ pub(super) struct RecordingRepository {
     pub(super) saved: Mutex<Vec<StockCagr>>,
     pub(super) save_calls: Mutex<usize>,
     /// `fetch_dates_missing_period` 要回傳的基準日。
-    pub(super) missing_dates: Vec<NaiveDate>,
+    pub(super) missing_dates: Vec<Date>,
 }
 
 impl RecordingRepository {
@@ -203,7 +198,7 @@ impl CagrRepository for RecordingRepository {
 
     async fn fetch_ranking(
         &self,
-        _date: NaiveDate,
+        _date: Date,
         _period: CagrPeriod,
         _metric: CagrMetric,
         _limit: i64,
@@ -216,38 +211,34 @@ impl CagrRepository for RecordingRepository {
         unimplemented!("計算流程不會讀取排行榜")
     }
 
-    async fn fetch_by_symbol(
-        &self,
-        _date: NaiveDate,
-        _stock_symbol: &str,
-    ) -> Result<Vec<StockCagr>> {
+    async fn fetch_by_symbol(&self, _date: Date, _stock_symbol: &str) -> Result<Vec<StockCagr>> {
         unimplemented!("計算流程不會讀取個股結果")
     }
 
     async fn fetch_coverage(
         &self,
-        _date: NaiveDate,
+        _date: Date,
         _period: CagrPeriod,
         _metric: CagrMetric,
     ) -> Result<CagrCoverage> {
         unimplemented!("計算流程不會讀取涵蓋統計")
     }
 
-    async fn fetch_latest_date(&self) -> Result<Option<NaiveDate>> {
+    async fn fetch_latest_date(&self) -> Result<Option<Date>> {
         unimplemented!("計算流程不會讀取最新基準日")
     }
 
-    async fn fetch_dates_missing_period(&self, _period: CagrPeriod) -> Result<Vec<NaiveDate>> {
+    async fn fetch_dates_missing_period(&self, _period: CagrPeriod) -> Result<Vec<Date>> {
         Ok(self.missing_dates.clone())
     }
 
-    async fn delete_before(&self, _date: NaiveDate) -> Result<u64> {
+    async fn delete_before(&self, _date: Date) -> Result<u64> {
         unimplemented!("計算流程不做保留期清理")
     }
 }
 
 /// 建立 2015-01 起每月 1 日的交易日，最後補上期末日 2026-08-03。
-pub(super) fn monthly_trading_days() -> Vec<NaiveDate> {
+pub(super) fn monthly_trading_days() -> Vec<Date> {
     let mut days = Vec::new();
     for year in 2015..=2026 {
         for month in 1..=12 {
@@ -271,8 +262,8 @@ pub(super) fn monthly_trading_days() -> Vec<NaiveDate> {
 pub(super) fn fixture_source() -> FakeSource {
     let trading_days = monthly_trading_days();
 
-    let mut prices: HashMap<String, BTreeMap<NaiveDate, Decimal>> = HashMap::new();
-    let series_2330: BTreeMap<NaiveDate, Decimal> = trading_days
+    let mut prices: HashMap<String, BTreeMap<Date, Decimal>> = HashMap::new();
+    let series_2330: BTreeMap<Date, Decimal> = trading_days
         .iter()
         .enumerate()
         .map(|(index, day)| (*day, dec(50 + index as i64)))

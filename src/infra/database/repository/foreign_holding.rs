@@ -1,10 +1,11 @@
 //! 外資持股歷史與趨勢的 PostgreSQL 倉儲實作。
 
+use jiff_sqlx::ToSqlx;
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use sqlx::Row;
 
@@ -27,7 +28,7 @@ impl PgForeignHoldingRepository {
     /// 只有在基準日當天仍有快照的股票才會寫入；基準日之前的舊趨勢列（已下市、當天無資料）
     /// 一併刪除。以指定日期為準而非全表最新日，回補歷史時才能重算任一天，
     /// 整合測試用固定的歷史日期也不會動到其他日期的趨勢列。
-    pub async fn rebuild_trends_as_of(&self, as_of: NaiveDate) -> Result<u64> {
+    pub async fn rebuild_trends_as_of(&self, as_of: Date) -> Result<u64> {
         // 窗口取基準日往前 120 個日曆日（約 80 個交易日），足以涵蓋 20 日變化；
         // 連續天數最多只算到這個窗口為止。
         let upsert = r#"
@@ -75,13 +76,13 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
 
         let mut tx = database::get_tx().await?;
         let written = sqlx::query(upsert)
-            .bind(as_of)
+            .bind(as_of.to_sqlx())
             .execute(&mut *tx)
             .await
             .with_context(|| format!("Failed to rebuild qfii_trend as of {as_of}"))?
             .rows_affected();
         sqlx::query(delete_stale)
-            .bind(as_of)
+            .bind(as_of.to_sqlx())
             .execute(&mut *tx)
             .await
             .with_context(|| format!("Failed to delete stale qfii_trend before {as_of}"))?;
@@ -101,7 +102,7 @@ impl ForeignHoldingRepository for PgForeignHoldingRepository {
         }
 
         // 同一批次內 (代號, 日期) 重複時 ON CONFLICT DO UPDATE 會直接報錯，先以最後一筆為準去重。
-        let mut unique: HashMap<(&str, NaiveDate), &ForeignHolding> = HashMap::new();
+        let mut unique: HashMap<(&str, Date), &ForeignHolding> = HashMap::new();
         for holding in holdings {
             unique.insert((holding.stock_symbol.as_str(), holding.date), holding);
         }
@@ -133,7 +134,12 @@ WHERE (qfii_history.issued_share, qfii_history.shares_held, qfii_history.share_h
 
         let result = sqlx::query(sql)
             .bind(&symbols)
-            .bind(&dates)
+            .bind(
+                dates
+                    .iter()
+                    .map(|value| value.to_sqlx())
+                    .collect::<Vec<_>>(),
+            )
             .bind(&issued)
             .bind(&held)
             .bind(&percentages)
@@ -145,11 +151,13 @@ WHERE (qfii_history.issued_share, qfii_history.shares_held, qfii_history.share_h
     }
 
     async fn rebuild_trends(&self) -> Result<u64> {
-        let latest: Option<NaiveDate> =
-            sqlx::query_scalar(r#"SELECT MAX("date") FROM qfii_history"#)
-                .fetch_one(database::get_connection())
-                .await
-                .context("Failed to fetch latest qfii_history date")?;
+        let latest: Option<Date> = sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(
+            r#"SELECT MAX("date") FROM qfii_history"#,
+        )
+        .fetch_one(database::get_connection())
+        .await
+        .map(crate::infra::database::jiff_types::from_wire)
+        .context("Failed to fetch latest qfii_history date")?;
 
         match latest {
             Some(as_of) => self.rebuild_trends_as_of(as_of).await,
@@ -179,7 +187,7 @@ ORDER BY t.change_20d DESC NULLS LAST, t.stock_symbol
                 Ok(HoldingForeignHoldingAlert {
                     stock_symbol: row.try_get("stock_symbol")?,
                     stock_name: row.try_get("stock_name")?,
-                    date: row.try_get("date")?,
+                    date: crate::infra::database::jiff_types::try_get(row, "date")?,
                     share_holding_percentage: row.try_get("share_holding_percentage")?,
                     change_5d: row.try_get("change_5d")?,
                     change_20d: row.try_get("change_20d")?,

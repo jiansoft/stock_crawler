@@ -1,6 +1,7 @@
 //! 年度 EPS 補齊流程的測試：缺年報清單、Redis 略過旗標與實際抓取（連外，`#[ignore]`）。
 
 use super::*;
+use crate::core::util::datetime::today;
 use crate::domain::financial::repository::FinancialRepository;
 use crate::infra::database;
 use crate::infra::database::repository::financial::PgFinancialRepository;
@@ -69,9 +70,9 @@ async fn execute_skips_symbols_flagged_in_redis() {
     .await
     .expect("種入季報");
 
-    let last_year = Local::now().date_naive().year() - 1;
+    let last_year = today().year() - 1;
     let missing = PgFinancialRepository::new()
-        .fetch_without_annual_statements(last_year)
+        .fetch_without_annual_statements(i32::from(last_year))
         .await
         .expect("查詢缺年報清單");
     let symbols: HashSet<&str> = missing

@@ -3,16 +3,16 @@
 //! 填息規則與 `/portfolio/dividend-fill`、17:20 填息通知相同（[`fill::recent_outcomes`]），只看近
 //! [`LOOKBACK_DAYS`] 天內的除權息。
 
-use chrono::{Days, NaiveDate};
-
 use super::TOP;
 use crate::domain::dividend::fill::{self, DividendFillQuery, FillOutcome};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 只看除權息日在今天往前這麼多天內的事件。
-const LOOKBACK_DAYS: u64 = 365;
+const LOOKBACK_DAYS: i64 = 365;
 
 /// 「本週填息」往前看的天數（週六執行，涵蓋週一到週五）。
-const RECENT_FILL_DAYS: u64 = 7;
+const RECENT_FILL_DAYS: i64 = 7;
 
 /// 一檔持股的一次除權息與填息結果。
 #[derive(Debug, Clone, PartialEq)]
@@ -25,9 +25,9 @@ pub(super) struct HoldingFill {
 pub(super) async fn holding_fills(
     query: &impl DividendFillQuery,
     symbols: impl IntoIterator<Item = &String>,
-    today: NaiveDate,
+    today: Date,
 ) -> Vec<HoldingFill> {
-    let since = today - Days::new(LOOKBACK_DAYS);
+    let since = today - LOOKBACK_DAYS.days();
     let mut fills = Vec::new();
     for symbol in symbols {
         match fill::recent_outcomes(query, symbol, since, today).await {
@@ -44,7 +44,7 @@ pub(super) async fn holding_fills(
 /// 持股填息一段的各行（開頭為空行）；近一年沒有除權息時回空陣列。
 pub(super) fn lines(
     fills: &[HoldingFill],
-    today: NaiveDate,
+    today: Date,
     stock_name: &impl Fn(&str) -> String,
 ) -> Vec<String> {
     if fills.is_empty() {
@@ -59,7 +59,7 @@ pub(super) fn lines(
         "持股填息（近一年除權息 {} 次，已填息 {filled} 次）",
         fills.len()
     ));
-    let recent_from = today - Days::new(RECENT_FILL_DAYS);
+    let recent_from = today - RECENT_FILL_DAYS.days();
     let mut recent: Vec<&HoldingFill> = fills
         .iter()
         .filter(|fill| {
@@ -77,7 +77,7 @@ pub(super) fn lines(
                     "{} {}（{} 除權息，第 {} 個交易日）",
                     fill.stock_symbol,
                     stock_name(&fill.stock_symbol),
-                    fill.outcome.event.ex_date.format("%m-%d"),
+                    fill.outcome.event.ex_date.strftime("%m-%d"),
                     fill.outcome.trading_days_to_fill.unwrap_or_default()
                 )
             })
@@ -104,7 +104,7 @@ pub(super) fn lines(
                     fill.stock_symbol,
                     stock_name(&fill.stock_symbol),
                     fill.outcome.gap_percent().unwrap_or_default(),
-                    fill.outcome.event.ex_date.format("%m-%d"),
+                    fill.outcome.event.ex_date.strftime("%m-%d"),
                     fill.outcome.trading_days_since_ex
                 )
             })

@@ -4,7 +4,8 @@
 //! `max_pb_percentile` 讀這張表。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use crate::infra::database;
 
@@ -59,17 +60,17 @@ impl PgPbPercentileRepository {
     /// # Errors
     ///
     /// 資料庫查詢或寫入失敗時回傳錯誤。
-    pub async fn replace_range(&self, from: NaiveDate, to: NaiveDate) -> Result<u64> {
+    pub async fn replace_range(&self, from: Date, to: Date) -> Result<u64> {
         let mut tx = database::get_batch_connection().begin().await?;
         sqlx::query("DELETE FROM daily_pb_percentile WHERE date BETWEEN $1 AND $2")
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .execute(&mut *tx)
             .await
             .context("清除 daily_pb_percentile 失敗")?;
         let inserted = sqlx::query(REPLACE_PB_PERCENTILES_SQL)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .bind(PB_PERCENTILE_YEARS)
             .bind(MIN_PB_SAMPLES)
             .execute(&mut *tx)

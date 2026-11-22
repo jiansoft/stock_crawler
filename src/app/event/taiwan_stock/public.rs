@@ -1,7 +1,7 @@
+use crate::core::util::datetime::today;
 use std::fmt::Write;
 
 use anyhow::Result;
-use chrono::Local;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use rust_decimal_macros::dec;
 
@@ -19,7 +19,7 @@ use crate::{
 pub async fn execute() -> Result<()> {
     let ps = crate::infra::crawler::twse::public::visit().await?;
     let mut msg = String::with_capacity(2048);
-    let now = Local::now().date_naive();
+    let now = today();
 
     for stock in ps {
         if stock.market == "中央登錄公債" {
@@ -68,7 +68,7 @@ pub async fn execute() -> Result<()> {
                 last_price = last_price,
                 price_change = price_change,
             );
-            let mut duration = (end - now).num_seconds() as usize;
+            let mut duration = end.duration_since(now).as_secs() as usize;
 
             if duration == 0 {
                 duration = declare::ONE_DAYS_IN_SECONDS;

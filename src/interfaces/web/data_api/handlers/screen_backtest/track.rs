@@ -13,8 +13,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
 use futures::{StreamExt, stream};
+use jiff::civil::Date;
 
 use super::current::return_since;
 use super::{ETF_BENCHMARK, round2};
@@ -84,11 +84,13 @@ fn internal_error(error: &anyhow::Error) -> Response {
 pub(super) async fn track_records(
     name: &str,
     records: &[StrategyRebalanceRecord],
-    until: Option<NaiveDate>,
+    until: Option<Date>,
 ) -> anyhow::Result<StrategyTrackResponse> {
-    let latest: Option<NaiveDate> = sqlx::query_scalar(LATEST_TRADING_DATE_SQL)
-        .fetch_one(database::get_connection())
-        .await?;
+    let latest: Option<Date> =
+        sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(LATEST_TRADING_DATE_SQL)
+            .fetch_one(database::get_connection())
+            .await
+            .map(crate::infra::database::jiff_types::from_wire)?;
     let latest = latest.map(|latest| until.map_or(latest, |until| latest.min(until)));
     let (bars, adjustments) = match latest {
         Some(latest) => load_bars(records, latest).await?,
@@ -100,7 +102,7 @@ pub(super) async fn track_records(
 /// 換股通知用的結算：最後一期（已經過至少一個交易日）的表現與追蹤以來的累積；沒有紀錄或最後一期
 /// 還沒有收盤可比時回 `None`。
 pub(super) fn settlement(response: &StrategyTrackResponse) -> Option<StrategySettlement> {
-    let parse = |date: &str| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok();
+    let parse = |date: &str| Date::strptime("%Y-%m-%d", date).ok();
     let last = response.periods.last()?;
     let (start, end) = (parse(&last.date)?, parse(&last.end)?);
     if end <= start {
@@ -123,7 +125,7 @@ pub(super) fn settlement(response: &StrategyTrackResponse) -> Option<StrategySet
 /// 讀取全部持股與 0050 從第一次換股日（往前多讀幾根）到 `latest` 的日線與除權息事件。
 async fn load_bars(
     records: &[StrategyRebalanceRecord],
-    latest: NaiveDate,
+    latest: Date,
 ) -> anyhow::Result<(
     HashMap<String, Vec<PriceBar>>,
     HashMap<String, Vec<PriceAdjustment>>,
@@ -136,7 +138,7 @@ async fn load_bars(
     symbols.sort_unstable();
     symbols.dedup();
     let first = records.first().map_or(latest, |record| record.date);
-    let limit = (latest - first).num_days().max(0) + 1 + EXTRA_BARS;
+    let limit = i64::from((latest - first).get_days()).max(0) + 1 + EXTRA_BARS;
     let repository = PgQuoteRepository::new();
     let adjustments = repository.fetch_price_adjustments(&symbols).await?;
     let repository = &repository;
@@ -160,8 +162,8 @@ fn period_return(
     bars: &HashMap<String, Vec<PriceBar>>,
     adjustments: &HashMap<String, Vec<PriceAdjustment>>,
     symbol: &str,
-    start: NaiveDate,
-    end: NaiveDate,
+    start: Date,
+    end: Date,
 ) -> Option<f64> {
     let bars = bars.get(symbol)?;
     let until = bars.partition_point(|bar| bar.date <= end);
@@ -174,7 +176,7 @@ fn period_return(
 pub(super) fn track(
     preset: &str,
     records: &[StrategyRebalanceRecord],
-    latest: Option<NaiveDate>,
+    latest: Option<Date>,
     bars: &HashMap<String, Vec<PriceBar>>,
     adjustments: &HashMap<String, Vec<PriceAdjustment>>,
 ) -> StrategyTrackResponse {
@@ -264,7 +266,7 @@ fn strategy_return(
     record: &StrategyRebalanceRecord,
     bars: &HashMap<String, Vec<PriceBar>>,
     adjustments: &HashMap<String, Vec<PriceAdjustment>>,
-    end: NaiveDate,
+    end: Date,
 ) -> Option<f64> {
     let total: f64 = record.holdings.iter().map(|holding| holding.weight).sum();
     if record.holdings.is_empty() || total <= 0.0 {

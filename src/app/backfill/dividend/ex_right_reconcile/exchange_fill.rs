@@ -13,10 +13,11 @@
 //! 只補除息日已過 [`SETTLE_DAYS`] 天的事件，附近有對不上交易所日期的資料列時也不補。
 //! 只補股票主檔中未下市的 ETF；已下市或主檔沒有的代號不建立資料列。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::{DATE_FORMAT, parse_date, plan::event_rows};
@@ -46,8 +47,8 @@ enum Cadence {
 /// 交易所資料的期間；期間外的日期無從判斷是否對得上交易所。
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Window {
-    pub(super) start: NaiveDate,
-    pub(super) end: NaiveDate,
+    pub(super) start: Date,
+    pub(super) end: Date,
 }
 
 /// 從交易所資料補 ETF 配息並寫入；回傳補入的資料列。
@@ -108,7 +109,7 @@ pub(super) fn exchange_fills(
     existing: &HashMap<String, Vec<Dividend>>,
     window: Window,
 ) -> Vec<Dividend> {
-    let mut official_dates: HashMap<&str, BTreeSet<NaiveDate>> = HashMap::new();
+    let mut official_dates: HashMap<&str, BTreeSet<Date>> = HashMap::new();
     for event in official {
         official_dates
             .entry(event.stock_symbol.as_str())
@@ -124,7 +125,7 @@ pub(super) fn exchange_fills(
         if !event.stock_symbol.starts_with("00")
             || !event.is_cash
             || event.is_stock
-            || (window.end - event.ex_date).num_days() < SETTLE_DAYS
+            || i64::from((window.end - event.ex_date).get_days()) < SETTLE_DAYS
         {
             continue;
         }
@@ -177,11 +178,11 @@ pub(super) fn exchange_fills(
 }
 
 /// 由交易所歷次除息日間隔的中位數判斷配息頻率；少於兩次或年配時回傳 `None`。
-fn cadence(dates: &BTreeSet<NaiveDate>) -> Option<Cadence> {
+fn cadence(dates: &BTreeSet<Date>) -> Option<Cadence> {
     let mut gaps: Vec<i64> = dates
         .iter()
         .zip(dates.iter().skip(1))
-        .map(|(earlier, later)| (*later - *earlier).num_days())
+        .map(|(earlier, later)| i64::from((*later - *earlier).get_days()))
         .collect();
     if gaps.is_empty() {
         return None;
@@ -202,7 +203,7 @@ fn has_nearby_unmatched_row(
     rows: &[&Dividend],
     event: &ExDividendAnnouncement,
     cash: Decimal,
-    official_dates: &BTreeSet<NaiveDate>,
+    official_dates: &BTreeSet<Date>,
     window: Window,
 ) -> bool {
     rows.iter()
@@ -210,27 +211,28 @@ fn has_nearby_unmatched_row(
             Some(date) => {
                 (window.start..=window.end).contains(&date)
                     && !official_dates.contains(&date)
-                    && (date - event.ex_date).num_days().abs() <= NEARBY_DAYS
+                    && i64::from((date - event.ex_date).get_days()).abs() <= NEARBY_DAYS
             }
             None => {
                 row.cash_dividend > Decimal::ZERO
-                    && (row.year == event.ex_date.year() || row.year == event.ex_date.year() + 1)
+                    && (row.year == i32::from(event.ex_date.year())
+                        || row.year == i32::from(event.ex_date.year() + 1))
                     && ((row.cash_dividend - cash).abs() / cash) <= super::plan::AMOUNT_TOLERANCE
             }
         })
 }
 
 /// 發放年度：12 月 10 日以後除息的，現金多在隔年 1 月發放。
-fn payment_year(ex_date: NaiveDate) -> i32 {
+fn payment_year(ex_date: Date) -> i32 {
     if ex_date.month() == 12 && ex_date.day() >= 10 {
-        ex_date.year() + 1
+        i32::from(ex_date.year() + 1)
     } else {
-        ex_date.year()
+        i32::from(ex_date.year())
     }
 }
 
 /// 除息日對應的期別 `(所屬年度, 期別)`；`previous` 為 true 時取前一期。
-fn period(cadence: Cadence, ex_date: NaiveDate, previous: bool) -> (i32, String) {
+fn period(cadence: Cadence, ex_date: Date, previous: bool) -> (i32, String) {
     let year = ex_date.year();
     let (per_year, index) = match cadence {
         Cadence::Monthly => (12, ex_date.month()),
@@ -247,7 +249,7 @@ fn period(cadence: Cadence, ex_date: NaiveDate, previous: bool) -> (i32, String)
         Cadence::Quarterly => format!("Q{index}"),
         Cadence::SemiAnnual => format!("H{index}"),
     };
-    (year, quarter)
+    (i32::from(year), quarter)
 }
 
 /// 以交易所的除息日與金額組成資料列；盈餘、公積的拆分與發放日交易所沒有，維持 0 與 `-`。
@@ -258,7 +260,7 @@ fn new_dividend(
     year_of_dividend: i32,
     quarter: String,
 ) -> Dividend {
-    let now = Local::now();
+    let now = TaipeiDateTime::now();
     Dividend {
         serial: 0,
         year,
@@ -275,7 +277,7 @@ fn new_dividend(
         payout_ratio_cash: Decimal::ZERO,
         payout_ratio_stock: Decimal::ZERO,
         payout_ratio: Decimal::ZERO,
-        ex_dividend_date_cash: event.ex_date.format(DATE_FORMAT).to_string(),
+        ex_dividend_date_cash: event.ex_date.strftime(DATE_FORMAT).to_string(),
         ex_dividend_date_stock: "-".to_string(),
         payable_date_cash: "-".to_string(),
         payable_date_stock: "-".to_string(),
@@ -292,7 +294,7 @@ pub(super) fn unresolved_after_exchange_fill(
     events
         .iter()
         .filter(|event| {
-            let date = event.ex_date.format(DATE_FORMAT).to_string();
+            let date = event.ex_date.strftime(DATE_FORMAT).to_string();
             !fills.iter().any(|fill| {
                 fill.security_code == event.stock_symbol && fill.ex_dividend_date_cash == date
             })

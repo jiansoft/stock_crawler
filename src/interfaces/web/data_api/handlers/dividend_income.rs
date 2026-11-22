@@ -3,13 +3,15 @@
 //! 查詢沿用 [`crate::domain::portfolio::payout`] 與 `PgPortfolioRepository`（與
 //! `/portfolio/upcoming-payouts`、入帳通知相同）；這裡只驗證參數、依月份加總並轉成 JSON。
 
+use crate::core::util::datetime::{today, ymd};
 use axum::{
     Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Datelike, Local, Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
@@ -40,15 +42,15 @@ pub(crate) async fn dividend_income(
 ) -> Response {
     // 範圍由 scope middleware 驗證後放進 extension（家庭全體或單一成員，7.6 N2）。
     let member_id = view.member_id_or_total();
-    let today = Local::now().date_naive();
-    let year = params.year.unwrap_or(today.year());
+    let today = today();
+    let year = params.year.unwrap_or(i32::from(today.year()));
     let Some((from, to)) = year_range(year, today) else {
         return error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             "year 必須介於 2000 至明年",
         );
     };
-    let (last_from, last_to) = (from - Months::new(12), to - Months::new(12));
+    let (last_from, last_to) = (from - 12.months(), to - 12.months());
 
     let repo = PgPortfolioRepository::new();
     let (this_year, last_year) = match tokio::try_join!(
@@ -71,22 +73,19 @@ pub(crate) async fn dividend_income(
 }
 
 /// `year` 的 1 月 1 日與 12 月 31 日；年份不在 2000 到 `today` 的明年時回 `None`。
-fn year_range(year: i32, today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
-    if !(2000..=today.year() + 1).contains(&year) {
+fn year_range(year: i32, today: Date) -> Option<(Date, Date)> {
+    if !(2000..=i32::from(today.year()) + 1).contains(&year) {
         return None;
     }
-    Some((
-        NaiveDate::from_ymd_opt(year, 1, 1)?,
-        NaiveDate::from_ymd_opt(year, 12, 31)?,
-    ))
+    Some((ymd(year, 1, 1)?, ymd(year, 12, 31)?))
 }
 
 async fn payouts_between(
     repo: &impl PortfolioRepository,
     view: &HoldingView,
-    from: NaiveDate,
-    to: NaiveDate,
-    today: NaiveDate,
+    from: Date,
+    to: Date,
+    today: Date,
 ) -> anyhow::Result<Vec<DividendPayout>> {
     let allocations = repo.fetch_payout_allocations(view, from, to, today).await?;
     Ok(payout::merge_members(payout::split_by_payable_date(
@@ -101,14 +100,14 @@ async fn payouts_between(
 pub(super) fn build_response(
     member_id: i64,
     year: i32,
-    as_of: NaiveDate,
+    as_of: Date,
     this_year: &[DividendPayout],
     last_year: &[DividendPayout],
     include_items: bool,
 ) -> DividendIncomeResponse {
     let months = payout::monthly_income(this_year, year, as_of);
     let last_months = payout::monthly_income(last_year, year - 1, as_of);
-    let same_period_end = as_of - Months::new(12);
+    let same_period_end = as_of - 12.months();
     let last_year_same_period: Decimal = last_year
         .iter()
         .filter(|item| item.payable_date <= same_period_end)

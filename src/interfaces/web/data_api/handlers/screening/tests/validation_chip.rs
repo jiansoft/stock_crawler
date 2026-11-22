@@ -1,6 +1,7 @@
 //! 條件選股的相對強度、法人連買與千張大戶參數驗證。
 
 use super::*;
+use jiff::civil::date;
 
 /// 相對強度門檻 1–99 含兩端，本身就是有效篩選條件；轉成 SQL 的 smallint。
 #[test]
@@ -47,7 +48,7 @@ fn screening_rs_columns_split_scores() {
             closing_price: None,
         },
     };
-    let date = NaiveDate::from_ymd_opt(2026, 10, 13).expect("合法日期");
+    let date = date(2026, 10, 13);
     let (as_of, symbols, scores) =
         rs_columns(Some((date, vec![scored("2330", 99), scored("2317", 42)])));
     assert_eq!(as_of.as_deref(), Some("2026-10-13"));
@@ -91,7 +92,7 @@ fn screening_streak_columns_split_rows() {
         foreign_streak,
         trust_streak,
     };
-    let date = NaiveDate::from_ymd_opt(2026, 10, 13).expect("合法日期");
+    let date = date(2026, 10, 13);
     let (as_of, symbols, foreign, trust) = streak_columns(Some((
         date,
         vec![streak("2330", -5, 10), streak("6505", 0, 14)],

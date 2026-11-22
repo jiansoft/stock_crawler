@@ -1,3 +1,4 @@
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -48,7 +49,7 @@ fn foreign_alert(
     HoldingForeignHoldingAlert {
         stock_symbol: symbol.to_string(),
         stock_name: name.to_string(),
-        date: NaiveDate::from_ymd_opt(2026, 9, 30).unwrap(),
+        date: date(2026, 9, 30),
         share_holding_percentage: dec!(26.3700),
         change_5d: Some(dec!(1.0300)),
         change_20d,

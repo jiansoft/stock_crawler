@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::infra::cache::PriceLimit;
+use jiff::civil::date;
 
 fn response(stat: &str, date: &str, rows: serde_json::Value) -> Response {
     serde_json::from_value(serde_json::json!({
@@ -45,10 +46,7 @@ fn parses_ranges_unlimited_and_skips_bad_rows() {
     ))
     .expect("格式正確要解析成功");
 
-    assert_eq!(
-        parsed.date,
-        NaiveDate::from_ymd_opt(2026, 11, 6).expect("valid date")
-    );
+    assert_eq!(parsed.date, date(2026, 11, 6));
     assert_eq!(
         parsed.limits,
         vec![

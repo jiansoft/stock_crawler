@@ -1,7 +1,10 @@
 //! 法人連續買賣超後報酬統計 endpoint 的資料庫語意整合測試。
 
+use crate::core::util::datetime::ymd;
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
@@ -35,8 +38,8 @@ const RETURNS: [(u32, &str, i64, Option<i64>); 6] = [
     (6, "79979SB", -2, None),
 ];
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1986, 6, d).expect("固定日期合法")
+fn day(d: u32) -> Date {
+    ymd(1986, 6, d).expect("固定日期合法")
 }
 
 /// 刪除種入的籌碼、報酬與股票主檔。
@@ -50,8 +53,8 @@ async fn cleanup(pool: &sqlx::PgPool) {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
     }
     crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
-        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
-        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+        date(1980, 1, 1),
+        date(1999, 12, 31),
     )
     .await
     .expect("重算大盤彙總");
@@ -75,7 +78,7 @@ async fn seed(pool: &sqlx::PgPool) {
             r#"INSERT INTO chip_daily ("date", stock_symbol, foreign_net, trust_net, dealer_net)
                VALUES ($1, $2, $3, $4, 0)"#,
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(symbol)
         .bind(foreign)
         .bind(trust)
@@ -89,7 +92,7 @@ async fn seed(pool: &sqlx::PgPool) {
             "INSERT INTO daily_forward_return (date, stock_symbol, return_5d, return_20d)
              VALUES ($1, $2, $3, $4)",
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(symbol)
         .bind(Decimal::from(r5))
         .bind(r20.map(Decimal::from))
@@ -99,8 +102,8 @@ async fn seed(pool: &sqlx::PgPool) {
     }
     // 大盤基準讀每日彙總表，種完未來報酬要重算。
     crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
-        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
-        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+        date(1980, 1, 1),
+        date(1999, 12, 31),
     )
     .await
     .expect("重算大盤彙總");

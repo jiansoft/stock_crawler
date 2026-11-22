@@ -1,11 +1,11 @@
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 儲存大盤加權指數命令。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaveIndexCommand {
     /// 日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 收盤指數
     pub index: Decimal,
     /// 漲跌點數
@@ -36,7 +36,7 @@ impl IndexAclMapper {
         let year = split_date[0].parse::<i32>().ok()?;
         let gregorian_year = crate::core::util::datetime::roc_year_to_gregorian_year(year);
         let date_str = format!("{}-{}-{}", gregorian_year, split_date[1], split_date[2]);
-        let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()?;
+        let date = Date::strptime("%Y-%m-%d", &date_str).ok()?;
 
         let trading_volume = crate::core::util::text::parse_decimal(&item[1], None).ok()?;
         let trade_value = crate::core::util::text::parse_decimal(&item[2], None).ok()?;

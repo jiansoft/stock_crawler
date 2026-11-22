@@ -1,6 +1,7 @@
 //! 台股季 EPS 更新事件的測試。
 
 use crate::core::declare::Quarter;
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::infra::cache::SHARE;
 use std::time::Duration;
 
@@ -152,7 +153,7 @@ mod mock_sources {
                 Decimal::ZERO,
                 Decimal::ZERO,
                 Decimal::ZERO,
-                Local::now(),
+                TaipeiDateTime::now(),
                 2,
                 0,
                 0,

@@ -1,13 +1,13 @@
 //! `/market/margin-ranking` handler：融資融券增減與券資比排行的測試。
 
-use chrono::NaiveDate;
+use jiff::civil::date;
 
 use super::*;
 
 fn test_period() -> FlowPeriod {
     FlowPeriod {
-        data_date: NaiveDate::from_ymd_opt(2026, 10, 14).expect("合法日期"),
-        from: NaiveDate::from_ymd_opt(2026, 10, 8).expect("合法日期"),
+        data_date: date(2026, 10, 14),
+        from: date(2026, 10, 8),
         days: 5,
     }
 }

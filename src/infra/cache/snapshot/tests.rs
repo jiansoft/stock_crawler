@@ -1,3 +1,5 @@
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
 use std::collections::HashMap;
 
 use rust_decimal::Decimal;
@@ -254,7 +256,7 @@ fn todays_price_limit_range_overrides_the_fixed_tolerance() {
     use super::super::realtime::PriceLimit;
 
     let share = Share::new();
-    let today = chrono::Local::now().date_naive();
+    let today = today();
     // 00631L：昨收 39.62，漲跌停 31.70～47.54。
     assert!(!share.is_valid_price("00631L", dec!(45), dec!(39.62)));
     share.set_price_limits(
@@ -279,7 +281,7 @@ fn unlimited_securities_use_the_relaxed_tolerance() {
     use super::super::realtime::PriceLimit;
 
     let share = Share::new();
-    let today = chrono::Local::now().date_naive();
+    let today = today();
     assert!(!share.is_valid_price("00715L", dec!(70.75), dec!(63.55)));
     share.set_price_limits(today, [("00715L".to_string(), PriceLimit::Unlimited)]);
     assert!(share.is_valid_price("00715L", dec!(70.75), dec!(63.55)));
@@ -291,7 +293,7 @@ fn unlimited_securities_use_the_relaxed_tolerance() {
 fn ipo_uses_todays_source_limits_and_resumes_normal_limits() {
     use super::super::realtime::PriceLimit;
     let share = Share::new();
-    let today = chrono::Local::now().date_naive();
+    let today = today();
     // 普通股未建主檔也可依來源辨識無漲跌幅限制，不使用主檔匯入日期猜測 IPO。
     share.set_price_limits(today, [("7999".to_string(), PriceLimit::Unlimited)]);
     assert!(share.is_valid_price("7999", dec!(180), dec!(100)));
@@ -316,8 +318,8 @@ fn stale_or_unknown_price_limits_are_ignored() {
     use super::super::realtime::PriceLimit;
 
     let share = Share::new();
-    let today = chrono::Local::now().date_naive();
-    let yesterday = today - chrono::Duration::days(1);
+    let today = today();
+    let yesterday = today - 1.days();
     share.set_price_limits(
         yesterday,
         [(

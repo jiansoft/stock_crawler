@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::domain::portfolio::exposure::{EtfConstituent, ExposurePosition, look_through};
+use jiff::civil::date;
 
 #[test]
 fn response_rounds_money_and_limits_items() {
@@ -22,7 +23,7 @@ fn response_rounds_money_and_limits_items() {
         ],
         &[EtfConstituent {
             etf_symbol: "0050".to_owned(),
-            as_of: chrono::NaiveDate::from_ymd_opt(2026, 9, 30).expect("日期合法"),
+            as_of: date(2026, 9, 30),
             holding_symbol: "2330".to_owned(),
             holding_name: "台積電".to_owned(),
             weight: 56.456,

@@ -1,6 +1,7 @@
 //! ETF 淨值寫入的倉儲驗證：upsert、前一營業日官方淨值回填與缺日補齊。
 
 use super::*;
+use jiff::civil::Date;
 
 #[tokio::test]
 #[cfg_attr(
@@ -23,12 +24,12 @@ async fn save_navs_upserts_and_backfills_previous_official_nav() {
         .expect("寫入第二天");
     assert_eq!(written, 2);
 
-    let rows: Vec<(NaiveDate, i64, Option<Decimal>)> = sqlx::query_as(
+    let rows: Vec<(Date, i64, Option<Decimal>)> = sqlx::query_as::<_, (jiff_sqlx::Date, i64, Option<Decimal>)>(
         "SELECT date, outstanding_units, nav FROM etf_daily_nav WHERE stock_symbol = $1 ORDER BY date",
     )
     .bind(FAKE)
     .fetch_all(database::get_connection())
-    .await
+    .await.map(|rows| rows.into_iter().map(|(c0, c1, c2)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2)).collect::<Vec<_>>())
     .expect("讀回淨值");
     assert_eq!(
         rows,
@@ -99,18 +100,18 @@ async fn missing_day_gets_its_own_official_nav_and_gap_fill_completes_it() {
     assert_eq!(again, 0, "沒有空欄可補時不寫入");
 
     type Row = (
-        NaiveDate,
+        Date,
         Option<i64>,
         Option<Decimal>,
         Option<Decimal>,
         Option<Decimal>,
     );
-    let rows: Vec<Row> = sqlx::query_as(
+    let rows: Vec<Row> = sqlx::query_as::<_, (jiff_sqlx::Date, Option<i64>, Option<Decimal>, Option<Decimal>, Option<Decimal>)>(
         "SELECT date, outstanding_units, nav, market_price, premium_rate FROM etf_daily_nav WHERE stock_symbol = $1 ORDER BY date",
     )
     .bind(FAKE)
     .fetch_all(database::get_connection())
-    .await
+    .await.map(|rows| rows.into_iter().map(|(c0, c1, c2, c3, c4)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2, c3, c4)).collect::<Vec<_>>())
     .expect("讀回淨值");
     assert_eq!(
         rows,
@@ -181,14 +182,20 @@ async fn holiday_rows_of_other_etfs_do_not_shift_the_backfill_date() {
     .await
     .expect("寫入 4/27");
 
-    let rows: Vec<(String, NaiveDate, Option<Decimal>)> = sqlx::query_as(
-        "SELECT stock_symbol::text, date, nav FROM etf_daily_nav
+    let rows: Vec<(String, Date, Option<Decimal>)> =
+        sqlx::query_as::<_, (String, jiff_sqlx::Date, Option<Decimal>)>(
+            "SELECT stock_symbol::text, date, nav FROM etf_daily_nav
          WHERE stock_symbol = ANY($1) ORDER BY stock_symbol, date",
-    )
-    .bind([FAKE, OVERSEAS])
-    .fetch_all(database::get_connection())
-    .await
-    .expect("讀回淨值");
+        )
+        .bind([FAKE, OVERSEAS])
+        .fetch_all(database::get_connection())
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(c0, c1, c2)| (c0, crate::infra::database::jiff_types::from_wire(c1), c2))
+                .collect::<Vec<_>>()
+        })
+        .expect("讀回淨值");
     remove_trading_days(&calendar).await;
     remove_overseas().await;
     cleanup().await;
@@ -237,18 +244,18 @@ async fn nav_history_fills_missing_dates_only() {
     assert_eq!(repo.insert_nav_history(FAKE, &[]).await.expect("空批次"), 0);
 
     type Row = (
-        NaiveDate,
+        Date,
         Option<i64>,
         Option<Decimal>,
         Option<Decimal>,
         Option<Decimal>,
     );
-    let rows: Vec<Row> = sqlx::query_as(
+    let rows: Vec<Row> = sqlx::query_as::<_, (jiff_sqlx::Date, Option<i64>, Option<Decimal>, Option<Decimal>, Option<Decimal>)>(
         "SELECT date, outstanding_units, nav, estimated_nav, premium_rate FROM etf_daily_nav WHERE stock_symbol = $1 ORDER BY date",
     )
     .bind(FAKE)
     .fetch_all(database::get_connection())
-    .await
+    .await.map(|rows| rows.into_iter().map(|(c0, c1, c2, c3, c4)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2, c3, c4)).collect::<Vec<_>>())
     .expect("讀回淨值");
     assert_eq!(
         rows,

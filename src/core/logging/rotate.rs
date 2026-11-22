@@ -1,3 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::SignedDuration;
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufWriter, Write},
@@ -9,7 +11,6 @@ use std::{
 };
 
 use anyhow::Result;
-use chrono::{DateTime, Local, TimeDelta};
 
 use crate::core::logging;
 
@@ -43,7 +44,7 @@ pub struct Rotate {
     /// 當前檔案已寫入大小
     current_size: u64,
     /// 當前檔案最後一筆日誌的時間；輪轉時作為封存檔名的時間戳
-    last_write_at: Option<DateTime<Local>>,
+    last_write_at: Option<TaipeiDateTime>,
     /// 日誌保留天數；`None` 表示跟隨全域設定
     max_age_days: Option<i64>,
     /// 是否正在執行輪轉
@@ -93,19 +94,21 @@ impl Rotate {
     }
 
     /// 取得目前生效的日誌保留時間。
-    fn max_age(&self) -> chrono::Duration {
+    fn max_age(&self) -> SignedDuration {
         let days = self
             .max_age_days
             .unwrap_or_else(|| GLOBAL_MAX_AGE_DAYS.load(Ordering::Relaxed));
 
-        TimeDelta::try_days(days).unwrap_or_else(|| TimeDelta::days(DEFAULT_MAX_AGE_DAYS))
+        days.checked_mul(24)
+            .map(SignedDuration::from_hours)
+            .unwrap_or_else(|| SignedDuration::from_hours(DEFAULT_MAX_AGE_DAYS * 24))
     }
 
     /// 確保當前有可用的檔案寫入器，必要時因跨日而切換新檔。
     ///
     /// 跨日時舊日期的活躍檔（檔名已含日期，不會與新檔撞名）保持原樣，
     /// 直接改開新日期的活躍檔。
-    fn ensure_writer(&mut self, now: DateTime<Local>) -> Result<()> {
+    fn ensure_writer(&mut self, now: TaipeiDateTime) -> Result<()> {
         let base_fn = self.generate_base_fn(now);
 
         // 日期未變更且檔案已開啟：沿用現有 writer
@@ -131,7 +134,7 @@ impl Rotate {
     /// # Arguments
     /// * `now` - 當前時間，同時作為輪轉後新檔名的時間戳
     /// * `msg` - 要寫入的訊息
-    pub fn write_msg(&mut self, now: DateTime<Local>, msg: &[u8]) -> Result<()> {
+    pub fn write_msg(&mut self, now: TaipeiDateTime, msg: &[u8]) -> Result<()> {
         // 確保有有效的 writer（含跨日切檔）
         self.ensure_writer(now)?;
 
@@ -159,8 +162,8 @@ impl Rotate {
     }
 
     /// 產生基礎檔名（根據日期，不含時間戳）
-    fn generate_base_fn(&self, now: DateTime<Local>) -> String {
-        now.format(&self.fn_pattern).to_string()
+    fn generate_base_fn(&self, now: TaipeiDateTime) -> String {
+        now.strftime(&self.fn_pattern).to_string()
     }
 
     /// 產生封存檔名（含時間戳）
@@ -190,8 +193,8 @@ impl Rotate {
     /// 依封存時間挑出尚未被使用的封存檔名。
     ///
     /// 同一秒內多次輪轉（或重啟）時遞增序號，確保不會覆蓋既有封存檔。
-    fn resolve_archive_fn(&self, stamp_at: DateTime<Local>) -> String {
-        let stamp = stamp_at.format("%H-%M-%S").to_string();
+    fn resolve_archive_fn(&self, stamp_at: TaipeiDateTime) -> String {
+        let stamp = stamp_at.strftime("%H-%M-%S").to_string();
         let mut seq = 0;
 
         loop {
@@ -251,7 +254,7 @@ impl Rotate {
     /// 先把活躍檔更名為帶時間戳的封存檔（時間戳取該檔最後一筆日誌的時間，
     /// 尚無寫入紀錄時退回當下時間），再開一個同名的空活躍檔繼續寫。
     /// 更名前必須先關閉檔案 handle，否則 Windows 會拒絕更名。
-    fn rotate_by_size(&mut self, now: DateTime<Local>) -> Result<()> {
+    fn rotate_by_size(&mut self, now: TaipeiDateTime) -> Result<()> {
         self.close_current();
 
         let stamp_at = self.last_write_at.unwrap_or(now);

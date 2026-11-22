@@ -1,11 +1,14 @@
 //! 技術指標日線與技術訊號倉儲的整合測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 use crate::domain::quote::technical::{SignalKind, TechnicalSignal};
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 fn signal(symbol: &str, kind: SignalKind) -> StockTechnicalSignal {
     StockTechnicalSignal {
-        date: NaiveDate::from_ymd_opt(1991, 9, 2).expect("有效日期"),
+        date: date(1991, 9, 2),
         stock_symbol: symbol.to_owned(),
         signal: TechnicalSignal {
             indicator: "kd",
@@ -28,7 +31,7 @@ async fn signal_symbols_and_replace_round_trip() {
         return;
     }
     let pool = database::get_connection();
-    let date = NaiveDate::from_ymd_opt(1991, 9, 2).expect("有效日期");
+    let date = date(1991, 9, 2);
     let cleanup = || async {
         for sql in [
             r#"DELETE FROM "DailyQuotes" WHERE stock_symbol LIKE '79979S_'"#,
@@ -62,7 +65,7 @@ async fn signal_symbols_and_replace_round_trip() {
                VALUES ($1, $2, $3, 1991, 9, 2)"#,
         )
         .bind(symbol)
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(rust_decimal::Decimal::from(close))
         .execute(pool)
         .await
@@ -74,7 +77,7 @@ async fn signal_symbols_and_replace_round_trip() {
     let ours: Vec<&String> = symbols.iter().filter(|s| s.starts_with("79979S")).collect();
     assert_eq!(ours, ["79979SA"]);
     // 期間有成交（收盤價 > 0）的上市櫃股票，暫停交易的也算；期間外沒有成交就不列。
-    let next_day = date.succ_opt().expect("有效日期");
+    let next_day = date.tomorrow().expect("有效日期");
     for (from, expected) in [(date, vec!["79979SA", "79979SC"]), (next_day, vec![])] {
         let symbols = repo
             .fetch_traded_symbols(from, next_day)
@@ -104,7 +107,7 @@ async fn signal_symbols_and_replace_round_trip() {
         "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
          VALUES ($1, '79979SA', 'unknown', 'golden_cross', '舊資料')",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .execute(pool)
     .await
     .expect("寫入無法辨識的訊號");
@@ -121,7 +124,7 @@ async fn signal_symbols_and_replace_round_trip() {
         "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
          VALUES ($1, '79979SA', 'rs80', 'cross_above', '相對強度 76 → 82 分，突破 80 分')",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .execute(pool)
     .await
     .expect("寫入相對強度訊號");
@@ -132,7 +135,7 @@ async fn signal_symbols_and_replace_round_trip() {
         "SELECT stock_symbol, indicator, kind, description FROM daily_technical_signal
          WHERE date = $1 ORDER BY indicator",
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .fetch_all(pool)
     .await
     .expect("讀回訊號");
@@ -157,7 +160,7 @@ async fn signal_symbols_and_replace_round_trip() {
     repo.replace_signals(date, &[]).await.expect("清空");
     let (count,): (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM daily_technical_signal WHERE date = $1")
-            .bind(date)
+            .bind(date.to_sqlx())
             .fetch_one(pool)
             .await
             .expect("計數");
@@ -229,7 +232,7 @@ async fn price_adjustments_merge_dividends_and_corporate_actions() {
     .await
     .expect("寫入測試公司行動");
 
-    let day = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("有效日期");
+    let day = |y, m, d| ymd(y, m, d).expect("有效日期");
     let map = PgQuoteRepository::new()
         .fetch_price_adjustments(&[
             "79979JA".to_owned(),
@@ -276,7 +279,7 @@ async fn signal_outcomes_group_by_indicator_and_kind() {
         return;
     }
     let pool = database::get_connection();
-    let day = |d| NaiveDate::from_ymd_opt(1989, 3, d).expect("有效日期");
+    let day = |d| ymd(1989, 3, d).expect("有效日期");
     let cleanup = || async {
         for sql in [
             "DELETE FROM daily_technical_signal WHERE stock_symbol LIKE '79979O_'",
@@ -299,7 +302,7 @@ async fn signal_outcomes_group_by_indicator_and_kind() {
             "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
              VALUES ($1, $2, $3, $4, '測試')",
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(symbol)
         .bind(indicator)
         .bind(kind)
@@ -309,7 +312,7 @@ async fn signal_outcomes_group_by_indicator_and_kind() {
         sqlx::query(
             "INSERT INTO daily_forward_return (date, stock_symbol, return_20d) VALUES ($1, $2, $3)",
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(symbol)
         .bind(value.map(rust_decimal::Decimal::from))
         .execute(pool)

@@ -14,8 +14,9 @@
 //! - `權`、`權息` 只給以價格計的合併值，拆不出現金與股票股利各多少，金額一律留 `None`，
 //!   只拿日期與類別比對；`權` 也可能是現金增資而不是配股。
 
+use crate::core::util::datetime::ymd;
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::{
@@ -50,7 +51,7 @@ const COL_OPEN_BASE: usize = 9;
 ///
 /// HTTP 請求、JSON 反序列化失敗，或 `stat` 不是 `OK` 也不是「查無資料」時回傳錯誤；
 /// 不把來源異常當成「沒有除權息」，否則核對流程會以為資料庫多出事件。
-pub async fn visit(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExDividendAnnouncement>> {
+pub async fn visit(start: Date, end: Date) -> Result<Vec<ExDividendAnnouncement>> {
     parse_results(&fetch(start, end).await?)
 }
 
@@ -59,16 +60,16 @@ pub async fn visit(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExDividendAnn
 /// # 錯誤
 ///
 /// 與 [`visit`] 相同。
-pub async fn visit_references(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExRightReference>> {
+pub async fn visit_references(start: Date, end: Date) -> Result<Vec<ExRightReference>> {
     parse_references(&fetch(start, end).await?)
 }
 
-async fn fetch(start: NaiveDate, end: NaiveDate) -> Result<Twt49uResponse> {
+async fn fetch(start: Date, end: Date) -> Result<Twt49uResponse> {
     let url = format!(
         "https://www.{}/rwd/zh/exRight/TWT49U?response=json&startDate={}&endDate={}",
         twse::HOST,
-        start.format("%Y%m%d"),
-        end.format("%Y%m%d")
+        start.strftime("%Y%m%d"),
+        end.strftime("%Y%m%d")
     );
     http::get_json::<Twt49uResponse>(&url)
         .await
@@ -144,7 +145,7 @@ pub fn parse_results(response: &Twt49uResponse) -> Result<Vec<ExDividendAnnounce
 }
 
 /// 解析 `114年01月02日` 形式的民國日期。
-fn parse_roc_full_date(raw: &str) -> Option<NaiveDate> {
+fn parse_roc_full_date(raw: &str) -> Option<Date> {
     let digits: Vec<i32> = raw
         .split(|c: char| !c.is_ascii_digit())
         .filter(|part| !part.is_empty())
@@ -156,7 +157,7 @@ fn parse_roc_full_date(raw: &str) -> Option<NaiveDate> {
     if !(1..=200).contains(&year) {
         return None;
     }
-    NaiveDate::from_ymd_opt(
+    ymd(
         year + 1911,
         u32::try_from(month).ok()?,
         u32::try_from(day).ok()?,

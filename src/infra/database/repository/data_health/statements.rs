@@ -3,8 +3,8 @@
 //! 檔案日誌的慢查詢只記到超過門檻的單筆（一般池 1 秒、批次池 5 秒），每次 0.8 秒、一天跑幾百次的
 //! 查詢永遠不會出現；這裡讀資料庫自己的累計值，週報用前後兩次的差額找出本週最耗時的語句。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local};
 use sqlx::PgConnection;
 
 use crate::{
@@ -50,7 +50,7 @@ pub(super) async fn fetch_statement_stats() -> Result<Option<StatementStats>> {
 
 /// 讀統計起算時間與各語句的累計值。
 pub(super) async fn read_statements(conn: &mut PgConnection) -> Result<StatementStats> {
-    let stats_reset: DateTime<Local> = sqlx::query_scalar(STATS_RESET_SQL)
+    let stats_reset: TaipeiDateTime = sqlx::query_scalar(STATS_RESET_SQL)
         .fetch_one(&mut *conn)
         .await
         .context("Failed to read pg_stat_statements_info")?;

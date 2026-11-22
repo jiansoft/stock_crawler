@@ -1,5 +1,7 @@
 //! 持股摘要、持股歷史與股利預估 endpoints 的資料庫語意整合測試。
 
+use crate::core::util::datetime::today;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{SEED_STOCK, SYMBOL, cleanup, get, pool_or_skip, seed};
@@ -13,8 +15,6 @@ use super::*;
     ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
 )]
 async fn portfolio_summary_endpoint_db_semantics() {
-    use chrono::Datelike;
-
     const MEMBER: i64 = 979_790;
     let Some(pool) = pool_or_skip("portfolio_summary_endpoint_db_semantics").await else {
         return;
@@ -42,7 +42,7 @@ async fn portfolio_summary_endpoint_db_semantics() {
 
     seed(pool, &[SEED_STOCK]).await;
     // 新鮮度以查詢當天判斷，殖利率日與評分年度只能由今天推算；列屬於假代號，結束時清除。
-    let today = chrono::Local::now().date_naive();
+    let today = today();
     for sql in [
         "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, cumulate_dividends_total, is_sold) VALUES ($1, $2, 1000, -40000, 300, false), ($1, $2, 1000, -50000, 200, false), ($1, $2, 500, -99999, 999, true)",
         r#"INSERT INTO last_daily_quotes (date, stock_symbol, closing_price, price_earning_ratio, "price-to-book_ratio") VALUES ('2026-04-30', $2, 50, 12.5, 0)"#,
@@ -55,13 +55,13 @@ async fn portfolio_summary_endpoint_db_semantics() {
             .unwrap_or_else(|error| panic!("種入持股失敗：{error}\n{sql}"));
     }
     sqlx::query("INSERT INTO yield_rank (date, security_code, yield) VALUES ($1, $2, 4.5)")
-        .bind(today)
+        .bind(today.to_sqlx())
         .bind(SYMBOL)
         .execute(pool)
         .await
         .expect("種入 yield_rank");
     // 營收：上個月起連 3 個月年減（−5、−3、−1），第 4 個月年增；財報：上一季營業虧損且三率都比去年同季低。
-    let month_ord = today.year() * 12 + today.month0() as i32;
+    let month_ord = i32::from(today.year()) * 12 + i32::from(today.month() - 1);
     for (back, yoy) in [(1, -5), (2, -3), (3, -1), (4, 2)] {
         let ord = month_ord - back;
         sqlx::query(r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "ComparedWithLastYearSameMonth") VALUES ($1, $1, $2, $3)"#)
@@ -72,7 +72,7 @@ async fn portfolio_summary_endpoint_db_semantics() {
             .await
             .expect("種入月營收");
     }
-    let quarter_ord = today.year() * 4 + (today.month0() / 3) as i32 - 1;
+    let quarter_ord = i32::from(today.year()) * 4 + i32::from((today.month() - 1) / 3) - 1;
     let (margin_year, margin_quarter) = (quarter_ord / 4, quarter_ord % 4 + 1);
     sqlx::query(
         "INSERT INTO income_statement (stock_symbol, fiscal_year, period_type, quarter, source, revenue, gross_profit, operating_profit, net_income)          VALUES ($1, $2, 'single', $3, 'yahoo', 100, 30, -2, 1), ($1, $2 - 1, 'single', $3, 'yahoo', 100, 35, 5, 3)",

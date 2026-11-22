@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 
 /// 儲存/更新股息明細命令。
@@ -53,7 +54,6 @@ impl YahooDividendAclMapper {
 
     /// 將 `SaveDividendCommand` 轉譯為領域模型 `Dividend`。
     pub fn from_command(cmd: &SaveDividendCommand) -> crate::domain::dividend::entity::Dividend {
-        use chrono::Local;
         use rust_decimal::Decimal;
         crate::domain::dividend::entity::Dividend {
             serial: 0,
@@ -75,8 +75,8 @@ impl YahooDividendAclMapper {
             ex_dividend_date_stock: cmd.ex_dividend_date2.clone(),
             payable_date_cash: cmd.payable_date1.clone(),
             payable_date_stock: cmd.payable_date2.clone(),
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 }

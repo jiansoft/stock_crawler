@@ -1,18 +1,22 @@
 //! 持股填息通知的測試：今天填息、今天第一次落後基準、期間過濾、單檔失敗略過與訊息格式。
 
+use crate::core::util::datetime::ymd;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
 use crate::domain::dividend::fill::{DailyClose, ExRightEvent};
 use crate::domain::dividend::fill_stats::FillSample;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("日期應合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("日期應合法")
 }
 
-fn event(ex_date: NaiveDate, cash: Decimal, stock: Decimal) -> ExRightEvent {
+fn event(ex_date: Date, cash: Decimal, stock: Decimal) -> ExRightEvent {
     ExRightEvent {
         ex_date,
         cash_dividend: cash,
@@ -20,8 +24,8 @@ fn event(ex_date: NaiveDate, cash: Decimal, stock: Decimal) -> ExRightEvent {
     }
 }
 
-fn y2025(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2025, m, d).expect("日期應合法")
+fn y2025(m: u32, d: u32) -> Date {
+    ymd(2025, m, d).expect("日期應合法")
 }
 
 /// 2330 10-14 除權息（配股 0.5 元）、前一日收 105，填息目標 105 ÷ 1.05 = 100，10-21 才回到 100（今天填息）；
@@ -33,7 +37,7 @@ struct FakeFills;
 
 #[async_trait]
 impl DividendFillQuery for FakeFills {
-    async fn fetch_latest_quote_date(&self, _symbol: &str) -> Result<Option<NaiveDate>> {
+    async fn fetch_latest_quote_date(&self, _symbol: &str) -> Result<Option<Date>> {
         unreachable!("填息通知不需要最新收盤日")
     }
 
@@ -54,9 +58,9 @@ impl DividendFillQuery for FakeFills {
         }
     }
 
-    async fn fetch_daily_closes(&self, symbol: &str, since: NaiveDate) -> Result<Vec<DailyClose>> {
+    async fn fetch_daily_closes(&self, symbol: &str, since: Date) -> Result<Vec<DailyClose>> {
         if symbol == "0056" {
-            assert_eq!(since, y2025(9, 1) - Days::new(fill::PRE_EX_LOOKBACK_DAYS));
+            assert_eq!(since, y2025(9, 1) - fill::PRE_EX_LOOKBACK_DAYS.days());
             let last_year = [
                 (y2025(8, 29), dec!(40)),
                 (y2025(9, 1), dec!(38)),
@@ -81,7 +85,7 @@ impl DividendFillQuery for FakeFills {
         }
         let closes: &[(u32, Decimal)] = match symbol {
             "2330" => {
-                assert_eq!(since, day(14) - Days::new(fill::PRE_EX_LOOKBACK_DAYS));
+                assert_eq!(since, day(14) - fill::PRE_EX_LOOKBACK_DAYS.days());
                 &[
                     (13, dec!(105)),
                     (14, dec!(95)),
@@ -188,7 +192,7 @@ async fn review_finds_todays_fills_and_first_lags() {
 fn lag_baseline_fires_only_on_the_first_exceeding_day() {
     let outcome = |since_ex: u32, filled: bool, latest: u32| FillOutcome {
         event: event(day(1), dec!(1), Decimal::ZERO),
-        pre_ex_date: NaiveDate::from_ymd_opt(2026, 9, 30).expect("日期應合法"),
+        pre_ex_date: date(2026, 9, 30),
         pre_ex_close: dec!(20),
         fill_target: dec!(20),
         fill_date: filled.then(|| day(2)),
@@ -333,7 +337,7 @@ mod entries {
         .await
         .expect("插入測試持股");
 
-        let fixed = run(NaiveDate::from_ymd_opt(1999, 6, 20).expect("合法日期")).await;
+        let fixed = run(date(1999, 6, 20)).await;
         let today = execute().await;
         cleanup().await;
 

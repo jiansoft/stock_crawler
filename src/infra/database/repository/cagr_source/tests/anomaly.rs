@@ -1,6 +1,8 @@
 //! CAGR 資料來源的異常跳動偵測測試：除息、上市初期與公司行動能解釋的跳動不標記。
 
 use super::*;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 #[tokio::test]
 #[cfg_attr(
@@ -21,7 +23,7 @@ async fn test_anomaly_detection_ignores_jumps_explained_by_dividends() {
         .fetch_anomaly_events(day(2), day(8))
         .await
         .expect("fetch_anomaly_events");
-    let mine: Vec<NaiveDate> = events
+    let mine: Vec<Date> = events
         .iter()
         .filter(|(symbol, _)| symbol == FAKE_A)
         .map(|(_, date)| *date)
@@ -90,7 +92,7 @@ async fn test_anomaly_detection_skips_listing_days_and_matches_actions_between_q
         r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
            VALUES ($1, $2, 20, 0)"#,
     )
-    .bind(day(9))
+    .bind(day(9).to_sqlx())
     .bind(FAKE_C)
     .execute(database::get_connection())
     .await
@@ -105,7 +107,7 @@ async fn test_anomaly_detection_skips_listing_days_and_matches_actions_between_q
         .expect("fetch_anomaly_events");
     cleanup().await;
 
-    let mine: Vec<NaiveDate> = events
+    let mine: Vec<Date> = events
         .iter()
         .filter(|(symbol, _)| symbol == FAKE_C)
         .map(|(_, date)| *date)

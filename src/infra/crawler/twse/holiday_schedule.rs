@@ -1,5 +1,6 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{Datelike, Local, NaiveDate};
+use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
 // 通知改走 core::alert 抽象介面，infra 層不直接依賴 interfaces::bot（反向耦合）。
@@ -22,7 +23,7 @@ struct HolidayScheduleResponse {
 /// 交易所休市日資料。
 pub struct HolidaySchedule {
     /// 休市日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 休市原因。
     pub why: String,
 }
@@ -57,17 +58,17 @@ fn should_back_up(year: i32, schedule: &[HolidaySchedule]) -> bool {
 
 /// 去年以後的年度。
 fn is_backed_up_year(year: i32) -> bool {
-    year >= Local::now().year() - 1
+    year >= i32::from(TaipeiDateTime::now().year() - 1)
 }
 
 /// 向證交所取得指定年度的休市日清單；`stat` 不是 OK 時發通知並回空清單。
 async fn fetch(year: i32) -> Result<Vec<HolidaySchedule>> {
-    let now = Local::now();
+    let now = TaipeiDateTime::now();
     let url = format!(
         "https://www.{host}/rwd/zh/holidaySchedule/holidaySchedule?date={year}&response=json&_={time}",
         host = twse::HOST,
         year = year,
-        time = now.timestamp_millis()
+        time = now.timestamp().as_millisecond()
     );
     let res = util::http::get_json::<HolidayScheduleResponse>(&url).await?;
     let stat = match res.stat {
@@ -138,7 +139,7 @@ fn parse_holiday_data(data: &[Vec<String>]) -> Vec<HolidaySchedule> {
     data.iter()
         .filter(|d| d.len() >= 3 && !d[2].contains("開始交易"))
         .filter_map(|date_info| {
-            NaiveDate::parse_from_str(&date_info[0], "%Y-%m-%d")
+            Date::strptime("%Y-%m-%d", &date_info[0])
                 .ok()
                 .map(|d| HolidaySchedule {
                     date: d,

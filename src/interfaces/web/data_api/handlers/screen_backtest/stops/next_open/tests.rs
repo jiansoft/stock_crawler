@@ -2,10 +2,12 @@
 
 use super::super::super::portfolio::trading_costs;
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
 /// 固定測試交易日。
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2024, 1, d).unwrap()
+fn day(d: u32) -> Date {
+    ymd(2024, 1, d).unwrap()
 }
 
 /// 由還原收盤與開盤建立測試日線；開盤缺值代表當天不可賣出。

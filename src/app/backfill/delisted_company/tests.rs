@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::infra::cache::SHARE;
 
 // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
@@ -11,7 +12,7 @@ fn stock(symbol: &str, market_id: i32) -> Stock {
         rust_decimal::Decimal::ZERO,
         rust_decimal::Decimal::ZERO,
         rust_decimal::Decimal::ZERO,
-        Local::now(),
+        TaipeiDateTime::now(),
         market_id,
         1,
         0,

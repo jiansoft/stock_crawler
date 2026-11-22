@@ -77,7 +77,9 @@ pub(crate) async fn list_portfolio_target_revisions(
                 let total: f64 = revision.targets.iter().map(|(_, percent)| percent).sum();
                 PortfolioTargetRevisionDto {
                     id: revision.id,
-                    saved_time: revision.saved_time.to_rfc3339(),
+                    saved_time: crate::core::util::datetime::rfc3339_utc::to_rfc3339(
+                        revision.saved_time,
+                    ),
                     target_cash_percent: ((100.0 - total).max(0.0) * 100.0).round() / 100.0,
                     actor_source: revision.actor.source.as_str().to_owned(),
                     actor_ref: revision.actor.actor_ref,

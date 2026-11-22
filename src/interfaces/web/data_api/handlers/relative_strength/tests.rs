@@ -1,10 +1,12 @@
 //! `/market/relative-strength` handler：相對強度排行（RS）的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 use crate::domain::quote::relative_strength::score_universe;
+use jiff::civil::Date;
 
-fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn day(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("合法日期")
 }
 
 fn row(symbol: &str, market_id: i32, industry: &str, returns: [f64; 3]) -> UniverseRow {

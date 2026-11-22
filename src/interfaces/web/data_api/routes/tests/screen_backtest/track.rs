@@ -2,13 +2,16 @@
 
 use super::*;
 use crate::app::ports::StrategyGateway;
+use crate::core::util::datetime::ymd;
 use crate::interfaces::web::data_api::handlers::BacktestStrategyGateway;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 const PRESET: &str = "79979 實盤追蹤";
 const SYMBOLS: [&str; 3] = ["79979KA", "79979KB", "0050"];
 
-fn track_day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1996, 5, d).expect("固定日期合法")
+fn track_day(d: u32) -> Date {
+    ymd(1996, 5, d).expect("固定日期合法")
 }
 
 async fn cleanup_track(pool: &sqlx::PgPool) {
@@ -24,8 +27,8 @@ async fn cleanup_track(pool: &sqlx::PgPool) {
         r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1) AND "Date" BETWEEN $2 AND $3"#,
     )
     .bind(&SYMBOLS[..])
-    .bind(track_day(1))
-    .bind(track_day(31))
+    .bind(track_day(1).to_sqlx())
+    .bind(track_day(31).to_sqlx())
     .execute(pool)
     .await;
 }

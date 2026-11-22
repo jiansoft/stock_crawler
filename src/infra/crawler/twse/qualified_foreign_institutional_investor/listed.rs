@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -37,12 +37,12 @@ pub struct QFIIResponse {
 }
 
 /// 取得上市股票外資及陸資投資持股統計
-pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
+pub async fn visit(date_time: TaipeiDateTime) -> Result<Vec<QfiiDto>> {
     let url = format!(
         "https://www.{}/rwd/zh/fund/MI_QFIIS?date={}&selectType=ALLBUT0999&response=json&_={}",
         twse::HOST,
-        date_time.format("%Y%m%d"),
-        date_time.timestamp_millis()
+        date_time.strftime("%Y%m%d"),
+        date_time.timestamp().as_millisecond()
     );
 
     let listed = http::get_json::<QFIIResponse>(&url).await?;
@@ -63,7 +63,7 @@ pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
         // 不是錯誤，只記 info；交易日真的漏抓由 23:00 盤後資料檢查（after_hours）重跑並告警。
         tracing::info!(
             "取得外資及陸資投資持股統計 {} 無資料，略過：{}",
-            date_time.format("%Y-%m-%d"),
+            date_time.strftime("%Y-%m-%d"),
             stat
         );
         return Ok(result);

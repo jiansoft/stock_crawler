@@ -9,7 +9,7 @@
 //! - 每股數值為新台幣元（`Decimal`，資料庫 `numeric(12, 2)`）。
 //! - `None` 表示來源未提供，**不可**當成 0。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::core::declare::Quarter;
@@ -24,7 +24,7 @@ pub struct LaggingStatement {
     /// 官方最新一季的季別（`Q1`～`Q4`）。
     pub quarter: String,
     /// 官方季報的公布日（第一次寫入 `financial_statement` 的日期）。
-    pub published_on: NaiveDate,
+    pub published_on: Date,
 }
 
 /// 報表期間口徑。

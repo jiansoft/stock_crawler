@@ -1,31 +1,33 @@
 //! 大盤趨勢狀態 endpoint 的資料庫語意整合測試。
 
+use crate::core::util::datetime::ymd;
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1994, 5, d).expect("固定日期合法")
+fn day(d: u32) -> Date {
+    ymd(1994, 5, d).expect("固定日期合法")
 }
 
 /// 刪除種入的加權指數、市場廣度與估值。
 async fn cleanup(pool: &sqlx::PgPool) {
     let _ = sqlx::query("DELETE FROM daily_market_valuation WHERE date BETWEEN $1 AND $2")
-        .bind(day(1))
-        .bind(day(31))
+        .bind(day(1).to_sqlx())
+        .bind(day(31).to_sqlx())
         .execute(pool)
         .await;
     let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date BETWEEN $1 AND $2")
-        .bind(day(1))
-        .bind(day(31))
+        .bind(day(1).to_sqlx())
+        .bind(day(31).to_sqlx())
         .execute(pool)
         .await;
     let _ =
         sqlx::query(r#"DELETE FROM "index" WHERE category = 'TAIEX' AND "date" BETWEEN $1 AND $2"#)
-            .bind(day(1))
-            .bind(day(31))
+            .bind(day(1).to_sqlx())
+            .bind(day(31).to_sqlx())
             .execute(pool)
             .await;
 }
@@ -50,7 +52,7 @@ async fn market_regime_endpoint_db_semantics() {
     ] {
         sqlx::query(r#"INSERT INTO "index" (category, "date", "index") VALUES ($1, $2, $3)"#)
             .bind(category)
-            .bind(day(d))
+            .bind(day(d).to_sqlx())
             .bind(Decimal::from(index))
             .execute(pool)
             .await
@@ -64,7 +66,7 @@ async fn market_regime_endpoint_db_semantics() {
                   above_20_day_moving_average, below_20_day_moving_average, new_52_week_high)
              VALUES ($1, $2, $3, $4, $3, $4, $5)",
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(market_id)
         .bind(above)
         .bind(below)
@@ -80,7 +82,7 @@ async fn market_regime_endpoint_db_semantics() {
                  (date, stock_exchange_market_id, median_pe, median_pb, pe_samples, pb_samples)
              VALUES ($1, $2, $3::numeric, $4::numeric, 100, 100)",
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(market_id)
         .bind(pe)
         .bind(pb)
@@ -150,7 +152,7 @@ async fn market_regime_endpoint_db_semantics() {
     let (status, _) = get("/api/v1/market/regime?date=1900-01-01").await;
     cleanup(pool).await;
     sqlx::query(r#"DELETE FROM "index" WHERE category = 'TPEx' AND "date" = $1"#)
-        .bind(day(5))
+        .bind(day(5).to_sqlx())
         .execute(pool)
         .await
         .expect("清除 TPEx");
@@ -160,8 +162,8 @@ async fn market_regime_endpoint_db_semantics() {
 /// 只刪除種入的估值，驗證沒有估值時的回應。
 async fn cleanup_valuation(pool: &sqlx::PgPool) {
     let _ = sqlx::query("DELETE FROM daily_market_valuation WHERE date BETWEEN $1 AND $2")
-        .bind(day(1))
-        .bind(day(31))
+        .bind(day(1).to_sqlx())
+        .bind(day(31).to_sqlx())
         .execute(pool)
         .await;
 }

@@ -1,6 +1,7 @@
 //! ETF 含息績效（`etf_performance`）與清單頁快照（`etf_snapshot`）。
 
 use anyhow::{Context, Result};
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -237,7 +238,14 @@ pub(super) async fn save_performances(performances: &[EtfPerformance]) -> Result
     if !rows.is_empty() {
         written = sqlx::query(SAVE_PERFORMANCES_SQL)
             .bind(&symbols)
-            .bind(rows.iter().map(|p| p.calc_date).collect::<Vec<_>>())
+            .bind(
+                rows.iter()
+                    .map(|p| p.calc_date)
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|value| value.map(ToSqlx::to_sqlx))
+                    .collect::<Vec<_>>(),
+            )
             .bind(column(|p| p.ret_1w))
             .bind(column(|p| p.ret_1m))
             .bind(column(|p| p.ret_3m))
@@ -250,15 +258,26 @@ pub(super) async fn save_performances(performances: &[EtfPerformance]) -> Result
             .bind(column(|p| p.ret_10y))
             .bind(column(|p| p.vol_1y))
             .bind(column(|p| p.mdd_1y))
-            .bind(rows.iter().map(|p| p.mdd_date).collect::<Vec<_>>())
+            .bind(
+                rows.iter()
+                    .map(|p| p.mdd_date)
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|value| value.map(ToSqlx::to_sqlx))
+                    .collect::<Vec<_>>(),
+            )
             .bind(column(|p| p.beta_1y))
             .bind(column(|p| p.sharpe_1y))
             .bind(column(|p| p.year_low))
             .bind(column(|p| p.year_high))
             .bind(
-                rows.iter()
+                (rows
+                    .iter()
                     .map(|p| p.nav_returns.as_ref().map(|n| n.calc_date))
-                    .collect::<Vec<_>>(),
+                    .collect::<Vec<_>>())
+                .iter()
+                .map(|value| value.map(ToSqlx::to_sqlx))
+                .collect::<Vec<_>>(),
             )
             .bind(nav_column(|n| n.ret_1w))
             .bind(nav_column(|n| n.ret_1m))

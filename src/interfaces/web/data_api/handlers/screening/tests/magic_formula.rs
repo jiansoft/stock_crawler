@@ -1,5 +1,6 @@
 //! 條件選股：神奇公式（Greenblatt）盈餘殖利率、資本報酬率與 `sort_by=magic_formula`。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -120,7 +121,7 @@ async fn screen_at_ranks_by_magic_formula() {
         .expect("種入日線");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 8, 10).expect("固定日期合法");
+    let query_date = date(1988, 8, 10);
     let mut params = screening_params();
     params.industry_id = Some(1);
     params.min_avg_trade_value = Some(1);

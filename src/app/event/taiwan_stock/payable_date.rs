@@ -4,10 +4,11 @@
 //! 已領股利明細，所以除權息後才賣出、今天才發放的也會列入，金額與
 //! `/portfolio/upcoming-payouts` 一致。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::{collections::BTreeMap, fmt::Write};
 
 use anyhow::Result;
-use chrono::{Datelike, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 // 通知走 core::alert（port），跳脫工具走 core::util::text——
@@ -30,7 +31,7 @@ use super::{format_decimal_with_commas, format_share_quantity, holdings, member_
 ///
 /// `today_payouts` 與 `month_payouts` 都依會員分列（不合併），本月至今依會員加總。
 fn build_batch_dividend_message(
-    today: NaiveDate,
+    today: Date,
     today_payouts: &[DividendPayout],
     month_payouts: &[DividendPayout],
     names: &BTreeMap<i64, String>,
@@ -99,7 +100,7 @@ fn build_batch_dividend_message(
 /// 同一筆股利的現金與股票發放日可能不同天（例如現金 9/02、股票 9/10），
 /// 因此只列出發放日確實落在今天的項目，合計也只加總今天入帳的部分。
 fn build_payable_summary_message(
-    today: NaiveDate,
+    today: Date,
     stocks_payable_date_info: &[StockDividendPayableDateInfo],
 ) -> Option<String> {
     let today_str = today.to_string();
@@ -164,11 +165,11 @@ fn build_payable_summary_message(
 
 /// 提醒本日發放股利的股票，並通知持股今天入帳的明細。
 pub async fn execute() -> Result<()> {
-    notify(Local::now().date_naive()).await
+    notify(today()).await
 }
 
 /// 以 `today` 為今天發送通知；整合測試以固定日期呼叫。
-async fn notify(today: NaiveDate) -> Result<()> {
+async fn notify(today: Date) -> Result<()> {
     let dividend_repo = PgDividendRepository::new();
     let stocks_payable_date_info = dividend_repo.fetch_payable_date_info_on_date(today).await?;
     // 今天發放的股票：只列收件者範圍內目前仍持有的（會員系統計畫 7.6）
@@ -198,8 +199,8 @@ async fn notify(today: NaiveDate) -> Result<()> {
 }
 
 /// 一個範圍今天入帳的明細與本月累計；今天沒有入帳回 `None`。
-async fn payout_message(view: &HoldingView, today: NaiveDate) -> Result<Option<String>> {
-    let month_start = today.with_day(1).unwrap_or(today);
+async fn payout_message(view: &HoldingView, today: Date) -> Result<Option<String>> {
+    let month_start = today.first_of_month();
     let allocations = PgPortfolioRepository::new()
         .fetch_payout_allocations(view, month_start, today, today)
         .await?;

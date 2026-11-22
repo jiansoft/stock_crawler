@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::EtfHoldingPeriod;
 
@@ -107,7 +107,7 @@ pub struct EtfOverview {
     /// 追蹤指數。
     pub benchmark: String,
     /// 行情日。
-    pub quote_date: Option<NaiveDate>,
+    pub quote_date: Option<Date>,
     /// 收盤價。
     pub closing_price: Option<f64>,
     /// 漲跌幅（%）。
@@ -115,7 +115,7 @@ pub struct EtfOverview {
     /// 成交值（元）。
     pub trade_value: Option<f64>,
     /// 淨值日期。
-    pub nav_date: Option<NaiveDate>,
+    pub nav_date: Option<Date>,
     /// 預估淨值。
     pub nav: Option<f64>,
     /// 折溢價（%）。
@@ -131,7 +131,7 @@ pub struct EtfOverview {
     /// 近 12 個月殖利率（%）。
     pub yield_12m: Option<f64>,
     /// 下次除息日。
-    pub next_ex_date: Option<NaiveDate>,
+    pub next_ex_date: Option<Date>,
     /// 下次配息金額。
     pub next_dividend: Option<f64>,
     /// 近 1 月含息報酬（%）。
@@ -152,7 +152,7 @@ pub struct EtfProfileView {
     /// 基金全名。
     pub full_name: String,
     /// 成立日。
-    pub inception_date: Option<NaiveDate>,
+    pub inception_date: Option<Date>,
     /// 是否為主動式。
     pub is_active: bool,
     /// 經理費（來源原文）。
@@ -169,7 +169,7 @@ pub struct EtfProfileView {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EtfPerformanceView {
     /// 市價含息報酬的基準日。
-    pub calc_date: Option<NaiveDate>,
+    pub calc_date: Option<Date>,
     /// 市價含息報酬：1 週。
     pub ret_1w: Option<f64>,
     /// 1 個月。
@@ -195,7 +195,7 @@ pub struct EtfPerformanceView {
     /// 近 1 年夏普值。
     pub sharpe_1y: Option<f64>,
     /// 淨值含息報酬的基準日。
-    pub nav_calc_date: Option<NaiveDate>,
+    pub nav_calc_date: Option<Date>,
     /// 淨值含息報酬：1 個月。
     pub nav_ret_1m: Option<f64>,
     /// 淨值含息報酬：今年以來。
@@ -212,7 +212,7 @@ pub struct EtfWeightRow {
     /// 區塊：`holding` 前十大、`industry` 行業比重、`asset` 資產分佈。
     pub kind: String,
     /// 資料日期。
-    pub as_of: NaiveDate,
+    pub as_of: Date,
     /// 台股成分股代號（只有前十大持股有，其餘為空字串）。
     pub symbol: String,
     /// 名稱或類別。
@@ -225,7 +225,7 @@ pub struct EtfWeightRow {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EtfNavDay {
     /// 日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 淨值（正式淨值優先，當天用預估淨值）。
     pub nav: Option<f64>,
     /// 市價。

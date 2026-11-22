@@ -3,6 +3,8 @@
 //! 個股分數沿用 [`mod@super::relative_strength`] 的上市櫃普通股（不含 ETF、特別股）計分；產業強度＝成分股 RS 的中位數，
 //! 另附強勢（RS ≥ 80）與弱勢（RS ≤ 20）占比，並與約 20 個交易日前的中位數比較。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::BTreeMap;
 
 use axum::{
@@ -11,7 +13,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
 
 use super::relative_strength::{ScoredStock, load_scores};
 use super::{
@@ -71,7 +72,7 @@ pub(crate) async fn industry_strength(Query(params): Query<IndustryStrengthParam
         );
     }
 
-    let until = date.unwrap_or_else(|| Local::now().date_naive());
+    let until = date.unwrap_or_else(today);
     let (data_date, current) = match load_scores(until).await {
         Ok(Some(scores)) => scores,
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "查無相對強度資料"),
@@ -106,13 +107,13 @@ pub(crate) async fn industry_strength(Query(params): Query<IndustryStrengthParam
 
 /// 組成回應：各產業統計、與前期中位數比較，依中位數排名（同中位數同名次、再依產業名稱）。
 fn build_response(
-    data_date: NaiveDate,
+    data_date: Date,
     market: &str,
     market_id: i32,
     min_stocks: usize,
     order: &str,
     current: Vec<ScoredStock>,
-    prior: Option<(NaiveDate, Vec<ScoredStock>)>,
+    prior: Option<(Date, Vec<ScoredStock>)>,
 ) -> IndustryStrengthResponse {
     let universe = current.len();
     let (prior_as_of, prior_medians) = match prior {

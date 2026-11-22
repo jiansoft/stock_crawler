@@ -7,10 +7,12 @@
 //! 每檔只查一次近 5 年的除權息與日線（與 `/portfolio/dividend-fill` 的 history 相同規則）；
 //! 單檔或全市場基準查詢失敗只記錄警告，那一檔不附文字，不影響提醒本身。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use chrono::{Days, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::domain::dividend::entity::StockDividendInfo;
@@ -20,7 +22,7 @@ use crate::infra::cache::dividend_fill_stats;
 use crate::infra::database::repository::dividend_fill::PgDividendFillRepository;
 
 /// 自身填息紀錄回看的天數（約 5 年）。
-const HISTORY_DAYS: u64 = 5 * 365 + 1;
+const HISTORY_DAYS: i64 = 5 * 365 + 1;
 
 /// 全市場基準的統計年數；與 [`HISTORY_DAYS`] 一致。
 const PEER_YEARS: u8 = fill_stats::MARKET_PEER_YEARS;
@@ -34,7 +36,7 @@ pub struct FillHints {
 
 impl FillHints {
     /// 查詢 `symbols` 近 5 年的填息統計與全市場基準。
-    pub async fn load(symbols: &[String], today: NaiveDate) -> Self {
+    pub async fn load(symbols: &[String], today: Date) -> Self {
         let repository = PgDividendFillRepository::new();
         let peers = match dividend_fill_stats::market_fill_samples_for(
             &repository,
@@ -117,9 +119,9 @@ impl FillHints {
 async fn load_history(
     repository: &impl DividendFillQuery,
     symbols: &[String],
-    today: NaiveDate,
+    today: Date,
 ) -> HashMap<String, FillSummary> {
-    let since = today - Days::new(HISTORY_DAYS);
+    let since = today - HISTORY_DAYS.days();
     let mut history = HashMap::new();
     for symbol in symbols {
         if history.contains_key(symbol) {
@@ -147,7 +149,7 @@ async fn load_history(
 ///
 /// 查詢失敗時回傳錯誤；原有快取保留，請求仍可讀舊值或自行現查。
 pub async fn refresh_market_peers() -> Result<()> {
-    let today = Local::now().date_naive();
+    let today = today();
     let samples = dividend_fill_stats::refresh_market_fill_samples_for(
         &PgDividendFillRepository::new(),
         today,

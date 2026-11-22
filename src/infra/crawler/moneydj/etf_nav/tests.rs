@@ -1,11 +1,13 @@
 //! MoneyDJ ETF 歷史淨值與市價的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn day(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, m, d).expect("日期應合法")
+fn day(m: u32, d: u32) -> Date {
+    ymd(2026, m, d).expect("日期應合法")
 }
 
 #[test]

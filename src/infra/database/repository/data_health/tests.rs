@@ -1,6 +1,9 @@
 //! 資料健康檢查倉儲（[`PgDataHealthRepository`]）的整合測試：量測 SQL 可執行、ETF、未來報酬缺口與集保級距。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 /// 每一條量測 SQL 都要能在測試庫（由 `etc/sql` 建立）上執行。
 #[tokio::test]
@@ -15,7 +18,7 @@ async fn fetch_snapshot_runs_every_query() {
         return;
     }
 
-    let day = |d| NaiveDate::from_ymd_opt(2026, 4, d).expect("日期應合法");
+    let day = |d| ymd(2026, 4, d).expect("日期應合法");
     let snapshot = PgDataHealthRepository::new()
         .fetch_snapshot(day(1), day(24), day(30), 2026, day(21))
         .await
@@ -51,7 +54,7 @@ async fn etf_queries_count_nav_rows_and_find_stale_profiles() {
             .await
             .expect("清空應成功");
     }
-    let day = |d| NaiveDate::from_ymd_opt(2021, 3, d).expect("日期應合法");
+    let day = |d| ymd(2021, 3, d).expect("日期應合法");
     for (symbol, date, nav) in [
         ("79971", day(1), Some(10.0)),
         ("79972", day(1), None),
@@ -61,7 +64,7 @@ async fn etf_queries_count_nav_rows_and_find_stale_profiles() {
         sqlx::query(
             "INSERT INTO etf_daily_nav (date, stock_symbol, estimated_nav, nav) VALUES ($1, $2, $3, $3)",
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbol)
         .bind(nav)
         .execute(&mut *tx)
@@ -91,14 +94,20 @@ async fn etf_queries_count_nav_rows_and_find_stale_profiles() {
             .expect("寫入快照應成功");
     }
 
-    let counts: Vec<(NaiveDate, i64, i64)> = sqlx::query_as(ETF_NAV_COUNTS_SQL)
-        .bind(day(1))
-        .bind(day(9))
-        .fetch_all(&mut *tx)
-        .await
-        .expect("計數應成功");
+    let counts: Vec<(Date, i64, i64)> =
+        sqlx::query_as::<_, (jiff_sqlx::Date, i64, i64)>(ETF_NAV_COUNTS_SQL)
+            .bind(day(1).to_sqlx())
+            .bind(day(9).to_sqlx())
+            .fetch_all(&mut *tx)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|(c0, c1, c2)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2))
+                    .collect::<Vec<_>>()
+            })
+            .expect("計數應成功");
     let stale: Vec<String> = sqlx::query_scalar(STALE_ETF_PROFILES_SQL)
-        .bind(day(5))
+        .bind(day(5).to_sqlx())
         .fetch_all(&mut *tx)
         .await
         .expect("查詢應成功");
@@ -131,7 +140,7 @@ async fn forward_return_gaps_flag_whole_day_holes_only() {
 INSERT INTO daily_forward_return (date, stock_symbol, return_5d, return_20d, return_60d)
 SELECT $1::date, $4 || n, $2, 1.0, 1.0 FROM generate_series(1, $3) AS n
 "#;
-    let day = |d| NaiveDate::from_ymd_opt(2021, 3, d).expect("日期應合法");
+    let day = |d| ymd(2021, 3, d).expect("日期應合法");
     for (date, return_5d, rows, prefix) in [
         // 最早有 5 日報酬之前、只有長天期的基準日：不列入。
         (day(1), None, 150, "G"),
@@ -149,7 +158,7 @@ SELECT $1::date, $4 || n, $2, 1.0, 1.0 FROM generate_series(1, $3) AS n
         (day(8), Some(1.0), 60, "H"),
     ] {
         sqlx::query(insert)
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(return_5d)
             .bind(rows)
             .bind(prefix)
@@ -158,11 +167,17 @@ SELECT $1::date, $4 || n, $2, 1.0, 1.0 FROM generate_series(1, $3) AS n
             .expect("寫入應成功");
     }
 
-    let gaps: Vec<(NaiveDate, i64)> = sqlx::query_as(FORWARD_RETURN_GAPS_SQL)
-        .bind(FORWARD_RETURN_GAP_MIN_PERCENT)
-        .fetch_all(&mut *tx)
-        .await
-        .expect("查詢應成功");
+    let gaps: Vec<(Date, i64)> =
+        sqlx::query_as::<_, (jiff_sqlx::Date, i64)>(FORWARD_RETURN_GAPS_SQL)
+            .bind(FORWARD_RETURN_GAP_MIN_PERCENT)
+            .fetch_all(&mut *tx)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|(c0, c1)| (crate::infra::database::jiff_types::from_wire(c0), c1))
+                    .collect::<Vec<_>>()
+            })
+            .expect("查詢應成功");
     tx.rollback().await.expect("rollback 應成功");
 
     assert_eq!(gaps, [(day(3), 120), (day(8), 60)]);
@@ -197,7 +212,7 @@ async fn holder_level_health_counts_the_latest_week_only() {
         .expect("空表查詢應成功");
     assert_eq!(empty, (None, 0, 0));
 
-    let week = |d| NaiveDate::from_ymd_opt(2021, 3, d).expect("日期應合法");
+    let week = |d| ymd(2021, 3, d).expect("日期應合法");
     // 舊週 2 檔、最新週 3 檔各 17 列。
     for (date, symbols) in [(week(5), 2), (week(12), 3)] {
         sqlx::query(
@@ -206,7 +221,7 @@ INSERT INTO holder_distribution_level ("date", stock_symbol, level)
 SELECT $1, 'L' || s, l FROM generate_series(1, $2) AS s, generate_series(1, 17) AS l
 "#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbols)
         .execute(&mut *tx)
         .await
@@ -222,7 +237,7 @@ SELECT $1, 'L' || s, l FROM generate_series(1, $2) AS s, generate_series(1, 17) 
         sqlx::query(
             r#"INSERT INTO holder_distribution ("date", stock_symbol, holders_400) VALUES ($1, $2, $3)"#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbol)
         .bind(holders_400)
         .execute(&mut *tx)
@@ -253,7 +268,7 @@ async fn fetch_snapshot_counts_quotes_and_zero_valuation_ratios() {
     }
     let pool = database::get_connection();
     let symbol = "79979DH";
-    let day = |d| NaiveDate::from_ymd_opt(1999, 3, d).expect("日期應合法");
+    let day = |d| ymd(1999, 3, d).expect("日期應合法");
     let cleanup = || async {
         for sql in [
             r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = $1"#,
@@ -278,7 +293,7 @@ async fn fetch_snapshot_counts_quotes_and_zero_valuation_ratios() {
         r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume", "PriceEarningRatio", "price-to-book_ratio")
            VALUES ($1, $2, 50, 1000, 0, 1.2)"#,
     )
-    .bind(day(10))
+    .bind(day(10).to_sqlx())
     .bind(symbol)
     .execute(pool)
     .await

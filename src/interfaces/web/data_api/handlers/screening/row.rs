@@ -1,6 +1,6 @@
 //! 條件選股的資料庫列型別與 API 契約轉換。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::super::{analytical_decimal_to_f64, format_month};
@@ -49,9 +49,11 @@ pub(super) struct ScreenedStockRow {
     /// 最新季度財報季別。
     financial_quarter: Option<String>,
     /// 最新估值日期。
-    valuation_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    valuation_date: Option<Date>,
     /// 最新殖利率日期。
-    yield_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    yield_date: Option<Date>,
     /// 新鮮的 F 分數。
     f_score: Option<i16>,
     /// 新鮮的 F 分數可判定指標數。
@@ -91,9 +93,11 @@ pub(super) struct ScreenedStockRow {
     /// 10 天內最新一筆日線的官方股價淨值比；沒有資料為 `None`。
     pb_ratio: Option<Decimal>,
     /// 本益比與股價淨值比的日線日期。
-    ratio_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    ratio_date: Option<Date>,
     /// 最近一次區間突破的交易日（有設 `range_breakout_days` 才有）。
-    breakout_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    breakout_date: Option<Date>,
     /// 最近一次區間突破的說明。
     breakout_description: Option<String>,
     /// 新鮮的單季 EPS 年增率。
@@ -103,7 +107,8 @@ pub(super) struct ScreenedStockRow {
     /// 年度 EPS 比較的最新年度。
     annual_eps_year: Option<i32>,
     /// 一年內最近一次 52 週新高（有設 `new_high_days` 才有）。
-    new_high_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    new_high_date: Option<Date>,
     /// 近 5 年填息率（%）。
     fill_rate_percent: Option<Decimal>,
     /// 近 5 年已填息者的平均填息交易日數。

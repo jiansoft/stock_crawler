@@ -1,6 +1,7 @@
 //! 估價計算的測試。
 
 use crate::infra::cache::SHARE;
+use jiff::civil::Date;
 
 use super::*;
 
@@ -13,7 +14,7 @@ async fn test_calculate_estimated_price() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
     tracing::debug!("開始 calculate_estimated_price");
-    let current_date = NaiveDate::parse_from_str("2026-03-31", "%Y-%m-%d").unwrap();
+    let current_date = Date::strptime("%Y-%m-%d", "2026-03-31").unwrap();
     match calculate_estimated_price(current_date).await {
         Ok(_) => {}
         Err(why) => {

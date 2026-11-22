@@ -7,7 +7,7 @@ use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use sqlx::{QueryBuilder, Row, postgres::PgRow};
 
@@ -356,9 +356,9 @@ impl PortfolioRepository for PgPortfolioRepository {
     async fn fetch_payout_allocations(
         &self,
         view: &HoldingView,
-        from: NaiveDate,
-        to: NaiveDate,
-        today: NaiveDate,
+        from: Date,
+        to: Date,
+        today: Date,
     ) -> Result<Vec<PayoutAllocation>> {
         payout::fetch(view, from, to, today).await
     }

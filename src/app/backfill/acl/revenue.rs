@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::infra::crawler::share::RevenueDto;
 use rust_decimal::Decimal;
 
@@ -50,7 +51,6 @@ impl RevenueAclMapper {
     pub fn from_command(
         cmd: &UpdateRevenueCommand,
     ) -> crate::infra::database::table::financial::revenue::Revenue {
-        use chrono::Local;
         let mut r = crate::infra::database::table::financial::revenue::Revenue::new();
         r.stock_symbol = cmd.symbol.clone();
         r.monthly = cmd.monthly;
@@ -62,7 +62,7 @@ impl RevenueAclMapper {
         r.compared_with_last_year_same_month = cmd.compared_with_last_year_same_month;
         r.accumulated_compared_with_last_year = cmd.accumulated_compared_with_last_year;
         r.date = cmd.date;
-        r.create_time = Local::now();
+        r.create_time = TaipeiDateTime::now();
         r
     }
 }

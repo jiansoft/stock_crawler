@@ -1,6 +1,7 @@
 //! 每週市場摘要測試用的假倉儲與固定資料。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 use crate::domain::portfolio::{
     chip::{BrokerPeriodNet, HoldingBrokerQuery},
     health::HoldingFundamentals,
@@ -9,6 +10,8 @@ use crate::domain::quote::technical::{
     RankedSignal, RankedSignalQuery, SignalKind, SignalOutcome, StockTechnicalSignal,
     TechnicalSignalQuery,
 };
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 mod holding;
 
@@ -17,7 +20,7 @@ pub(super) use self::holding::{FakePortfolio, FakeValuation, portfolio};
 /// 回傳固定加權指數收盤與市場廣度的假倉儲；`fail` 時指數查詢失敗，`breadth_fail` 時廣度查詢失敗。
 #[derive(Default)]
 pub(super) struct FakeIndex {
-    pub(super) points: Vec<(NaiveDate, f64)>,
+    pub(super) points: Vec<(Date, f64)>,
     pub(super) fail: bool,
     pub(super) breadth: Vec<BreadthDay>,
     pub(super) breadth_fail: bool,
@@ -25,11 +28,7 @@ pub(super) struct FakeIndex {
 
 #[async_trait]
 impl BreadthQuery for FakeIndex {
-    async fn fetch_breadth(
-        &self,
-        until: Option<NaiveDate>,
-        limit: usize,
-    ) -> Result<Vec<BreadthDay>> {
+    async fn fetch_breadth(&self, until: Option<Date>, limit: usize) -> Result<Vec<BreadthDay>> {
         assert_eq!((until, limit), (Some(day(16)), WEEK_DAYS + 1));
         if self.breadth_fail {
             return Err(anyhow!("breadth down"));
@@ -43,9 +42,9 @@ impl IndexCloseQuery for FakeIndex {
     async fn fetch_index_closes(
         &self,
         category: &str,
-        until: Option<NaiveDate>,
+        until: Option<Date>,
         limit: usize,
-    ) -> Result<Vec<(NaiveDate, f64)>> {
+    ) -> Result<Vec<(Date, f64)>> {
         assert_eq!((category, until), (regime::TAIEX, Some(day(17))));
         if self.fail {
             return Err(anyhow!("index down"));
@@ -56,11 +55,11 @@ impl IndexCloseQuery for FakeIndex {
 
 /// 加權指數由新到舊：最新一天 2026-10-16 收盤 300，往前每天少 1，共 300 天（一路上漲，
 /// 多頭排列、沒有穿越）。
-pub(super) fn index_points() -> Vec<(NaiveDate, f64)> {
+pub(super) fn index_points() -> Vec<(Date, f64)> {
     (0..300u32)
         .map(|offset| {
             (
-                day(16) - chrono::Days::new(u64::from(offset)),
+                day(16) - i64::from(offset).days(),
                 300.0 - f64::from(offset),
             )
         })
@@ -84,14 +83,14 @@ pub(super) fn failing_index() -> FakeIndex {
 /// 依查詢日回傳全體分數、交易日與持股分數的假倉儲。
 #[derive(Default)]
 pub(super) struct FakeQuote {
-    pub(super) universes: HashMap<NaiveDate, (NaiveDate, Vec<ScoredStock>)>,
-    pub(super) dates: Vec<NaiveDate>,
+    pub(super) universes: HashMap<Date, (Date, Vec<ScoredStock>)>,
+    pub(super) dates: Vec<Date>,
     pub(super) rs: Vec<RelativeStrengthDay>,
     pub(super) crossings: Vec<PeriodCrossing>,
     /// 本月季節性；`None` 時查詢失敗。
     pub(super) seasonality: Option<MonthSeasonality>,
     /// 每個交易日的區間突破（依成交值排序前）與當天總檔數；沒有的日子回空。
-    pub(super) breakouts: HashMap<NaiveDate, (Vec<RankedSignal>, i64)>,
+    pub(super) breakouts: HashMap<Date, (Vec<RankedSignal>, i64)>,
     /// 區間突破的歷史表現。
     pub(super) outcomes: Vec<SignalOutcome>,
     pub(super) fail: bool,
@@ -101,11 +100,7 @@ pub(super) struct FakeQuote {
 
 #[async_trait]
 impl RelativeStrengthCrossingQuery for FakeQuote {
-    async fn fetch_period_crossings(
-        &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<PeriodCrossing>> {
+    async fn fetch_period_crossings(&self, from: Date, to: Date) -> Result<Vec<PeriodCrossing>> {
         assert_eq!((from, to), (day(12), day(16)), "最近 5 個交易日");
         if self.fail {
             return Err(anyhow!("連線中斷"));
@@ -129,10 +124,7 @@ pub(super) fn crossing(symbol: &str, threshold: u8, up: bool, score: Option<u8>)
 
 #[async_trait]
 impl ScoredUniverseQuery for FakeQuote {
-    async fn fetch_scored_universe(
-        &self,
-        until: NaiveDate,
-    ) -> Result<Option<(NaiveDate, Vec<ScoredStock>)>> {
+    async fn fetch_scored_universe(&self, until: Date) -> Result<Option<(Date, Vec<ScoredStock>)>> {
         if self.fail {
             return Err(anyhow!("連線中斷"));
         }
@@ -144,7 +136,7 @@ impl ScoredUniverseQuery for FakeQuote {
 impl RelativeStrengthQuery for FakeQuote {
     async fn fetch_relative_strength(
         &self,
-        _until: NaiveDate,
+        _until: Date,
         days: u16,
         stock_symbols: &[String],
     ) -> Result<Vec<RelativeStrengthDay>> {
@@ -166,14 +158,14 @@ impl RelativeStrengthQuery for FakeQuote {
 
 #[async_trait]
 impl ForwardReturnRepository for FakeQuote {
-    async fn fetch_trading_dates(&self, _until: NaiveDate, count: usize) -> Result<Vec<NaiveDate>> {
+    async fn fetch_trading_dates(&self, _until: Date, count: usize) -> Result<Vec<Date>> {
         Ok(self.dates.iter().copied().take(count).collect())
     }
 
     async fn upsert_forward_returns(
         &self,
-        _base: NaiveDate,
-        _end: NaiveDate,
+        _base: Date,
+        _end: Date,
         _horizon: usize,
     ) -> Result<u64> {
         Ok(0)
@@ -185,10 +177,10 @@ impl MarketSeasonalityQuery for FakeQuote {
     async fn fetch_month_seasonality(
         &self,
         month: u32,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<MonthSeasonality> {
-        let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("合法日期");
+        let date = |y, m, d| ymd(y, m, d).expect("合法日期");
         assert_eq!(
             (month, from, to),
             (10, date(2018, 10, 1), date(2026, 9, 30)),
@@ -201,14 +193,14 @@ impl MarketSeasonalityQuery for FakeQuote {
 /// 依法人別回傳淨買賣的假籌碼查詢。
 #[derive(Default)]
 pub(super) struct FakeChip {
-    pub(super) dates: Vec<NaiveDate>,
+    pub(super) dates: Vec<Date>,
     pub(super) flows: HashMap<String, Vec<StockFlow>>,
     pub(super) fail: bool,
 }
 
 #[async_trait]
 impl ChipFlowQuery for FakeChip {
-    async fn fetch_chip_dates(&self, _until: NaiveDate) -> Result<Vec<NaiveDate>> {
+    async fn fetch_chip_dates(&self, _until: Date) -> Result<Vec<Date>> {
         if self.fail {
             return Err(anyhow!("籌碼逾時"));
         }
@@ -219,7 +211,7 @@ impl ChipFlowQuery for FakeChip {
         Ok(self.flows.get(investor).cloned().unwrap_or_default())
     }
 
-    async fn fetch_streaks(&self, _data_date: NaiveDate) -> Result<Vec<flow::StockStreak>> {
+    async fn fetch_streaks(&self, _data_date: Date) -> Result<Vec<flow::StockStreak>> {
         Ok(Vec::new())
     }
 }
@@ -296,7 +288,7 @@ pub(super) fn name(symbol: &str) -> String {
 impl RankedSignalQuery for FakeQuote {
     async fn fetch_ranked_signals(
         &self,
-        date: NaiveDate,
+        date: Date,
         indicator: &str,
         kind: SignalKind,
         limit: i64,
@@ -316,7 +308,7 @@ impl RankedSignalQuery for FakeQuote {
 impl TechnicalSignalQuery for FakeQuote {
     async fn fetch_signals(
         &self,
-        _date: NaiveDate,
+        _date: Date,
         _stock_symbols: &[String],
     ) -> Result<Vec<StockTechnicalSignal>> {
         Ok(Vec::new())
@@ -324,8 +316,8 @@ impl TechnicalSignalQuery for FakeQuote {
 
     async fn fetch_signal_outcomes(
         &self,
-        _from: NaiveDate,
-        _to: NaiveDate,
+        _from: Date,
+        _to: Date,
         _indicators: &[&str],
     ) -> Result<Vec<SignalOutcome>> {
         Ok(self.outcomes.clone())

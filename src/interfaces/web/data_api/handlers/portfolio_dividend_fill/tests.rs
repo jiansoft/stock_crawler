@@ -1,4 +1,7 @@
+use crate::core::util::datetime::ymd;
 use async_trait::async_trait;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -6,8 +9,8 @@ use super::*;
 use crate::domain::dividend::fill::{DailyClose, ExRightEvent};
 use crate::domain::dividend::fill_stats::FillSample;
 
-fn day(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, m, d).expect("日期應合法")
+fn day(m: u32, d: u32) -> Date {
+    ymd(2026, m, d).expect("日期應合法")
 }
 
 /// 2330：7 月除息已填息、10 月除息仍差 5%；0056：9 月除息仍差 10%；
@@ -16,7 +19,7 @@ struct FakeFills;
 
 #[async_trait]
 impl DividendFillQuery for FakeFills {
-    async fn fetch_latest_quote_date(&self, _symbol: &str) -> Result<Option<NaiveDate>> {
+    async fn fetch_latest_quote_date(&self, _symbol: &str) -> Result<Option<Date>> {
         unreachable!("持股填息不需要最新收盤日")
     }
 
@@ -29,16 +32,13 @@ impl DividendFillQuery for FakeFills {
         Ok(match symbol {
             "2330" => vec![event(day(10, 14), dec!(5)), event(day(7, 10), dec!(5))],
             "0056" => vec![event(day(9, 15), dec!(1))],
-            "1101" => vec![event(
-                NaiveDate::from_ymd_opt(2025, 7, 1).expect("日期應合法"),
-                dec!(1),
-            )],
+            "1101" => vec![event(date(2025, 7, 1), dec!(1))],
             _ => Vec::new(),
         })
     }
 
-    async fn fetch_daily_closes(&self, symbol: &str, _since: NaiveDate) -> Result<Vec<DailyClose>> {
-        let closes: Vec<(NaiveDate, Decimal)> = match symbol {
+    async fn fetch_daily_closes(&self, symbol: &str, _since: Date) -> Result<Vec<DailyClose>> {
+        let closes: Vec<(Date, Decimal)> = match symbol {
             "2330" => vec![
                 (day(7, 9), dec!(100)),
                 (day(7, 10), dec!(96)),
@@ -53,7 +53,7 @@ impl DividendFillQuery for FakeFills {
                 (day(10, 20), dec!(36)),
             ],
             "1101" => {
-                let y2025 = |m, d| NaiveDate::from_ymd_opt(2025, m, d).expect("日期應合法");
+                let y2025 = |m, d| ymd(2025, m, d).expect("日期應合法");
                 vec![
                     (y2025(6, 30), dec!(20)),
                     (y2025(7, 1), dec!(19)),
@@ -153,7 +153,7 @@ async fn collect_counts_history_beyond_window() {
     assert_eq!((within[0].history.events, within[0].history.filled), (1, 1));
     assert_eq!(within[0].history.average_trading_days, Some(2.0));
 
-    let far = NaiveDate::from_ymd_opt(2031, 7, 2).expect("日期應合法");
+    let far = date(2031, 7, 2);
     let beyond = collect(&FakeFills, &holdings, far, 30)
         .await
         .expect("假倉儲不會失敗");

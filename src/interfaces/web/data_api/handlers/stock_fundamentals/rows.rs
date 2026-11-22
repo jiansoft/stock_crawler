@@ -1,6 +1,8 @@
 //! 基本面歷史 handlers 對應的資料庫列型別（月營收、財報、股利、估值）與轉成 API DTO 的規則。
 
 use super::*;
+use jiff::Timestamp;
+use jiff::civil::Date;
 
 /// 對應 `"Revenue"` 月營收列。
 ///
@@ -103,7 +105,8 @@ pub(super) struct StatementRow {
     /// 資產報酬率。
     return_on_assets: Option<Decimal>,
     /// 資料庫最後更新時間。
-    updated_time: Option<DateTime<Utc>>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Timestamp>")]
+    updated_time: Option<Timestamp>,
 }
 impl StatementRow {
     /// 將財報列轉成 API DTO，年度空字串映射為 `A` 並保留轉換錯誤上下文。
@@ -174,7 +177,8 @@ pub(super) struct DividendRow {
     /// 股票股利發放日（字串，可能是無效標記）。
     payable_date2: String,
     /// 資料庫最後更新時間。
-    updated_time: Option<DateTime<Utc>>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Timestamp>")]
+    updated_time: Option<Timestamp>,
 }
 impl DividendRow {
     /// 將股利列轉成 API DTO，清洗日期並以股票代號追蹤 NUMERIC 轉換失敗。
@@ -218,7 +222,8 @@ pub(super) struct ValuationRow {
     /// 股票代號。
     security_code: String,
     /// 估值日期。
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     /// 收盤價。
     closing_price: Decimal,
     /// 收盤價相對便宜價百分比。

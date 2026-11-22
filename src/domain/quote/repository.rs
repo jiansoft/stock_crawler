@@ -3,7 +3,7 @@ use crate::domain::quote::entity::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 報價領域之倉儲介面 (Repository Trait)。
@@ -27,13 +27,13 @@ pub trait QuoteRepository: Send + Sync {
     async fn insert_missing_daily_quotes(&self, quotes: &[DailyQuote]) -> Result<u64>;
 
     /// 依交易日查詢全市場的每日報價資料。
-    async fn fetch_quotes_by_date(&self, date: NaiveDate) -> Result<Vec<DailyQuote>>;
+    async fn fetch_quotes_by_date(&self, date: Date) -> Result<Vec<DailyQuote>>;
 
     /// 刪除指定交易日的所有每日報價。
     ///
     /// 注意：這是「單獨」的刪除操作。若目的是用新資料重建整日報價，
     /// 請改用 [`Self::replace_quotes_by_date`]，避免刪除後寫入失敗而留下資料缺口。
-    async fn delete_quotes_by_date(&self, date: NaiveDate) -> Result<()>;
+    async fn delete_quotes_by_date(&self, date: Date) -> Result<()>;
 
     /// 以「原子替換」的方式重建指定交易日的所有每日報價。
     ///
@@ -42,7 +42,7 @@ pub trait QuoteRepository: Send + Sync {
     /// 被關閉）則整批 rollback，原有資料完整保留，不會出現資料缺口。
     ///
     /// 回傳實際寫入的資料筆數。
-    async fn replace_quotes_by_date(&self, date: NaiveDate, quotes: &[DailyQuote]) -> Result<u64>;
+    async fn replace_quotes_by_date(&self, date: Date, quotes: &[DailyQuote]) -> Result<u64>;
 
     /// 依指定日期與股票，查詢並回填該股票的均線與年內高低點統計。
     async fn fill_moving_average(&self, quote: &mut DailyQuote) -> Result<()>;
@@ -56,27 +56,27 @@ pub trait QuoteRepository: Send + Sync {
     async fn recalculate_moving_averages(
         &self,
         stock_symbols: &[String],
-        from: NaiveDate,
+        from: Date,
     ) -> Result<u64>;
 
     /// 依日報價重建指定股票的歷史最高、最低價（股價淨值比極值不動），回傳變更筆數。
     async fn rebuild_quote_history_price_extremes(&self, stock_symbols: &[String]) -> Result<u64>;
 
     /// 查詢 `from`（含）之後有日報價的所有代號（含已下市者），依代號排序。
-    async fn fetch_symbols_quoted_since(&self, from: NaiveDate) -> Result<Vec<String>>;
+    async fn fetch_symbols_quoted_since(&self, from: Date) -> Result<Vec<String>>;
 
     /// 補上當日缺少的每日收盤數據。
     ///
     /// 回傳受影響的資料筆數。
-    async fn makeup_for_the_lack_daily_quotes(&self, date: NaiveDate) -> Result<u64>;
+    async fn makeup_for_the_lack_daily_quotes(&self, date: Date) -> Result<u64>;
 
     /// 查詢 `from`～`to` 每個交易日上市、上櫃各有幾檔有成交（成交量大於 0）。
     ///
     /// 沒有任何資料的日期不會出現在結果中。
     async fn fetch_market_traded_counts(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<Vec<MarketTradedCount>>;
 
     /// 取得指定股票在指定年月的最低、平均、最高收盤價統計。
@@ -108,7 +108,7 @@ pub trait QuoteRepository: Send + Sync {
     // === 股價分布統計 (DailyStockPriceStats) ===
 
     /// 產生或更新指定日期的股價分布統計資料。
-    async fn save_stock_price_stats(&self, date: NaiveDate) -> Result<()>;
+    async fn save_stock_price_stats(&self, date: Date) -> Result<()>;
 
     // === 歷史極值紀錄 (QuoteHistoryRecord) ===
 

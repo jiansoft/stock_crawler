@@ -1,5 +1,7 @@
 //! 開盤前載入交易所公告的漲跌停價（H46）的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -7,8 +9,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::*;
 use crate::core::util::http::mock_origin::with_origins;
 
-fn date(day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 11, day).expect("valid date")
+fn date(day: u32) -> Date {
+    ymd(2026, 11, day).expect("valid date")
 }
 
 fn range(down: i64, up: i64) -> PriceLimit {
@@ -86,7 +88,7 @@ async fn mount(server: &MockServer, route: &str, status: u16, body: serde_json::
 /// 用 1991 年的日期，不會蓋到今天盤中真正在用的限制。
 #[tokio::test]
 async fn execute_writes_today_limits_from_both_markets() {
-    let today = NaiveDate::from_ymd_opt(1991, 1, 3).expect("valid date");
+    let today = jiff::civil::date(1991, 1, 3);
     let twse = MockServer::start().await;
     let tpex = MockServer::start().await;
     mount(
@@ -117,7 +119,7 @@ async fn execute_writes_today_limits_from_both_markets() {
 /// 上市資料還是前一個交易日的：只寫無限制；上櫃失敗不影響上市。兩邊都失敗才回錯誤。
 #[tokio::test]
 async fn execute_keeps_unlimited_only_for_stale_listed_data() {
-    let today = NaiveDate::from_ymd_opt(1991, 1, 4).expect("valid date");
+    let today = jiff::civil::date(1991, 1, 4);
     let twse = MockServer::start().await;
     let tpex = MockServer::start().await;
     mount(

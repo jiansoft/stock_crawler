@@ -1,7 +1,9 @@
 //! 產業表現 endpoint 的資料庫語意整合測試。
 
+use crate::core::util::datetime::ymd;
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
@@ -15,9 +17,8 @@ const STOCKS: [(&str, i32, i64); 3] = [
 ];
 
 /// 固定的歷史交易日：區間起點、中間一天、資料日。
-fn days() -> [NaiveDate; 3] {
-    [(1989, 5, 31), (1989, 6, 1), (1989, 6, 2)]
-        .map(|(y, m, d)| NaiveDate::from_ymd_opt(y, m, d).expect("固定日期合法"))
+fn days() -> [Date; 3] {
+    [(1989, 5, 31), (1989, 6, 1), (1989, 6, 2)].map(|(y, m, d)| ymd(y, m, d).expect("固定日期合法"))
 }
 
 /// 刪除種入的日報價與股票主檔。
@@ -34,7 +35,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
 /// 種入日報價：`(日期, 代號, 收盤價, 漲跌幅 %, 成交金額)`。
 async fn insert_quote(
     pool: &sqlx::PgPool,
-    date: NaiveDate,
+    date: Date,
     symbol: &str,
     close: i64,
     change: i64,
@@ -45,7 +46,7 @@ async fn insert_quote(
                                       "PriceEarningRatio", "price-to-book_ratio")
            VALUES ($1, $2, $3, $4, $5, 12, 0)"#,
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .bind(symbol)
     .bind(Decimal::from(close))
     .bind(Decimal::from(change))

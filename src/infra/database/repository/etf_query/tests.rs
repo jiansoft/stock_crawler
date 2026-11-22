@@ -1,6 +1,8 @@
 //! ETF 專區查詢的 SQL 組裝與資料庫語意測試。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::*;
 use crate::domain::etf::query::EtfSort;
@@ -22,8 +24,8 @@ fn filter() -> EtfListFilter {
     }
 }
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 4, d).expect("日期應合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 4, d).expect("日期應合法")
 }
 
 #[test]
@@ -108,7 +110,7 @@ async fn list_and_detail_read_prepared_tables() {
          VALUES ($1, $2, -2.5, $2, -2.2)",
     )
     .bind(FAKE_A)
-    .bind(day(30))
+    .bind(day(30).to_sqlx())
     .execute(pool)
     .await
     .expect("寫入績效");
@@ -117,7 +119,7 @@ async fn list_and_detail_read_prepared_tables() {
          VALUES ($1, 1, $2, '', 'US TREASURY', 5.25)",
     )
     .bind(FAKE_A)
-    .bind(day(1))
+    .bind(day(1).to_sqlx())
     .execute(pool)
     .await
     .expect("寫入持股");
@@ -126,7 +128,7 @@ async fn list_and_detail_read_prepared_tables() {
          VALUES ($1, 'asset', '債券', $2, 99.1, 1), ($1, 'industry', '政府公債', $2, 98.0, 1)",
     )
     .bind(FAKE_A)
-    .bind(day(1))
+    .bind(day(1).to_sqlx())
     .execute(pool)
     .await
     .expect("寫入配置");
@@ -135,8 +137,8 @@ async fn list_and_detail_read_prepared_tables() {
          VALUES ($2, $1, 25.0, 24.9, -0.4), ($3, $1, NULL, 25.1, 0.1)",
     )
     .bind(FAKE_A)
-    .bind(day(29))
-    .bind(day(30))
+    .bind(day(29).to_sqlx())
+    .bind(day(30).to_sqlx())
     .execute(pool)
     .await
     .expect("寫入淨值");
@@ -144,7 +146,7 @@ async fn list_and_detail_read_prepared_tables() {
         "UPDATE etf_daily_nav SET estimated_nav = 25.05 WHERE stock_symbol = $1 AND date = $2",
     )
     .bind(FAKE_A)
-    .bind(day(30))
+    .bind(day(30).to_sqlx())
     .execute(pool)
     .await
     .expect("寫入預估淨值");

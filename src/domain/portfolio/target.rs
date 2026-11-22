@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 /// 配置維度。
@@ -142,7 +142,8 @@ pub struct PortfolioTargetRecord {
     /// 目標百分比（0.00 ~ 100.00）。
     pub target_percent: f64,
     /// 最後更新時間。
-    pub updated_time: DateTime<Utc>,
+    #[serde(with = "crate::core::util::datetime::rfc3339_utc")]
+    pub updated_time: Timestamp,
 }
 
 /// 目標配置的一個歷史版本：某次儲存前的整組配置。
@@ -153,7 +154,8 @@ pub struct PortfolioTargetRevision {
     /// 配置維度。
     pub dimension: TargetDimension,
     /// 那一組配置被取代（記成這一版）的時間。
-    pub saved_time: DateTime<Utc>,
+    #[serde(with = "crate::core::util::datetime::rfc3339_utc")]
+    pub saved_time: Timestamp,
     /// 那一組配置的 `(key, 目標百分比)`，依百分比由高到低；空的代表全現金。
     pub targets: Vec<(String, f64)>,
     /// 取代這一組的那次寫入是誰做的（舊資料為未標示）。

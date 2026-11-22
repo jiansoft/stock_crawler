@@ -1,7 +1,7 @@
 //! 收盤後寫入每日股價淨值比歷史分位（`daily_pb_percentile`：當天股價淨值比在自身近 5 年的百分位）。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::infra::database::repository::pb_percentile::PgPbPercentileRepository;
 
@@ -10,7 +10,7 @@ use crate::infra::database::repository::pb_percentile::PgPbPercentileRepository;
 /// # Errors
 ///
 /// 查詢或寫入失敗時回傳錯誤。
-pub async fn calculate_pb_percentiles(date: NaiveDate) -> Result<u64> {
+pub async fn calculate_pb_percentiles(date: Date) -> Result<u64> {
     calculate_pb_percentiles_between(date, date).await
 }
 
@@ -19,7 +19,7 @@ pub async fn calculate_pb_percentiles(date: NaiveDate) -> Result<u64> {
 /// # Errors
 ///
 /// 查詢或寫入失敗時回傳錯誤。
-pub async fn calculate_pb_percentiles_between(from: NaiveDate, to: NaiveDate) -> Result<u64> {
+pub async fn calculate_pb_percentiles_between(from: Date, to: Date) -> Result<u64> {
     PgPbPercentileRepository::new()
         .replace_range(from, to)
         .await

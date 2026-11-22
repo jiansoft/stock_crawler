@@ -94,8 +94,6 @@ async fn update_changed_writes_only_different_values() {
     ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
 )]
 async fn run_fetches_emerging_list_on_weekdays_only() {
-    use chrono::TimeZone;
-
     if database_unavailable("run_fetches_emerging_list_on_weekdays_only").await {
         return;
     }
@@ -112,14 +110,10 @@ async fn run_fetches_emerging_list_on_weekdays_only() {
         .await;
     let uri = server.uri();
     // 1999-03-10 是星期三、03-13 是星期六；只有平日那次會打到 mock（expect(1)）。
-    let weekday = Local
-        .with_ymd_and_hms(1999, 3, 10, 5, 0, 0)
-        .single()
-        .expect("固定時間合法");
-    let saturday = Local
-        .with_ymd_and_hms(1999, 3, 13, 5, 0, 0)
-        .single()
-        .expect("固定時間合法");
+    let weekday = TaipeiDateTime::from_datetime(jiff::civil::date(1999, 3, 10).at(5, 0, 0, 0))
+        .expect("合法時間");
+    let saturday = TaipeiDateTime::from_datetime(jiff::civil::date(1999, 3, 13).at(5, 0, 0, 0))
+        .expect("合法時間");
 
     let results = with_origins(&[("https://www.tpex.org.tw", &uri)], async {
         (run(weekday).await, run(saturday).await)

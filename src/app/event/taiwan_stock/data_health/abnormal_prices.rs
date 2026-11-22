@@ -6,10 +6,9 @@
 //! 被擋的價格不會進入快取（驗價已擋下），但某站一週錯很多次代表來源不穩，值得換掉或降低權重；
 //! 單站一週超過 [`SITE_WARN_COUNT`] 次就在週報標出來。只讀本機檔案，不碰資料庫。
 
+use jiff::civil::Date;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-
-use super::*;
 
 /// 收盤統計行的開頭（與 `infra::cache::abnormal_price` 的輸出一致）。
 const DAILY_PREFIX: &str = "今日過濾異常價格：";
@@ -30,8 +29,8 @@ pub(super) struct SiteWeek {
 /// 一檔股票本週被擋的日子與最近一天的採集價說明（例如 `452.96／昨收 900`；舊格式沒有）。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct SymbolWeek {
-    days: BTreeSet<NaiveDate>,
-    latest: Option<(NaiveDate, String)>,
+    days: BTreeSet<Date>,
+    latest: Option<(Date, String)>,
 }
 
 /// 本週的異常價格：依站點的次數與天數，與依股票的被擋天數。
@@ -51,8 +50,8 @@ struct DailySite {
 }
 
 /// 期間內（含起訖）每天 info 檔裡的異常價格統計，依站點與股票加總；目錄或檔案讀不到時略過。
-pub(super) fn weekly_abnormal_prices(dir: &Path, from: NaiveDate, to: NaiveDate) -> AbnormalWeek {
-    let mut daily: BTreeMap<(String, NaiveDate), usize> = BTreeMap::new();
+pub(super) fn weekly_abnormal_prices(dir: &Path, from: Date, to: Date) -> AbnormalWeek {
+    let mut daily: BTreeMap<(String, Date), usize> = BTreeMap::new();
     let mut symbols: BTreeMap<String, SymbolWeek> = BTreeMap::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return AbnormalWeek::default();
@@ -65,7 +64,7 @@ pub(super) fn weekly_abnormal_prices(dir: &Path, from: NaiveDate, to: NaiveDate)
         }
         let Some(date) = name
             .get(..10)
-            .and_then(|day| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+            .and_then(|day| Date::strptime("%Y-%m-%d", day).ok())
         else {
             continue;
         };

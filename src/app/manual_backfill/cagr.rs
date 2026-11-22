@@ -5,7 +5,7 @@
 //! - `test_backfill_cagr_period`：
 //!   依 [`MANUAL_CAGR_PERIOD`] 為既有的歷史基準日回填單一統計期間（新增期間後專用）。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::app::calculation::cagr;
 use crate::domain::performance::CagrPeriod;
@@ -42,8 +42,7 @@ async fn test_backfill_cagr_for_date() {
         None
     } else {
         Some(
-            NaiveDate::parse_from_str(MANUAL_CAGR_DATE, "%Y-%m-%d")
-                .expect("manual cagr date should be valid"),
+            Date::strptime("%Y-%m-%d", MANUAL_CAGR_DATE).expect("manual cagr date should be valid"),
         )
     };
 

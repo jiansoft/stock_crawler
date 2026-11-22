@@ -1,6 +1,9 @@
 //! HiStock 每日背景採集統計；逐列異常留待收盤彙總，避免單筆警告洗版。
 
-use chrono::{Local, NaiveDate, NaiveTime};
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::today;
+use jiff::civil;
+use jiff::civil::Date;
 use once_cell::sync::Lazy;
 use std::{collections::BTreeSet, sync::Mutex};
 
@@ -16,7 +19,7 @@ static DAILY: Lazy<Mutex<DailyStats>> = Lazy::new(|| Mutex::new(DailyStats::defa
 /// 一天的輪數、成功率、延遲分布與矛盾列統計。
 #[derive(Default)]
 struct DailyStats {
-    date: Option<NaiveDate>,
+    date: Option<Date>,
     rounds: u64,
     succeeded: u64,
     slow: u64,
@@ -29,12 +32,12 @@ struct DailyStats {
     symbols: BTreeSet<String>,
     /// 整批捨棄的輪數與第一輪、最後一輪的時間（開盤那段 HiStock 整頁不可用多久）。
     dirty_batches: u64,
-    dirty_window: Option<(NaiveTime, NaiveTime)>,
+    dirty_window: Option<(civil::Time, civil::Time)>,
 }
 
 impl DailyStats {
     /// 日期不同時換成新一天的資料，避免前一交易日混入。
-    fn on_day(&mut self, today: NaiveDate) {
+    fn on_day(&mut self, today: Date) {
         if self.date != Some(today) {
             *self = Self {
                 date: Some(today),
@@ -65,7 +68,7 @@ impl DailyStats {
     }
 
     /// 記一輪整批捨棄的時間。
-    fn dirty_batch(&mut self, at: NaiveTime) {
+    fn dirty_batch(&mut self, at: civil::Time) {
         self.dirty_batches += 1;
         self.dirty_window = Some(match self.dirty_window {
             Some((first, last)) => (first.min(at), last.max(at)),
@@ -90,8 +93,8 @@ impl DailyStats {
             .map(|(first, last)| {
                 format!(
                     "({}～{})",
-                    first.format("%H:%M:%S"),
-                    last.format("%H:%M:%S")
+                    first.strftime("%H:%M:%S"),
+                    last.strftime("%H:%M:%S")
                 )
             })
             .unwrap_or_default();
@@ -113,7 +116,7 @@ impl DailyStats {
 /// 背景迴圈完成一次請求後記錄，耗時包含正常重試。
 pub(super) fn record_cycle(succeeded: bool, elapsed_ms: u64) {
     if let Ok(mut stats) = DAILY.lock() {
-        stats.on_day(Local::now().date_naive());
+        stats.on_day(today());
         stats.cycle(succeeded, elapsed_ms);
     }
 }
@@ -121,7 +124,7 @@ pub(super) fn record_cycle(succeeded: bool, elapsed_ms: u64) {
 /// 篩選器記錄當輪所有矛盾列，包括整批捨棄；計數按列次累計，代號去重。
 pub(super) fn record_inconsistent<'a>(rows: impl Iterator<Item = (&'a str, Inconsistency)>) {
     if let Ok(mut stats) = DAILY.lock() {
-        stats.on_day(Local::now().date_naive());
+        stats.on_day(today());
         for (symbol, reason) in rows {
             stats.inconsistent_row(symbol, reason);
         }
@@ -131,8 +134,8 @@ pub(super) fn record_inconsistent<'a>(rows: impl Iterator<Item = (&'a str, Incon
 /// 背景迴圈遇到整批捨棄時記錄當下時間。
 pub(super) fn record_dirty_batch() {
     if let Ok(mut stats) = DAILY.lock() {
-        let now = Local::now();
-        stats.on_day(now.date_naive());
+        let now = TaipeiDateTime::now();
+        stats.on_day(now.date());
         stats.dirty_batch(now.time());
     }
 }

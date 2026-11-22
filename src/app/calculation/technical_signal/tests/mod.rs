@@ -1,3 +1,7 @@
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -7,8 +11,8 @@ use async_trait::async_trait;
 use super::*;
 use crate::domain::quote::technical::SignalKind;
 
-fn day(offset: u64) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 1, 1).expect("有效日期") + chrono::Days::new(offset)
+fn day(offset: u64) -> Date {
+    date(2026, 1, 1) + (offset as i64).days()
 }
 
 /// 連續 `len` 日、收盤依序為 `closes` 的日線，最後一日為 `day(len - 1)`。
@@ -26,7 +30,7 @@ fn bars(closes: &[f64]) -> Vec<PriceBar> {
 }
 
 /// `replace_indicator_signals` 的引數：來源、起日、迄日與訊號。
-type Replaced = (String, NaiveDate, NaiveDate, Vec<StockTechnicalSignal>);
+type Replaced = (String, Date, Date, Vec<StockTechnicalSignal>);
 
 /// 記錄寫入內容的假倉儲；`bars` 沒有的代號讀取時回錯誤，`adjustments_fail` 時讀事件回錯誤。
 #[derive(Default)]
@@ -38,7 +42,7 @@ struct FakeRepo {
     adjustments: HashMap<String, Vec<PriceAdjustment>>,
     adjustments_fail: bool,
     limits: Mutex<Vec<i64>>,
-    saved: Mutex<Option<(NaiveDate, Vec<StockTechnicalSignal>)>>,
+    saved: Mutex<Option<(Date, Vec<StockTechnicalSignal>)>>,
     /// `replace_indicator_signals` 收到的來源、起訖與訊號。
     replaced: Mutex<Option<Replaced>>,
 }
@@ -48,7 +52,7 @@ impl PriceBarRepository for FakeRepo {
     async fn fetch_price_bars(
         &self,
         stock_symbol: &str,
-        _until: Option<NaiveDate>,
+        _until: Option<Date>,
         limit: i64,
     ) -> Result<Vec<PriceBar>> {
         self.limits.lock().expect("測試鎖").push(limit);
@@ -61,7 +65,7 @@ impl PriceBarRepository for FakeRepo {
     async fn fetch_volumes(
         &self,
         stock_symbol: &str,
-        _until: Option<NaiveDate>,
+        _until: Option<Date>,
         _limit: i64,
     ) -> Result<Vec<VolumeBar>> {
         Ok(self.volumes.get(stock_symbol).cloned().unwrap_or_default())
@@ -80,28 +84,24 @@ impl PriceBarRepository for FakeRepo {
 
 #[async_trait]
 impl TechnicalSignalRepository for FakeRepo {
-    async fn fetch_signal_symbols(&self, _date: NaiveDate) -> Result<Vec<String>> {
+    async fn fetch_signal_symbols(&self, _date: Date) -> Result<Vec<String>> {
         Ok(self.symbols.clone())
     }
 
-    async fn replace_signals(
-        &self,
-        date: NaiveDate,
-        signals: &[StockTechnicalSignal],
-    ) -> Result<()> {
+    async fn replace_signals(&self, date: Date, signals: &[StockTechnicalSignal]) -> Result<()> {
         *self.saved.lock().expect("測試鎖") = Some((date, signals.to_vec()));
         Ok(())
     }
 
-    async fn fetch_traded_symbols(&self, _from: NaiveDate, _to: NaiveDate) -> Result<Vec<String>> {
+    async fn fetch_traded_symbols(&self, _from: Date, _to: Date) -> Result<Vec<String>> {
         Ok(self.symbols.clone())
     }
 
     async fn replace_indicator_signals(
         &self,
         indicator: &str,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         signals: &[StockTechnicalSignal],
     ) -> Result<()> {
         *self.replaced.lock().expect("測試鎖") =
@@ -191,8 +191,8 @@ async fn calculate_technical_signals_writes_table() {
         return;
     }
     let symbol = "79979SU";
-    let first = NaiveDate::from_ymd_opt(1990, 1, 1).expect("有效日期");
-    let last = first + chrono::Days::new(259);
+    let first = date(1990, 1, 1);
+    let last = first + 259.days();
     let cleanup = || async {
         for sql in [
             r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = $1"#,
@@ -220,7 +220,7 @@ async fn calculate_technical_signals_writes_table() {
            SELECT $2::date + n, $1, 100 + n, 101 + n, 99 + n FROM generate_series(0, 259) AS n"#,
     )
     .bind(symbol)
-    .bind(first)
+    .bind(first.to_sqlx())
     .execute(pool)
     .await
     .expect("寫入測試日線");
@@ -230,7 +230,7 @@ async fn calculate_technical_signals_writes_table() {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT indicator, kind FROM daily_technical_signal WHERE date = $1 AND stock_symbol = $2",
     )
-    .bind(last)
+    .bind(last.to_sqlx())
     .bind(symbol)
     .fetch_all(pool)
     .await

@@ -1,6 +1,7 @@
 //! 比對規則（同日、日期延後、日期未公布）的測試。
 
 use super::*;
+use jiff::civil::date;
 
 /// 同一天兩次配息時，交易所息值是合計：兩列都算已收錄，金額不動（2505 國揚 2020-08-18）。
 #[test]
@@ -131,10 +132,7 @@ fn a_row_already_matching_an_official_date_is_not_moved() {
     assert_eq!(plan.matched, 1);
     assert!(plan.updates.is_empty());
     assert_eq!(plan.missing.len(), 1);
-    assert_eq!(
-        plan.missing[0].ex_date,
-        NaiveDate::from_ymd_opt(2025, 11, 18).unwrap()
-    );
+    assert_eq!(plan.missing[0].ex_date, date(2025, 11, 18));
 }
 
 /// 日期還沒公布、金額相同的列補上日期。

@@ -5,13 +5,14 @@
 //! ＋ 0.3 × 近 120 日 ＋ 0.3 × 近 240 日（較重近一季），分數是加權報酬在上市櫃普通股（不含 ETF、特別股）中的
 //! 百分位（1–99）。市場、產業與代號只篩選輸出，分數與名次一律以全體計算。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
+use jiff::civil::Date;
 
 use super::{
     ensure_stock_exists, error_response, industry_error, market_id_for_stocks, parse_optional_date,
@@ -63,7 +64,7 @@ pub(crate) async fn relative_strength(Query(params): Query<RelativeStrengthParam
         return response;
     }
 
-    let until = date.unwrap_or_else(|| Local::now().date_naive());
+    let until = date.unwrap_or_else(today);
     match load_scores(until).await {
         Ok(Some((data_date, scored))) => {
             Json(build_response(data_date, &params, market_id, scored)).into_response()
@@ -78,8 +79,8 @@ pub(crate) async fn relative_strength(Query(params): Query<RelativeStrengthParam
 /// 最新一個交易日尚未完成 RS 計算時，使用之前最近的已留存交易日；沒有完整
 /// 資料回 `Ok(None)`。查詢失敗時回已組好的安全 500 回應，呼叫端直接回傳即可。
 pub(super) async fn load_scores(
-    until: NaiveDate,
-) -> Result<Option<(NaiveDate, Vec<ScoredStock>)>, Box<Response>> {
+    until: Date,
+) -> Result<Option<(Date, Vec<ScoredStock>)>, Box<Response>> {
     PgQuoteRepository::new()
         .fetch_stored_scored_universe(until)
         .await
@@ -88,7 +89,7 @@ pub(super) async fn load_scores(
 
 /// 依市場、產業、代號篩選已計分的全體，依 `order` 排序後取前 `limit` 筆。
 fn build_response(
-    data_date: NaiveDate,
+    data_date: Date,
     params: &RelativeStrengthParams,
     market_id: i32,
     scored: Vec<ScoredStock>,

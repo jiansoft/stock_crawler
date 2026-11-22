@@ -12,7 +12,7 @@
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use reqwest::StatusCode;
 use rust_decimal::Decimal;
 use serde_json::{Map, Value, json};
@@ -249,8 +249,8 @@ fn decimal(value: Option<&Value>) -> Option<Decimal> {
 }
 
 /// Yahoo 的日期是 `2026/10/17`。
-fn date(value: Option<&Value>) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(value?.as_str()?.trim(), "%Y/%m/%d").ok()
+fn date(value: Option<&Value>) -> Option<Date> {
+    Date::strptime("%Y/%m/%d", value?.as_str()?.trim()).ok()
 }
 
 #[cfg(test)]

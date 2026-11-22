@@ -1,13 +1,14 @@
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
 use super::*;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 4, d).expect("合法日期")
+fn day(d: u32) -> Date {
+    ymd(2026, 4, d).expect("合法日期")
 }
 
 /// 一筆日線列；開高低收以元為單位，`None` 表示缺值。
-fn row(date: NaiveDate, open: Option<i64>, close: Option<i64>) -> HistoricalQuoteRow {
+fn row(date: Date, open: Option<i64>, close: Option<i64>) -> HistoricalQuoteRow {
     HistoricalQuoteRow {
         date,
         opening_price: open.map(Decimal::from),
@@ -29,7 +30,7 @@ fn row(date: NaiveDate, open: Option<i64>, close: Option<i64>) -> HistoricalQuot
     }
 }
 
-fn cash_dividend(date: NaiveDate, cash: f64) -> PriceAdjustment {
+fn cash_dividend(date: Date, cash: f64) -> PriceAdjustment {
     PriceAdjustment {
         date,
         cash_dividend: cash,

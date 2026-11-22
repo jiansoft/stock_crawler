@@ -1,6 +1,6 @@
 //! 外資及陸資持股領域實體。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 持股通知的門檻：近 20 個交易日外資持股比率變化達 ±3 個百分點。
@@ -16,7 +16,7 @@ pub struct ForeignHolding {
     /// 股票代號
     pub stock_symbol: String,
     /// 資料日期（交易日）
-    pub date: NaiveDate,
+    pub date: Date,
     /// 發行股數
     pub issued_share: i64,
     /// 外資及陸資持有股數
@@ -52,7 +52,7 @@ pub struct HoldingForeignHoldingAlert {
     /// 股票名稱
     pub stock_name: String,
     /// 趨勢基準日（最新交易日）
-    pub date: NaiveDate,
+    pub date: Date,
     /// 基準日的外資持股比率（%）
     pub share_holding_percentage: Decimal,
     /// 近 5 個交易日持股比率變化（百分點）；歷史不足時為 None

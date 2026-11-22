@@ -4,13 +4,12 @@
 //! 連線池被長查詢占滿或資料庫主機忙時，取連線會先變慢、之後才逾時（10-29 15:00 收盤一秒內 8 筆）；
 //! 同一分鐘集中出現代表是同一批工作在搶連線。只讀本機檔案。
 
+use jiff::civil::Date;
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-
-use super::*;
 
 /// sqlx 取連線過慢的訊息。
 const SLOW_ACQUIRE_MESSAGE: &str = "time to acquire exceeded slow threshold";
@@ -50,7 +49,7 @@ pub(super) fn parse_acquire_line(line: &str) -> Option<(String, f64)> {
 }
 
 /// 期間內（含起訖）warn 檔裡的取連線過慢；目錄或檔案讀不到時略過。
-pub(super) fn weekly_slow_acquires(dir: &Path, from: NaiveDate, to: NaiveDate) -> SlowAcquires {
+pub(super) fn weekly_slow_acquires(dir: &Path, from: Date, to: Date) -> SlowAcquires {
     let mut acquires = SlowAcquires::default();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return acquires;
@@ -63,7 +62,7 @@ pub(super) fn weekly_slow_acquires(dir: &Path, from: NaiveDate, to: NaiveDate) -
         }
         let Some(date) = name
             .get(..10)
-            .and_then(|day| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+            .and_then(|day| Date::strptime("%Y-%m-%d", day).ok())
         else {
             continue;
         };

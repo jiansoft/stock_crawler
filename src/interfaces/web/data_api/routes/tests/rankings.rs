@@ -1,7 +1,8 @@
 //! 殖利率排行 endpoint 的資料庫語意整合測試。
 
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
@@ -46,7 +47,7 @@ async fn dividend_yield_ranking_excludes_unclassified_market() {
         return;
     };
     cleanup(pool).await;
-    let date = NaiveDate::from_ymd_opt(1989, 7, 3).expect("固定日期合法");
+    let date = date(1989, 7, 3);
     for (symbol, market_id, yield_percent) in STOCKS {
         sqlx::query(
             r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
@@ -61,7 +62,7 @@ async fn dividend_yield_ranking_excludes_unclassified_market() {
             r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice")
                VALUES ($1, $2, 100) RETURNING "Serial""#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbol)
         .fetch_one(pool)
         .await
@@ -79,7 +80,7 @@ async fn dividend_yield_ranking_excludes_unclassified_market() {
             "INSERT INTO yield_rank (date, security_code, daily_quotes_serial, dividend_serial, yield)
              VALUES ($1, $2, $3, $4, $5)",
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbol)
         .bind(quote_serial)
         .bind(dividend_serial)

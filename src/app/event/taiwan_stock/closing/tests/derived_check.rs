@@ -1,16 +1,18 @@
 //! 收盤衍生資料檢查的測試：缺漏判斷、只重算缺的那一步與報告內容。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 依序回傳筆數、記錄重算項目的假倉儲。
 struct DerivedRepo {
-    dates: Vec<NaiveDate>,
+    dates: Vec<Date>,
     counts: std::sync::Mutex<Vec<DerivedCounts>>,
-    got_base: std::sync::Mutex<Option<NaiveDate>>,
+    got_base: std::sync::Mutex<Option<Date>>,
 }
 
 impl DerivedRepo {
-    fn new(dates: Vec<NaiveDate>, counts: Vec<DerivedCounts>) -> Self {
+    fn new(dates: Vec<Date>, counts: Vec<DerivedCounts>) -> Self {
         Self {
             dates,
             counts: std::sync::Mutex::new(counts),
@@ -21,14 +23,14 @@ impl DerivedRepo {
 
 #[async_trait::async_trait]
 impl ForwardReturnRepository for DerivedRepo {
-    async fn fetch_trading_dates(&self, _until: NaiveDate, count: usize) -> Result<Vec<NaiveDate>> {
+    async fn fetch_trading_dates(&self, _until: Date, count: usize) -> Result<Vec<Date>> {
         Ok(self.dates.iter().copied().take(count).collect())
     }
 
     async fn upsert_forward_returns(
         &self,
-        _base: NaiveDate,
-        _end: NaiveDate,
+        _base: Date,
+        _end: Date,
         _horizon: usize,
     ) -> Result<u64> {
         Ok(0)
@@ -37,15 +39,15 @@ impl ForwardReturnRepository for DerivedRepo {
 
 #[async_trait::async_trait]
 impl DerivedDataQuery for DerivedRepo {
-    async fn count_derived(&self, _date: NaiveDate, base: NaiveDate) -> Result<DerivedCounts> {
+    async fn count_derived(&self, _date: Date, base: Date) -> Result<DerivedCounts> {
         *self.got_base.lock().expect("測試鎖") = Some(base);
         Ok(self.counts.lock().expect("測試鎖").remove(0))
     }
 }
 
 /// 由新到舊的連續交易日，第一個是 `end`。
-fn trading_days(end: NaiveDate, count: u64) -> Vec<NaiveDate> {
-    (0..count).map(|i| end - chrono::Days::new(i)).collect()
+fn trading_days(end: Date, count: u64) -> Vec<Date> {
+    (0..count).map(|i| end - (i as i64).days()).collect()
 }
 
 const COMPLETE: DerivedCounts = DerivedCounts {

@@ -10,9 +10,11 @@ mod sources;
 mod streak_store;
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
-pub(super) fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).unwrap()
+pub(super) fn day(d: u32) -> Date {
+    ymd(2026, 10, d).unwrap()
 }
 
 pub(super) fn flow(foreign: i64, trust: i64, dealer: i64) -> InstitutionalFlow {

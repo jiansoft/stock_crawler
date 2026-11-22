@@ -1,4 +1,6 @@
-use chrono::{DateTime, Local, NaiveDate};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 
 /// 每日個股報價領域實體 (Aggregate Root)。
@@ -11,7 +13,7 @@ pub struct DailyQuote {
     /// 股票代碼
     pub stock_symbol: String,
     /// 交易日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 開盤價
     pub opening_price: Decimal,
     /// 最高價
@@ -61,22 +63,22 @@ pub struct DailyQuote {
     /// 年內平均收盤價
     pub average_price_in_year: Decimal,
     /// 年內最高價對應日期
-    pub maximum_price_in_year_date_on: NaiveDate,
+    pub maximum_price_in_year_date_on: Date,
     /// 年內最低價對應日期
-    pub minimum_price_in_year_date_on: NaiveDate,
+    pub minimum_price_in_year_date_on: Date,
     /// 年、月、日（查詢用冗餘欄位）
     pub year: i32,
     pub month: i32,
     pub day: i32,
     /// 建立時間
-    pub create_time: DateTime<Local>,
+    pub create_time: TaipeiDateTime,
     /// 最後更新時間
-    pub record_time: DateTime<Local>,
+    pub record_time: TaipeiDateTime,
 }
 
 impl Default for DailyQuote {
     fn default() -> Self {
-        let ep = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        let ep = date(1970, 1, 1);
         DailyQuote {
             serial: 0,
             stock_symbol: String::new(),
@@ -110,8 +112,8 @@ impl Default for DailyQuote {
             year: 0,
             month: 0,
             day: 0,
-            create_time: Local::now(),
-            record_time: Local::now(),
+            create_time: TaipeiDateTime::now(),
+            record_time: TaipeiDateTime::now(),
         }
     }
 }
@@ -122,7 +124,7 @@ impl Default for DailyQuote {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LastDailyQuote {
     /// 報價日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 股票代號
     pub stock_symbol: String,
     /// 收盤價
@@ -133,7 +135,7 @@ pub struct LastDailyQuote {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DailyStockPriceStats {
     /// 統計日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 市場類型（0: 全部、2: TWSE、4: TPEx）
     pub stock_exchange_market_id: i32,
     /// 股價位階統計
@@ -160,8 +162,8 @@ pub struct DailyStockPriceStats {
     pub new_52_week_high: i32,
     pub new_52_week_low: i32,
     /// 建立與更新時間
-    pub created_at: DateTime<Local>,
-    pub updated_at: DateTime<Local>,
+    pub created_at: TaipeiDateTime,
+    pub updated_at: TaipeiDateTime,
 }
 
 impl DailyQuote {
@@ -196,13 +198,13 @@ impl DailyQuote {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QuoteHistoryRecord {
     /// 歷史最高價發生日期。
-    pub maximum_price_date_on: NaiveDate,
+    pub maximum_price_date_on: Date,
     /// 歷史最低價發生日期。
-    pub minimum_price_date_on: NaiveDate,
+    pub minimum_price_date_on: Date,
     /// 歷史最高股價淨值比發生日期。
-    pub maximum_price_to_book_ratio_date_on: NaiveDate,
+    pub maximum_price_to_book_ratio_date_on: Date,
     /// 歷史最低股價淨值比發生日期。
-    pub minimum_price_to_book_ratio_date_on: NaiveDate,
+    pub minimum_price_to_book_ratio_date_on: Date,
     /// 股票代號。
     pub security_code: String,
     /// 歷史最高價。
@@ -220,10 +222,10 @@ impl QuoteHistoryRecord {
     pub fn new(security_code: String) -> Self {
         QuoteHistoryRecord {
             security_code,
-            maximum_price_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
-            minimum_price_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
-            maximum_price_to_book_ratio_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
-            minimum_price_to_book_ratio_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            maximum_price_date_on: date(1970, 1, 1),
+            minimum_price_date_on: date(1970, 1, 1),
+            maximum_price_to_book_ratio_date_on: date(1970, 1, 1),
+            minimum_price_to_book_ratio_date_on: date(1970, 1, 1),
             maximum_price: Decimal::ZERO,
             minimum_price: Decimal::ZERO,
             maximum_price_to_book_ratio: Decimal::ZERO,
@@ -234,13 +236,13 @@ impl QuoteHistoryRecord {
 
 impl crate::core::util::map::Keyable for DailyQuote {
     fn key(&self) -> String {
-        format!("{}-{}", self.date.format("%Y%m%d"), self.stock_symbol)
+        format!("{}-{}", self.date.strftime("%Y%m%d"), self.stock_symbol)
     }
 
     fn key_with_prefix(&self) -> String {
         format!(
             "DailyQuote:{}-{}",
-            self.date.format("%Y%m%d"),
+            self.date.strftime("%Y%m%d"),
             self.stock_symbol
         )
     }
@@ -252,7 +254,7 @@ impl crate::core::util::map::Keyable for DailyQuote {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarketTradedCount {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 市場別（`stocks.stock_exchange_market_id`：2 上市、4 上櫃）。
     pub market_id: i32,
     /// 有成交的檔數。

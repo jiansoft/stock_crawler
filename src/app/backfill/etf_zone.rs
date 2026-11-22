@@ -11,10 +11,10 @@
 //! | [`backfill_nav_history`] | MoneyDJ 歷史淨值與市價 → 重建快照（補 MIS 上線前的日子） | 手動 |
 //! | [`backfill_nav_history_since`] | 同上，起日改為指定日期（例如 2019-01-01） | 手動 |
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use chrono::{DateTime, Local};
 use rand::RngExt;
 
 use crate::{
@@ -43,11 +43,11 @@ const PROFILE_BATCH: usize = 50;
 ///
 /// 淨值抓取或任一步驟的資料庫操作失敗時回傳錯誤。
 pub async fn execute_daily() -> Result<()> {
-    run_daily(Local::now()).await
+    run_daily(TaipeiDateTime::now()).await
 }
 
 /// [`execute_daily`] 的本體：`now` 落在週末時直接結束。
-async fn run_daily(now: DateTime<Local>) -> Result<()> {
+async fn run_daily(now: TaipeiDateTime) -> Result<()> {
     if now.is_weekend() {
         return Ok(());
     }
@@ -160,11 +160,11 @@ where
 ///
 /// 資料庫操作失敗時回傳錯誤。
 pub async fn refresh_snapshot() -> Result<()> {
-    refresh_snapshot_on(Local::now()).await
+    refresh_snapshot_on(TaipeiDateTime::now()).await
 }
 
 /// [`refresh_snapshot`] 的本體：`now` 落在週末時直接結束。
-async fn refresh_snapshot_on(now: DateTime<Local>) -> Result<()> {
+async fn refresh_snapshot_on(now: TaipeiDateTime) -> Result<()> {
     if now.is_weekend() {
         return Ok(());
     }

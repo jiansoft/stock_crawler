@@ -9,7 +9,8 @@
 //! 寫入一律是「只補空位」：既有資料不覆寫也不刪除，所以中途失敗直接重跑即可。
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use crate::{
     app::backfill::acl::QuoteAclMapper,
@@ -55,8 +56,8 @@ pub struct QuoteHistoryBackfillSummary {
 /// （寫入是「只補空位」，重跑不會產生重複資料）。
 pub async fn execute(
     stock_symbols: &[String],
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
 ) -> Result<QuoteHistoryBackfillSummary> {
     let repository = PgQuoteRepository::new();
     let fetcher = MarketRoutedMonthlyQuoteFetcher {
@@ -82,7 +83,7 @@ struct MarketRoutedMonthlyQuoteFetcher<'a> {
 
 #[async_trait::async_trait]
 impl MonthlyQuoteFetcher for MarketRoutedMonthlyQuoteFetcher<'_> {
-    async fn fetch(&self, stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+    async fn fetch(&self, stock_symbol: &str, month: Date) -> Result<Vec<DailyQuoteDto>> {
         if (self.market_of)(stock_symbol) == Some(StockExchangeMarket::OverTheCounter.serial()) {
             self.otc.fetch(stock_symbol, month).await
         } else {
@@ -109,8 +110,8 @@ pub async fn execute_with(
     fetcher: &dyn MonthlyQuoteFetcher,
     repository: &dyn QuoteRepository,
     stock_symbols: &[String],
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
 ) -> Result<QuoteHistoryBackfillSummary> {
     let months = months_between(from, to)?;
     let mut summary = QuoteHistoryBackfillSummary::default();
@@ -125,7 +126,7 @@ pub async fn execute_with(
                 Ok(value) => value,
                 Err(why) => {
                     summary.months_failed += 1;
-                    let month_text = month.format("%Y-%m");
+                    let month_text = month.strftime("%Y-%m");
                     tracing::warn!(
                         stock_symbol = stock_symbol,
                         month = %month_text,
@@ -157,7 +158,7 @@ pub async fn execute_with(
                 .with_context(|| {
                     format!(
                         "Failed to insert quotes for {stock_symbol} at {}",
-                        month.format("%Y-%m")
+                        month.strftime("%Y-%m")
                     )
                 })?;
             summary.rows_inserted += inserted;
@@ -165,7 +166,7 @@ pub async fn execute_with(
                 touched.push(stock_symbol.clone());
             }
 
-            let month_text = month.format("%Y-%m");
+            let month_text = month.strftime("%Y-%m");
             let fetched = dtos.len();
             tracing::info!(
                 stock_symbol = stock_symbol,
@@ -235,7 +236,7 @@ pub async fn fetch_etf_symbols() -> Result<Vec<String>> {
 }
 
 /// 列出 `from` 到 `to`（含）之間每個月的第一天。
-fn months_between(from: NaiveDate, to: NaiveDate) -> Result<Vec<NaiveDate>> {
+fn months_between(from: Date, to: Date) -> Result<Vec<Date>> {
     let start = first_day_of_month(from);
     let end = first_day_of_month(to);
     if start > end {
@@ -247,15 +248,16 @@ fn months_between(from: NaiveDate, to: NaiveDate) -> Result<Vec<NaiveDate>> {
     while cursor <= end {
         months.push(cursor);
         cursor = cursor
-            .checked_add_months(Months::new(1))
+            .checked_add(1.months())
+            .ok()
             .context("Failed to advance to the next month")?;
     }
     Ok(months)
 }
 
 /// 取得該日期所屬月份的第一天。
-fn first_day_of_month(date: NaiveDate) -> NaiveDate {
-    date.with_day(1).unwrap_or(date)
+fn first_day_of_month(date: Date) -> Date {
+    date.first_of_month()
 }
 
 #[cfg(test)]

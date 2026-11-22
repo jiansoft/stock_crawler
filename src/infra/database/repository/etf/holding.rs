@@ -2,7 +2,8 @@
 //! （`etf_holding_history`）與最新兩期的比對來源。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -39,7 +40,7 @@ async fn replace_allocation(
     tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
     symbol: &str,
     kind: &str,
-    as_of: NaiveDate,
+    as_of: Date,
     rows: &[EtfAllocationRecord],
 ) -> Result<u64> {
     sqlx::query("DELETE FROM etf_allocation WHERE stock_symbol = $1 AND kind = $2")
@@ -61,7 +62,7 @@ async fn replace_allocation(
         .bind(symbol)
         .bind(kind)
         .bind(&row.label)
-        .bind(as_of)
+        .bind(as_of.to_sqlx())
         .bind(row.weight)
         .bind(i16::try_from(index).unwrap_or(i16::MAX))
         .execute(&mut **tx)
@@ -89,7 +90,7 @@ pub(super) async fn replace_portfolio(portfolio: &EtfPortfolio) -> Result<u64> {
             )
             .bind(symbol)
             .bind(h.rank)
-            .bind(as_of)
+            .bind(as_of.to_sqlx())
             .bind(&h.holding_symbol)
             .bind(&h.holding_name)
             .bind(h.weight)
@@ -106,7 +107,7 @@ pub(super) async fn replace_portfolio(portfolio: &EtfPortfolio) -> Result<u64> {
                      weight = EXCLUDED.weight",
             )
             .bind(symbol)
-            .bind(as_of)
+            .bind(as_of.to_sqlx())
             .bind(h.rank)
             .bind(&h.holding_symbol)
             .bind(&h.holding_name)
@@ -137,15 +138,32 @@ pub(super) async fn replace_portfolio(portfolio: &EtfPortfolio) -> Result<u64> {
 
 pub(super) async fn holding_periods(
     stock_symbols: &[String],
-    recorded_since: NaiveDate,
+    recorded_since: Date,
 ) -> Result<Vec<EtfHoldingPeriods>> {
-    let rows: Vec<(String, i64, NaiveDate, i16, String, String, Decimal)> =
-        sqlx::query_as(HOLDING_PERIODS_SQL)
-            .bind(stock_symbols)
-            .bind(recorded_since)
-            .fetch_all(database::get_connection())
-            .await
-            .context("Failed to fetch ETF holding periods")?;
+    let rows: Vec<(String, i64, Date, i16, String, String, Decimal)> = sqlx::query_as::<
+        _,
+        (String, i64, jiff_sqlx::Date, i16, String, String, Decimal),
+    >(HOLDING_PERIODS_SQL)
+    .bind(stock_symbols)
+    .bind(recorded_since.to_sqlx())
+    .fetch_all(database::get_connection())
+    .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(|(c0, c1, c2, c3, c4, c5, c6)| {
+                (
+                    c0,
+                    c1,
+                    crate::infra::database::jiff_types::from_wire(c2),
+                    c3,
+                    c4,
+                    c5,
+                    c6,
+                )
+            })
+            .collect::<Vec<_>>()
+    })
+    .context("Failed to fetch ETF holding periods")?;
     let mut out: Vec<EtfHoldingPeriods> = Vec::new();
     for (symbol, rn, as_of, rank, holding_symbol, holding_name, weight) in rows {
         if out.last().is_none_or(|last| last.stock_symbol != symbol) {

@@ -1,6 +1,8 @@
 //! 條件選股回測 endpoint 整合測試：千張大戶持股比例變化只用換股日以前已公布的週。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff_sqlx::ToSqlx;
 
 /// 種入 1993 年的集保週資料（千張比例 %）。03-08 與換股日同一天（人為的陷阱週），換股日當天還看不到；
 ///
@@ -18,13 +20,13 @@ async fn seed_holders(pool: &sqlx::PgPool) {
         for (d, percent) in [(19, 2), (26, 2), (5, 3), (8, 3), (12, 3)]
             .into_iter()
             .zip(percents)
-            .map(|((d, m), percent)| (NaiveDate::from_ymd_opt(1993, m, d), percent))
+            .map(|((d, m), percent)| (ymd(1993, m, d), percent))
         {
             sqlx::query(
                 r#"INSERT INTO holder_distribution ("date", stock_symbol, major_holders, major_percent, total_holders)
                    VALUES ($1, $2, 10, $3, 100)"#,
             )
-            .bind(d.expect("固定日期合法"))
+            .bind(d.expect("固定日期合法").to_sqlx())
             .bind(symbol)
             .bind(Decimal::from(percent))
             .execute(pool)

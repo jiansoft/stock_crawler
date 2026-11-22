@@ -1,6 +1,7 @@
 //! ETF 清單與基本資料：上市櫃 ETF 清單、Yahoo 基本資料與推斷分類（`etf_profile`）。
 
 use anyhow::{Context, Result};
+use jiff_sqlx::ToSqlx;
 
 use crate::{domain::etf::EtfProfileRecord, infra::database};
 
@@ -70,7 +71,7 @@ pub(super) async fn save_profiles(profiles: &[EtfProfileRecord]) -> Result<u64> 
             .bind(&p.stock_symbol)
             .bind(&p.full_name)
             .bind(&p.issuer)
-            .bind(p.inception_date)
+            .bind(p.inception_date.map(ToSqlx::to_sqlx))
             .bind(&p.benchmark)
             .bind(&p.category)
             .bind(p.is_active)
@@ -85,7 +86,7 @@ pub(super) async fn save_profiles(profiles: &[EtfProfileRecord]) -> Result<u64> 
             .bind(&p.manager)
             .bind(&p.website)
             .bind(p.total_assets)
-            .bind(p.total_assets_date)
+            .bind(p.total_assets_date.map(ToSqlx::to_sqlx))
             .bind(&p.nav_return)
             .bind(&p.source)
             .execute(&mut *tx)

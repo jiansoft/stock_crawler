@@ -1,6 +1,7 @@
 //! `/market/signals` handler：全市場技術訊號選股的測試。
 
 use super::*;
+use jiff::civil::Date;
 
 fn row(symbol: &str, indicator: &str, kind: &str, trade_value: Option<i64>) -> SignalRow {
     SignalRow {
@@ -38,8 +39,8 @@ fn rows() -> Vec<SignalRow> {
     ]
 }
 
-fn date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 12).expect("有效日期")
+fn date() -> Date {
+    jiff::civil::date(2026, 10, 12)
 }
 
 /// 家數依來源、種類的對外順序統計，不受篩選影響；項目依成交值排序並套用 limit。

@@ -1,6 +1,7 @@
 //! 訊號績效的大盤基準：同市場全部股票各天期的平均報酬與上漲比例，可依年度拆分。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::HORIZONS;
 use super::rows::{BenchmarkMonthRow, BenchmarkRow};
@@ -17,8 +18,8 @@ pub(in crate::interfaces::web::data_api::handlers) struct Benchmark {
 
 /// 查詢大盤基準；`by_year` 時用 [`BENCHMARK_BY_YEAR_SQL`] 一次取整段與各年度。
 pub(in crate::interfaces::web::data_api::handlers) async fn fetch_benchmark(
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     market_id: i32,
     by_year: bool,
 ) -> Result<Benchmark, sqlx::Error> {
@@ -27,8 +28,8 @@ pub(in crate::interfaces::web::data_api::handlers) async fn fetch_benchmark(
     // 市場條件剪不掉（2026-10-28 正式庫實測三年依年度 custom 2.1 秒、generic 5.7 秒）。
     if !by_year {
         let total = sqlx::query_as(BENCHMARK_SQL)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .bind(market_id)
             .persistent(false)
             .fetch_one(pool)
@@ -36,8 +37,8 @@ pub(in crate::interfaces::web::data_api::handlers) async fn fetch_benchmark(
         return Ok(Benchmark { total, years: None });
     }
     let rows: Vec<BenchmarkRow> = sqlx::query_as(BENCHMARK_BY_YEAR_SQL)
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .bind(market_id)
         .persistent(false)
         .fetch_all(pool)
@@ -47,14 +48,14 @@ pub(in crate::interfaces::web::data_api::handlers) async fn fetch_benchmark(
 
 /// 期間內依基準日月份（跨年度合併）的大盤基準，由 1 月到 12 月；沒有資料的月份不列。
 pub(in crate::interfaces::web::data_api::handlers) async fn fetch_benchmark_by_month(
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     market_id: i32,
 ) -> Result<Vec<BenchmarkMonth>, sqlx::Error> {
     // 與 fetch_benchmark 相同，不快取 prepared statement，避免 generic plan 剪不掉市場條件。
     let rows: Vec<BenchmarkMonthRow> = sqlx::query_as(BENCHMARK_BY_MONTH_SQL)
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .bind(market_id)
         .persistent(false)
         .fetch_all(database::get_connection())

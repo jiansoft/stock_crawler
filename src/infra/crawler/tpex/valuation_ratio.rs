@@ -9,7 +9,7 @@
 //! 公司名稱尾端有全形空白補齊，沒有值時是 `N/A`。非交易日 `data` 為空。
 
 use anyhow::{Result, anyhow};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::{
@@ -37,11 +37,11 @@ struct PeQryTable {
 /// # Errors
 ///
 /// 請求失敗、回應不是預期的 JSON，或有資料卻缺少「股票代號」欄位時回傳錯誤。
-pub async fn visit(date: NaiveDate) -> Result<Vec<OfficialRatio>> {
+pub async fn visit(date: Date) -> Result<Vec<OfficialRatio>> {
     let url = format!(
         "https://{host}/www/zh-tw/afterTrading/peQryDate?date={date}&response=json",
         host = tpex::HOST,
-        date = date.format("%Y%%2F%m%%2F%d")
+        date = date.strftime("%Y%%2F%m%%2F%d")
     );
     let response = util::http::get_json::<PeQryResponse>(&url).await?;
     parse(response)

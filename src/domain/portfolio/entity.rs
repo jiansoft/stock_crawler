@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local};
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 
 /// 持股明細領域實體 (Domain Entity)。
@@ -31,7 +31,7 @@ pub struct StockOwnershipDetail {
     /// 累積已領取的總股利價值 (元)
     pub cumulate_dividends_total: Decimal,
     /// 建立時間 (持股入帳時間)
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
 }
 
 impl StockOwnershipDetail {
@@ -50,7 +50,7 @@ impl StockOwnershipDetail {
         cumulate_dividends_stock: Decimal,
         cumulate_dividends_stock_money: Decimal,
         cumulate_dividends_total: Decimal,
-        created_time: DateTime<Local>,
+        created_time: TaipeiDateTime,
     ) -> Self {
         Self {
             serial,
@@ -105,9 +105,9 @@ pub struct ReceivedDividend {
     /// 合計股利 (元)
     pub total: Decimal,
     /// 建立時間
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
 }
 
 /// 持股單筆股利發放項目明細之領域實體 (ReceivedDividendItem)。
@@ -132,7 +132,7 @@ pub struct ReceivedDividendItem {
     /// 合計股利 (元)
     pub total: Decimal,
     /// 建立時間
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
 }

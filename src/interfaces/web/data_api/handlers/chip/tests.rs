@@ -1,6 +1,7 @@
 //! `/stocks/{symbol}/chip` handler：單一股票的籌碼面的測試。
 
 use super::*;
+use jiff::civil::date;
 
 /// 連續天數只算到第一個缺資料、0 或反向為止。
 #[test]
@@ -30,7 +31,7 @@ fn streak_is_not_capped_by_the_detail_window() {
 #[test]
 fn daily_row_computes_changes_and_totals() {
     let row = ChipDailyRow {
-        date: NaiveDate::from_ymd_opt(2026, 10, 6).unwrap(),
+        date: date(2026, 10, 6),
         foreign_net: Some(-1_672_231),
         trust_net: Some(154_586),
         dealer_net: Some(395_975),
@@ -65,7 +66,7 @@ fn parse_brokers_reads_string_shares() {
 #[test]
 fn insider_summary_computes_pledge_percent() {
     let row = |shares: i64, pledged: i64| InsiderRow {
-        month: NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
+        month: date(2026, 8, 1),
         insiders: 18,
         shares: Decimal::from(shares),
         pledged: Decimal::from(pledged),

@@ -1,6 +1,6 @@
 //! 公司行動（股票分割、反向分割、減資）與其類型。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 公司行動的類型，對應資料表 `corporate_action.action_type` 的字串值。
@@ -68,7 +68,7 @@ pub struct CorporateAction {
     /// 股票代號。
     pub stock_symbol: String,
     /// 生效日：換發後恢復交易的第一個交易日（該日收盤價已是調整後價格）。
-    pub effective_date: NaiveDate,
+    pub effective_date: Date,
     /// 事件類型。不由 [`Self::share_ratio`] 反推，理由見 [`CorporateActionType`]。
     pub action_type: CorporateActionType,
     /// 股數變動比例：持有 1 股在事件後變成幾股。

@@ -1,6 +1,7 @@
 //! `/etfs`、`/etfs/{symbol}` 的資料庫語意整合測試：直接寫入預先整理好的 ETF 表再查詢。
 
 use axum::http::StatusCode;
+use jiff::civil::date;
 
 use super::support::{get, pool_or_skip};
 
@@ -89,7 +90,7 @@ async fn etf_endpoints_db_semantics() {
     assert_eq!(json["benchmark_kind"], "etf_proxy");
     assert_eq!(json["benchmark_symbol"], "0050");
     assert!(json["data_as_of"].is_null() && json["tracking_error_percent"].is_null());
-    let date = chrono::NaiveDate::from_ymd_opt(1987, 3, 5).unwrap();
+    let date = date(1987, 3, 5);
     crate::infra::database::repository::etf::tracking::save(&[(
         SYMBOL.into(),
         date,

@@ -1,8 +1,8 @@
+use jiff::civil::Date;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use chrono::{Local, NaiveDate};
 
 use crate::{
     app::backfill::{dividend, quote, quote_history, taiwan_stock_index},
@@ -25,7 +25,7 @@ use self::runner::*;
 ///
 /// Job 會呼叫 TWSE 與 TPEx 來源重抓上市櫃各股每日開高低收、成交量與本益比等
 /// 資料，抓取成功後才在單一資料庫 transaction 內刪除同日舊資料並寫入新資料。
-pub(crate) async fn start_daily_quotes_job(date: NaiveDate) -> Result<BackfillJob, StartJobError> {
+pub(crate) async fn start_daily_quotes_job(date: Date) -> Result<BackfillJob, StartJobError> {
     start_job(
         BACKFILL_STATE.clone(),
         "daily_quotes",
@@ -97,9 +97,7 @@ pub(crate) async fn start_annual_total_repair_job() -> Result<BackfillJob, Start
 /// 建立收盤彙總背景 job。
 ///
 /// Job 會呼叫 `closing::aggregate` 重新彙總指定交易日的收盤資料。
-pub(crate) async fn start_closing_aggregate_job(
-    date: NaiveDate,
-) -> Result<BackfillJob, StartJobError> {
+pub(crate) async fn start_closing_aggregate_job(date: Date) -> Result<BackfillJob, StartJobError> {
     start_job(
         BACKFILL_STATE.clone(),
         "closing_aggregate",
@@ -116,9 +114,7 @@ pub(crate) async fn start_closing_aggregate_job(
 ///
 /// Job 會依指定日期呼叫 TWSE 加權股價指數來源，從回傳的整月資料中篩選出
 /// 指定日期的那一筆，跳過快取檢查後 upsert `Index` 資料並更新快取。
-pub(crate) async fn start_taiwan_stock_index_job(
-    date: NaiveDate,
-) -> Result<BackfillJob, StartJobError> {
+pub(crate) async fn start_taiwan_stock_index_job(date: Date) -> Result<BackfillJob, StartJobError> {
     start_job(
         BACKFILL_STATE.clone(),
         "taiwan_stock_index",
@@ -188,8 +184,8 @@ pub(crate) async fn start_historical_dividends_job(
 /// 因請求量大，改用 [`LONG_RUNNING_JOB_TIMEOUT`]。
 pub(crate) async fn start_quote_history_job(
     stock_symbols: Vec<String>,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
 ) -> Result<BackfillJob, StartJobError> {
     // input 同時是查重鍵：同一組代號與區間不允許併行兩份。
     let input = format!(
@@ -199,8 +195,8 @@ pub(crate) async fn start_quote_history_job(
         } else {
             stock_symbols.join(",")
         },
-        from.format("%Y-%m"),
-        to.format("%Y-%m")
+        from.strftime("%Y-%m"),
+        to.strftime("%Y-%m")
     );
 
     start_job_with_timeout(
@@ -236,7 +232,7 @@ pub(crate) async fn start_quote_history_job(
 ///
 /// `date` 為 `None` 時採用資料庫中最新的交易日。計算只讀既有報價與股利，
 /// 不呼叫外部網站；同一 `(基準日, 股票, 期間)` 為冪等的 upsert 覆蓋。
-pub(crate) async fn start_cagr_job(date: Option<NaiveDate>) -> Result<BackfillJob, StartJobError> {
+pub(crate) async fn start_cagr_job(date: Option<Date>) -> Result<BackfillJob, StartJobError> {
     let input = date.map_or_else(|| "latest".to_string(), |value| value.to_string());
 
     start_job(

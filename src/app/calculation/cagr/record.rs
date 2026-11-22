@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::domain::performance::{
@@ -21,19 +21,19 @@ use crate::domain::performance::{
 pub(super) fn build_record(
     symbol: &str,
     period: CagrPeriod,
-    end_date: NaiveDate,
-    target: NaiveDate,
-    aligned_base_date: NaiveDate,
+    end_date: Date,
+    target: Date,
+    aligned_base_date: Date,
     base_price_on_aligned: Option<Decimal>,
-    grace_quote: Option<(NaiveDate, Decimal)>,
+    grace_quote: Option<(Date, Decimal)>,
     end_price: Option<Decimal>,
-    first_quote_date: Option<NaiveDate>,
+    first_quote_date: Option<Date>,
     events: &[DividendEvent],
     corporate_actions: &[CorporateAction],
-    reinvest_prices: &HashMap<NaiveDate, Decimal>,
+    reinvest_prices: &HashMap<Date, Decimal>,
     has_anomaly: bool,
 ) -> StockCagr {
-    let incomplete = |base_date: Option<NaiveDate>, base_price: Option<Decimal>| StockCagr {
+    let incomplete = |base_date: Option<Date>, base_price: Option<Decimal>| StockCagr {
         date: end_date,
         stock_symbol: symbol.to_string(),
         period,
@@ -65,7 +65,7 @@ pub(super) fn build_record(
         return incomplete(Some(base_date), Some(base_price));
     };
 
-    let lookup = |date: NaiveDate| reinvest_prices.get(&date).copied();
+    let lookup = |date: Date| reinvest_prices.get(&date).copied();
     let input = SimulationInput {
         principal: Decimal::from(PRINCIPAL),
         base_date,
@@ -95,7 +95,7 @@ pub(super) fn build_record(
         total: Some(result.total),
         reinvested: Some(result.reinvested),
         first_quote_date,
-        shortfall_days: Some((base_date - target).num_days().max(0) as i32),
+        shortfall_days: Some(i64::from((base_date - target).get_days()).max(0) as i32),
         data_complete: true,
         has_anomaly,
         dividend_events: result.dividend_events,
@@ -136,11 +136,11 @@ pub(super) fn group_events_by_symbol(
 /// 也不會生效。這讓查詢量從「所有股票 × 所有交易日」縮到實際需要的數萬筆。
 pub(super) fn collect_reinvest_pairs(
     events_by_symbol: &HashMap<String, Vec<DividendEvent>>,
-    from: NaiveDate,
-    to: NaiveDate,
-) -> Vec<(String, NaiveDate)> {
+    from: Date,
+    to: Date,
+) -> Vec<(String, Date)> {
     let mut pairs = Vec::new();
-    let mut seen: HashSet<(String, NaiveDate)> = HashSet::new();
+    let mut seen: HashSet<(String, Date)> = HashSet::new();
     for events in events_by_symbol.values() {
         for event in events {
             let Some(date) = event.ex_dividend_date_cash else {
@@ -160,9 +160,9 @@ pub(super) fn collect_reinvest_pairs(
 
 /// 將 (代號, 日期, 價格) 攤平結果整理成以代號為索引的查價表。
 pub(super) fn group_prices_by_symbol(
-    prices: Vec<(String, NaiveDate, Decimal)>,
-) -> HashMap<String, HashMap<NaiveDate, Decimal>> {
-    let mut grouped: HashMap<String, HashMap<NaiveDate, Decimal>> = HashMap::new();
+    prices: Vec<(String, Date, Decimal)>,
+) -> HashMap<String, HashMap<Date, Decimal>> {
+    let mut grouped: HashMap<String, HashMap<Date, Decimal>> = HashMap::new();
     for (symbol, date, price) in prices {
         grouped.entry(symbol).or_default().insert(date, price);
     }

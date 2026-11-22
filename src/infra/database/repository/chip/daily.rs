@@ -1,7 +1,8 @@
 //! `chip_daily`：三大法人買賣超、融資融券與連續買賣超天數。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::dedup_by_key;
 use crate::{
@@ -82,7 +83,7 @@ WHERE d."date" = x."date" AND d.stock_symbol = x.stock_symbol
       IS DISTINCT FROM (x.foreign_streak, x.trust_streak, x.dealer_streak, x.total_streak)
 "#;
 
-pub(super) async fn save_institutional(date: NaiveDate, flows: &[InstitutionalNet]) -> Result<u64> {
+pub(super) async fn save_institutional(date: Date, flows: &[InstitutionalNet]) -> Result<u64> {
     let flows = dedup_by_key(flows, |flow| flow.stock_symbol.clone());
     if flows.is_empty() {
         return Ok(0);
@@ -106,7 +107,7 @@ WHERE (chip_daily.foreign_net, chip_daily.trust_net, chip_daily.dealer_net)
   IS DISTINCT FROM (EXCLUDED.foreign_net, EXCLUDED.trust_net, EXCLUDED.dealer_net)
 "#;
     let result = sqlx::query(sql)
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(&symbols)
         .bind(&foreign)
         .bind(&trust)
@@ -117,7 +118,7 @@ WHERE (chip_daily.foreign_net, chip_daily.trust_net, chip_daily.dealer_net)
     Ok(result.rows_affected())
 }
 
-pub(super) async fn save_margin(date: NaiveDate, margins: &[MarginRecord]) -> Result<u64> {
+pub(super) async fn save_margin(date: Date, margins: &[MarginRecord]) -> Result<u64> {
     let margins = dedup_by_key(margins, |margin| margin.stock_symbol.clone());
     if margins.is_empty() {
         return Ok(0);
@@ -143,7 +144,7 @@ WHERE (chip_daily.margin_previous, chip_daily.margin_balance, chip_daily.short_p
   IS DISTINCT FROM (EXCLUDED.margin_previous, EXCLUDED.margin_balance, EXCLUDED.short_previous, EXCLUDED.short_balance)
 "#;
     let result = sqlx::query(sql)
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(&symbols)
         .bind(&margin_previous)
         .bind(&margin_balance)
@@ -155,10 +156,10 @@ WHERE (chip_daily.margin_previous, chip_daily.margin_balance, chip_daily.short_p
     Ok(result.rows_affected())
 }
 
-pub(super) async fn refresh_streaks(from: NaiveDate, to: NaiveDate) -> Result<u64> {
+pub(super) async fn refresh_streaks(from: Date, to: Date) -> Result<u64> {
     let result = sqlx::query(REFRESH_STREAKS_SQL)
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .execute(database::get_connection())
         .await
         .with_context(|| format!("Failed to refresh chip streaks of {from}~{to}"))?;

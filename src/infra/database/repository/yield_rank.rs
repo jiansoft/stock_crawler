@@ -2,7 +2,9 @@ use crate::domain::yield_rank::repository::YieldRankRepository;
 use crate::infra::database;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use chrono::{Datelike, NaiveDate, TimeDelta};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 /// 基於 PostgreSQL 的殖利率排行倉儲實現 (PgYieldRankRepository)。
 ///
@@ -25,13 +27,13 @@ impl Default for PgYieldRankRepository {
 #[async_trait]
 impl YieldRankRepository for PgYieldRankRepository {
     /// 依據指定交易日期，重新計算並重建所有股票的殖利率排行資料。
-    async fn rebuild_by_date(&self, date: NaiveDate) -> Result<()> {
+    async fn rebuild_by_date(&self, date: Date) -> Result<()> {
         // 取得資料庫交易以保證重建過程的原子性
         let mut tx = database::get_tx()
             .await
             .context("Failed to get_tx in PgYieldRankRepository::rebuild_by_date")?;
 
-        let month_ago = date - TimeDelta::try_days(30).unwrap();
+        let month_ago = date - 30.days();
         let sql = r#"
 INSERT INTO yield_rank (date, security_code, daily_quotes_serial, dividend_serial, yield)
 WITH latest_dividend AS (
@@ -81,8 +83,8 @@ ON CONFLICT (date, security_code) DO UPDATE SET
         // 執行批次計算重建 SQL
         let result = sqlx::query(sql)
             .bind(date.year() - 1)
-            .bind(date)
-            .bind(month_ago)
+            .bind(date.to_sqlx())
+            .bind(month_ago.to_sqlx())
             .execute(&mut *tx)
             .await;
 

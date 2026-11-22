@@ -1,11 +1,13 @@
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 mod cadence;
 mod entitlement;
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("有效日期")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("有效日期")
 }
 
 fn holding(symbol: &str, shares: i64, price: Option<Decimal>) -> Holding {
@@ -22,8 +24,8 @@ fn event(
     year_of_dividend: i32,
     quarter: &str,
     cash: Decimal,
-    ex_date: Option<NaiveDate>,
-    payable_date: Option<NaiveDate>,
+    ex_date: Option<Date>,
+    payable_date: Option<Date>,
 ) -> DividendEvent {
     DividendEvent {
         stock_symbol: symbol.to_owned(),
@@ -88,7 +90,7 @@ fn announced_and_estimated_without_double_counting() {
         12,
     );
 
-    let summary: Vec<(NaiveDate, Decimal, Basis)> = forecast
+    let summary: Vec<(Date, Decimal, Basis)> = forecast
         .items
         .iter()
         .map(|item| (item.pay_date, item.amount, item.basis))
@@ -185,7 +187,7 @@ fn duplicate_rows_and_empty_holdings() {
     assert_eq!(empty.forward_yield_percent, None);
 }
 
-fn summary(forecast: &Forecast) -> Vec<(NaiveDate, NaiveDate, Decimal, Basis)> {
+fn summary(forecast: &Forecast) -> Vec<(Date, Date, Decimal, Basis)> {
     forecast
         .items
         .iter()

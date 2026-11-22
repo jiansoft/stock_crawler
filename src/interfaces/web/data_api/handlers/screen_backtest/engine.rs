@@ -1,8 +1,10 @@
 //! 回測引擎：驗證條件、查每期候選股、決定持股與扣交易成本；回測與偏移、前緣、滾動前推、歸因各端點共用。
 
+use jiff::ToSpan;
+use jiff_sqlx::ToSqlx;
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::current::split_current;
 use super::portfolio::FEE_RATE;
@@ -65,9 +67,9 @@ pub(super) fn cost_fee_discount(fee_discount: f64, slippage_bps: u16) -> f64 {
 /// `/stocks/screen/backtest/offsets` 共用。
 pub(super) struct Backtest<'a> {
     pub(super) params: &'a ScreenBacktestParams,
-    pub(super) from: NaiveDate,
+    pub(super) from: Date,
     /// 迄日（含）之前最近一個有相對強度的交易日。
-    pub(super) to: NaiveDate,
+    pub(super) to: Date,
     pub(super) market: &'a str,
     pub(super) market_id: i32,
     pub(super) hold_days: u16,
@@ -88,7 +90,7 @@ pub(super) struct Backtest<'a> {
     /// 單檔權重上限（%）；未設定為不限。
     pub(super) max_weight: Option<u8>,
     /// 樣本內外分割日（只用於偏移穩健度與前緣）。
-    pub(super) split: Option<NaiveDate>,
+    pub(super) split: Option<Date>,
     /// 排除的產業名稱；空的為不排除。
     pub(super) excluded_industries: Vec<String>,
     /// 期間停損規則。
@@ -205,8 +207,8 @@ impl<'a> Backtest<'a> {
         let with_chip = self.with_chip();
         // SQL 只由本模組常數或測試中的等價改寫傳入；使用者條件仍全部綁定。
         let mut query = sqlx::query_as(sqlx::AssertSqlSafe(sql))
-            .bind(self.from)
-            .bind(self.to)
+            .bind(self.from.to_sqlx())
+            .bind(self.to.to_sqlx())
             .bind(self.market_id)
             .bind(i32::from(self.hold_days))
             .bind(i64::from(if params.max_per_industry.is_some() {
@@ -316,7 +318,7 @@ impl<'a> Backtest<'a> {
             .last()
             .filter(|row| row.pending)
             .map(|row| row.elapsed_days);
-        let liquidity_starts: HashMap<NaiveDate, NaiveDate> = candidates
+        let liquidity_starts: HashMap<Date, Date> = candidates
             .iter()
             .map(|row| (row.date, row.liquidity_start))
             .collect();
@@ -334,7 +336,7 @@ impl<'a> Backtest<'a> {
         let mut bars = match self.execution {
             ExecutionPrice::Close if self.stops.is_active() => Some(
                 self.bars
-                    .load(&rows, self.from - chrono::Duration::days(30), self.to)
+                    .load(&rows, self.from - 30.days(), self.to)
                     .await?,
             ),
             _ if self.daily_path || self.stops.is_active() => {

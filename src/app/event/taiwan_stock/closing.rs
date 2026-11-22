@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::{
     app::backfill,
     app::calculation,
@@ -13,7 +14,7 @@ use crate::{
     infra::database::repository::{quote::PgQuoteRepository, yield_rank::PgYieldRankRepository},
 };
 use anyhow::Result;
-use chrono::{DateTime, Datelike, Local, NaiveDate};
+use jiff::civil::Date;
 use scopeguard::defer;
 
 mod after_hours;
@@ -33,12 +34,12 @@ pub async fn execute() -> Result<()> {
     defer! {
        tracing::info!("台股收盤事件結束");
     }
-    run(Local::now()).await
+    run(TaipeiDateTime::now()).await
 }
 
 /// [`execute`] 的本體：`now` 決定收盤匯總的日期與是否休市。
-async fn run(now: DateTime<Local>) -> Result<()> {
-    let current_date: NaiveDate = now.date_naive();
+async fn run(now: TaipeiDateTime) -> Result<()> {
+    let current_date: Date = now.date();
     if is_market_closed(now).await {
         tracing::info!("{current_date} 休市，略過收盤匯總");
         return Ok(());
@@ -79,12 +80,12 @@ async fn run(now: DateTime<Local>) -> Result<()> {
 ///
 /// 查詢有成交檔數或衍生資料筆數失敗時回傳錯誤；重跑失敗只告警，不回傳錯誤。
 pub async fn ensure_complete() -> Result<()> {
-    ensure_complete_on(Local::now()).await
+    ensure_complete_on(TaipeiDateTime::now()).await
 }
 
 /// [`ensure_complete`] 的本體：`now` 決定要檢查的日期與是否休市。
-async fn ensure_complete_on(now: DateTime<Local>) -> Result<()> {
-    let date = now.date_naive();
+async fn ensure_complete_on(now: TaipeiDateTime) -> Result<()> {
+    let date = now.date();
     if is_market_closed(now).await {
         return Ok(());
     }
@@ -101,13 +102,13 @@ async fn ensure_complete_on(now: DateTime<Local>) -> Result<()> {
 /// 休市日 TWSE `MI_INDEX` 只回 `{"stat":"很抱歉，沒有符合條件的資料!"}`，缺少 `tables`
 /// 讓解析失敗，每逢週末、假日都記一筆 error（2026-09-25～28 連續四天）。
 /// 休市日清單抓取失敗時視為開市，交給 [`aggregate`] 原本「0 筆即略過」的邏輯處理。
-async fn is_market_closed(now: DateTime<Local>) -> bool {
+async fn is_market_closed(now: TaipeiDateTime) -> bool {
     if now.is_weekend() {
         return true;
     }
 
-    let today = now.date_naive();
-    match twse::holiday_schedule::visit(today.year()).await {
+    let today = now.date();
+    match twse::holiday_schedule::visit(i32::from(today.year())).await {
         Ok(holidays) => holidays.iter().any(|holiday| holiday.date == today),
         Err(why) => {
             tracing::warn!(
@@ -128,7 +129,7 @@ async fn is_market_closed(now: DateTime<Local>) -> bool {
 /// # Errors
 ///
 /// 任一步驟失敗時會回傳錯誤，呼叫端可依情境記錄或中止後續流程。
-pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
+pub(crate) async fn aggregate(date: Date) -> Result<()> {
     //抓取上市櫃公司每日收盤資訊
     let daily_quote_count = backfill::quote::execute(date).await?;
     tracing::info!("抓取上市櫃收盤數據結束:{}", daily_quote_count);
@@ -209,7 +210,7 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
         .dispatch_async(vec![
             crate::domain::events::DomainEvent::MoneyFlowRecalculated {
                 date,
-                occurred_at: chrono::Local::now(),
+                occurred_at: TaipeiDateTime::now(),
             },
         ])
         .await;

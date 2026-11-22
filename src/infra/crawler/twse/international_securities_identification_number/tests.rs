@@ -1,6 +1,7 @@
 //! TWSE ISIN 名冊頁的解析與抓取測試。
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
 
 /// 最小 HTML fixture：含一個類別標頭列與兩筆資料列（6 欄、5 欄各一）。
 const FIXTURE_HTML: &str = r#"<html><body>
@@ -141,7 +142,7 @@ mod mock_source {
     async fn visit_entries_skip_weekends_or_parse_the_page() {
         let server = listed_page().await;
         let uri = server.uri();
-        let weekend = Local::now().is_weekend();
+        let weekend = TaipeiDateTime::now().is_weekend();
 
         let (items, symbols) = with_origins(&[(ISIN, &uri)], async {
             (
@@ -160,19 +161,13 @@ mod mock_source {
     /// 兩個入口的本體：平日抓 mock 頁面解析，週末不打來源直接回空。
     #[tokio::test]
     async fn entries_parse_on_weekdays_and_skip_weekends() {
-        use chrono::TimeZone;
-
         let server = listed_page().await;
         let uri = server.uri();
         // 1999-03-10 是星期三、03-13 是星期六。
-        let weekday = Local
-            .with_ymd_and_hms(1999, 3, 10, 5, 0, 0)
-            .single()
-            .expect("固定時間合法");
-        let saturday = Local
-            .with_ymd_and_hms(1999, 3, 13, 5, 0, 0)
-            .single()
-            .expect("固定時間合法");
+        let weekday = TaipeiDateTime::from_datetime(jiff::civil::date(1999, 3, 10).at(5, 0, 0, 0))
+            .expect("合法時間");
+        let saturday = TaipeiDateTime::from_datetime(jiff::civil::date(1999, 3, 13).at(5, 0, 0, 0))
+            .expect("合法時間");
         let listed = StockExchangeMarket::Listed;
 
         let counts = with_origins(&[(ISIN, &uri)], async {

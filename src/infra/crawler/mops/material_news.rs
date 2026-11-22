@@ -13,7 +13,8 @@
 //! 更名、面額變更這類公告在「公告期間」內每天重發，去重交給呼叫端。
 
 use anyhow::Result;
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use jiff::civil;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::core::util::{self, datetime};
@@ -31,7 +32,7 @@ pub struct MaterialNews {
     /// 公司名稱。
     pub company_name: String,
     /// 發言時間。
-    pub spoken_at: NaiveDateTime,
+    pub spoken_at: civil::DateTime,
     /// 主旨。
     pub subject: String,
     /// 符合條款（例如「第51款」）。
@@ -141,7 +142,7 @@ fn build(
     Some(MaterialNews {
         stock_symbol,
         company_name: name.trim().to_string(),
-        spoken_at: NaiveDateTime::new(parse_date(date)?, parse_time(time)?),
+        spoken_at: parse_date(date)?.to_datetime(parse_time(time)?),
         subject: normalize(&subject),
         clause: clause.trim().to_string(),
         description: description.replace("\r\n", "\n").trim().to_string(),
@@ -149,17 +150,17 @@ fn build(
 }
 
 /// 民國日期 `1151005` → 2026-10-05。
-fn parse_date(raw: &str) -> Option<NaiveDate> {
+fn parse_date(raw: &str) -> Option<Date> {
     datetime::parse_taiwan_date_short(raw.trim())
 }
 
 /// `70003` → 07:00:03（左補零成六碼）。
-fn parse_time(raw: &str) -> Option<NaiveTime> {
+fn parse_time(raw: &str) -> Option<civil::Time> {
     let raw = raw.trim();
     if raw.is_empty() || raw.len() > 6 || !raw.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
-    NaiveTime::parse_from_str(&format!("{raw:0>6}"), "%H%M%S").ok()
+    civil::Time::strptime("%H%M%S", format!("{raw:0>6}")).ok()
 }
 
 /// 主旨的換行是排版用的，接成一行。

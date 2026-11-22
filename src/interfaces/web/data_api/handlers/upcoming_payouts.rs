@@ -3,13 +3,15 @@
 //! 查詢與依發放日拆分在 [`crate::domain::portfolio::payout`] 與 `PgPortfolioRepository`
 //! （入帳通知共用）；這裡只驗證參數、合併會員並轉成 JSON。
 
+use crate::core::util::datetime::today;
 use axum::{
     Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Days, Local, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
@@ -42,8 +44,8 @@ pub(crate) async fn upcoming_payouts(
     if !(1..=90).contains(&days) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "days 必須介於 1 至 90");
     }
-    let today = Local::now().date_naive();
-    let to = today + Days::new(u64::from(days) - 1);
+    let today = today();
+    let to = today + (i64::from(days) - 1).days();
 
     let allocations = match PgPortfolioRepository::new()
         .fetch_payout_allocations(&view, today, to, today)
@@ -59,8 +61,8 @@ pub(crate) async fn upcoming_payouts(
 /// 組出回應：入帳已依發放日、代號排序並合併會員，金額轉成 JSON 用的小數。
 pub(super) fn build_response(
     member_id: i64,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     payouts: &[DividendPayout],
 ) -> UpcomingPayoutsResponse {
     UpcomingPayoutsResponse {

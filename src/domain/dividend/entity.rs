@@ -1,4 +1,5 @@
-use chrono::{DateTime, Local, NaiveDate};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 股息發放日程之領域實體 (Aggregate Root)。
@@ -46,31 +47,31 @@ pub struct Dividend {
     /// 股票股利發放日
     pub payable_date_stock: String,
     /// 建立時間
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
 }
 
 impl Dividend {
     /// 判斷持有日是否符合除息日資格。
     ///
     /// 規則：持有日必須嚴格早於除息日，才能領取現金股利。
-    pub fn is_eligible_for_cash(&self, holding_date: NaiveDate) -> bool {
+    pub fn is_eligible_for_cash(&self, holding_date: Date) -> bool {
         self.is_eligible_for_date(holding_date, &self.ex_dividend_date_cash)
     }
 
     /// 判斷持有日是否符合除權日資格。
     ///
     /// 規則：持有日必須嚴格早於除權日，才能領取股票股利。
-    pub fn is_eligible_for_stock(&self, holding_date: NaiveDate) -> bool {
+    pub fn is_eligible_for_stock(&self, holding_date: Date) -> bool {
         self.is_eligible_for_date(holding_date, &self.ex_dividend_date_stock)
     }
 
     /// 核心判定輔助方法。
     ///
     /// 比對持有日與公告的除權息日。若日期無效、未公佈或格式不合，回傳不可領取。
-    fn is_eligible_for_date(&self, holding_date: NaiveDate, ex_date_str: &str) -> bool {
-        let Ok(ex_date) = NaiveDate::parse_from_str(ex_date_str, "%Y-%m-%d") else {
+    fn is_eligible_for_date(&self, holding_date: Date, ex_date_str: &str) -> bool {
+        let Ok(ex_date) = Date::strptime("%Y-%m-%d", ex_date_str) else {
             return false;
         };
         holding_date < ex_date
@@ -82,7 +83,7 @@ impl Dividend {
     /// 每股配股 1 元等同於配發 0.1 股 (配股率 = 股利 / 10)。
     pub fn calculate_payout(
         &self,
-        holding_date: NaiveDate,
+        holding_date: Date,
         share_quantity: Decimal,
     ) -> (Decimal, Decimal, Decimal, Decimal) {
         use rust_decimal_macros::dec;

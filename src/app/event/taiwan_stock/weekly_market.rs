@@ -47,10 +47,11 @@ mod message;
 mod strategy;
 mod upcoming_dividend;
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 
 use self::{
     allocation::{AllocationSection, allocation_sections},
@@ -118,7 +119,7 @@ struct MarketWeek {
 }
 
 impl MarketWeek {
-    fn data_date(&self, etfs: Option<&EtfWeekSection>) -> Option<NaiveDate> {
+    fn data_date(&self, etfs: Option<&EtfWeekSection>) -> Option<Date> {
         week_data_date(
             self.market.as_ref(),
             self.industries.as_ref(),
@@ -142,7 +143,7 @@ struct HoldingSources<'a, Q, P> {
 ///
 /// 目前不會回傳錯誤；各段失敗只記錄警告並略過。
 pub async fn execute() -> Result<()> {
-    let date = Local::now().date_naive();
+    let date = today();
     let strategy = strategy_section().await;
     // 市場段的 ETF 只用全市場淨申購：不帶任何持有代號。
     let market_etfs = etf_section(&PgEtfRepository::new(), &BTreeSet::new(), date)
@@ -193,7 +194,7 @@ struct HoldingData {
 }
 
 /// 依收件者範圍查持股資料；查不到持股時回錯誤（這個範圍不發），其餘各段失敗只少那一段。
-async fn load_holding_data(view: &HoldingView, date: NaiveDate) -> Result<HoldingData> {
+async fn load_holding_data(view: &HoldingView, date: Date) -> Result<HoldingData> {
     let symbols = holdings::common_stock_holdings(view)
         .await
         .context("fetch holdings for weekly holdings summary failed")?;
@@ -239,7 +240,7 @@ async fn market_week(
     chip: &impl ChipFlowQuery,
     index: &(impl IndexCloseQuery + BreadthQuery),
     valuation: &impl MarketValuationRepository,
-    date: NaiveDate,
+    date: Date,
 ) -> MarketWeek {
     let mut market = regime_section(index, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取加權指數失敗: {why:#}");
@@ -325,8 +326,8 @@ fn market_message(
 async fn holdings_message<Q, P>(
     sources: &HoldingSources<'_, Q, P>,
     week: &MarketWeek,
-    data_date: Option<NaiveDate>,
-    date: NaiveDate,
+    data_date: Option<Date>,
+    date: Date,
     data: &HoldingData,
 ) -> Option<String>
 where
@@ -410,7 +411,7 @@ async fn run(
     index: &(impl IndexCloseQuery + BreadthQuery),
     valuation: &impl MarketValuationRepository,
     portfolio: &(impl HoldingFundamentalsQuery + HoldingBrokerQuery),
-    date: NaiveDate,
+    date: Date,
     symbols: &BTreeSet<String>,
     strategy: Option<&StrategySection>,
     fills: &[HoldingFill],

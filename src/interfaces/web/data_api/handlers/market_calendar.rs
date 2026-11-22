@@ -1,13 +1,16 @@
 //! `/market/dividend-calendar` handler、其 UNION ALL 參數化 SQL、
 //! 查詢區間解析與對應的資料庫列型別。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::dividend_fill::summary_dto;
@@ -49,7 +52,7 @@ pub(crate) async fn dividend_calendar(Query(params): Query<DividendCalendarParam
     };
     // 預設區間由 handler 明確帶入「台北本地今天」計算，與 screen_stocks
     // 相同；純函式 `resolve_calendar_range` 可用任意日期做 deterministic 測試。
-    let (from, to) = match resolve_calendar_range(from, to, Local::now().date_naive()) {
+    let (from, to) = match resolve_calendar_range(from, to, today()) {
         Ok(range) => range,
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
@@ -73,8 +76,8 @@ pub(crate) async fn dividend_calendar(Query(params): Query<DividendCalendarParam
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "limit 必須介於 1 至 200");
     }
     let rows: Result<Vec<CalendarEventRow>, _> = sqlx::query_as(DIVIDEND_CALENDAR_SQL)
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .bind(event_type)
         .bind(i64::from(limit))
         .fetch_all(database::get_connection())
@@ -118,7 +121,7 @@ async fn load_fill_hints(rows: &[CalendarEventRow]) -> FillHints {
     if symbols.is_empty() {
         return FillHints::default();
     }
-    FillHints::load(&symbols, Local::now().date_naive()).await
+    FillHints::load(&symbols, today()).await
 }
 
 /// 一筆事件的歷年填息與同組基準：只有除息／除權事件有；同組基準只在除息事件且沒有自身紀錄時附上，
@@ -214,17 +217,18 @@ LIMIT $4
 /// 區間顛倒、超過 92 天或日期加法溢位（極端如 `9999-12-31`）時回傳可直接
 /// 作為 422 訊息的固定字串。
 fn resolve_calendar_range(
-    from: Option<NaiveDate>,
-    to: Option<NaiveDate>,
-    today: NaiveDate,
-) -> Result<(NaiveDate, NaiveDate), &'static str> {
+    from: Option<Date>,
+    to: Option<Date>,
+    today: Date,
+) -> Result<(Date, Date), &'static str> {
     let from = from.unwrap_or(today);
     let to = match to {
         Some(value) => value,
         // `checked_add_days` 避免 `9999-12-31 + 30 天` 這類溢位 panic；
         // 溢位視為參數錯誤而非伺服器錯誤。
         None => from
-            .checked_add_days(chrono::Days::new(30))
+            .checked_add(30.days())
+            .ok()
             .ok_or("日期超出可查詢範圍")?,
     };
     if from > to {
@@ -232,7 +236,7 @@ fn resolve_calendar_range(
     }
     // `num_days` 以「兩端相減」計算：92 天上限指起迄差值，區間本身含首尾
     // 共 93 個日曆日（一季再加緩衝，涵蓋單一季度的所有除權息事件）。
-    if (to - from).num_days() > 92 {
+    if i64::from((to - from).get_days()) > 92 {
         return Err("查詢區間不可超過 92 天");
     }
     Ok((from, to))
@@ -248,7 +252,8 @@ struct CalendarEventRow {
     /// 事件類型（SQL 內字面值之一）。
     event_type: String,
     /// 事件日期；`WHERE event_date BETWEEN` 已排除 NULL，可安全宣告非 Option。
-    event_date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    event_date: Date,
     /// 股利所屬年度。
     year_of_dividend: i32,
     /// 資料庫期間標記：空字串（年度）、`H1`／`H2` 或 `Q1`–`Q4`。

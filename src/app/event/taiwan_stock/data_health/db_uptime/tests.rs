@@ -1,18 +1,24 @@
 //! 健康週報的資料庫可用性一行：啟動時間、連續運作多久，本週重啟過時附上 `pg_stat_statements`的測試。
 
-use chrono::TimeZone;
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 use super::*;
 
-fn local(day: u32, hour: u32, minute: u32) -> DateTime<Local> {
-    Local
-        .with_ymd_and_hms(2026, 10, day, hour, minute, 0)
-        .single()
-        .expect("台北時間沒有夏令時間，時間唯一")
+fn local(day: u32, hour: u32, minute: u32) -> TaipeiDateTime {
+    TaipeiDateTime::from_datetime(
+        crate::core::util::datetime::ymd(2026, 10, day)
+            .and_then(|day| {
+                crate::core::util::datetime::hms(hour, minute, 0).map(|time| day.to_datetime(time))
+            })
+            .expect("合法時間"),
+    )
+    .expect("合法時間")
 }
 
-fn week_from() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 25).expect("固定日期")
+fn week_from() -> Date {
+    date(2026, 10, 25)
 }
 
 /// 本週沒有重啟：只列啟動時間與連續運作時間。

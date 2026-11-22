@@ -1,5 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction, postgres::PgQueryResult};
 
@@ -16,9 +18,11 @@ pub struct DailyMoneyHistoryDetailMore {
     /// 會員識別碼（0 代表全體聚合）。
     pub member_id: i64,
     /// 統計日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 原始買入/建立交易日期。
-    pub transaction_date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub transaction_date: Date,
     /// 股票代號。
     pub security_code: String,
     /// 當日收盤價。
@@ -36,9 +40,9 @@ pub struct DailyMoneyHistoryDetailMore {
     /// 此批次當日損益百分比。
     pub profit_and_loss_percentage: Decimal,
     /// 建立時間。
-    pub created_time: chrono::DateTime<chrono::Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_time: chrono::DateTime<chrono::Local>,
+    pub updated_time: TaipeiDateTime,
 }
 
 impl DailyMoneyHistoryDetailMore {
@@ -51,11 +55,11 @@ impl DailyMoneyHistoryDetailMore {
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
     /// 是否回滾由呼叫端控制。
     pub async fn delete(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = "DELETE FROM daily_money_history_detail_more WHERE date = $1;";
-        let query = sqlx::query(sql).bind(date);
+        let query = sqlx::query(sql).bind(date.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
@@ -77,7 +81,7 @@ impl DailyMoneyHistoryDetailMore {
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
     /// 是否回滾由呼叫端控制。
     pub async fn upsert(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
@@ -137,7 +141,7 @@ FROM aggregated_data
 ORDER BY security_code, member_id, transaction_date;
 "#;
 
-        let query = sqlx::query(sql).bind(date);
+        let query = sqlx::query(sql).bind(date.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,

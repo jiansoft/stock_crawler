@@ -1,13 +1,14 @@
 //! 報價防腐層轉換的測試。
 
 use super::*;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 #[test]
 fn test_quote_acl_mapping() {
     let dto = DailyQuoteDto {
         symbol: "2330".to_string(),
-        date: NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
+        date: date(2026, 6, 5),
         opening_price: dec!(900.0),
         highest_price: dec!(910.0),
         lowest_price: dec!(895.0),
@@ -32,5 +33,5 @@ fn test_quote_acl_mapping() {
     let entity = QuoteAclMapper::from_command(&cmd);
     assert_eq!(entity.stock_symbol, "2330");
     assert_eq!(entity.closing_price, dec!(905.0));
-    assert_eq!(entity.date, NaiveDate::from_ymd_opt(2026, 6, 5).unwrap());
+    assert_eq!(entity.date, date(2026, 6, 5));
 }

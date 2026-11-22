@@ -18,11 +18,12 @@
 //! - [`targets`]：依股票代號分組的追蹤條件快取。
 //! - [`alert`]：邊界判斷、去重與警報訊息。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::{DateTime, Datelike, Local, NaiveDate};
 use futures::future;
 use rust_decimal::Decimal;
 use tokio::{task, time};
@@ -81,18 +82,18 @@ enum EvaluationSource {
 ///
 /// 如果在檢查假期時發生資料庫或網路錯誤，將會回傳 `Err`。
 pub async fn execute() -> Result<()> {
-    execute_at(Local::now()).await
+    execute_at(TaipeiDateTime::now()).await
 }
 
 /// [`execute`] 的本體；`now` 可注入，讓測試以固定日期驗證週末與休市日直接結束。
-async fn execute_at(now: DateTime<Local>) -> Result<()> {
+async fn execute_at(now: TaipeiDateTime) -> Result<()> {
     // 週末不處理
     if now.is_weekend() {
         return Ok(());
     }
 
     // 檢查是否為國定假日休市
-    if is_holiday(now.date_naive()).await? {
+    if is_holiday(now.date()).await? {
         return Ok(());
     }
 
@@ -107,7 +108,7 @@ async fn execute_at(now: DateTime<Local>) -> Result<()> {
 
     // 先載入當日除權息與減資恢復買賣參考價，讓開盤第一批報價就用正確的基準檢查異常價格。
     // 失敗只影響這些股票的過濾準確度，不阻擋追蹤啟動。
-    load_reference_prices(now.date_naive()).await;
+    load_reference_prices(now.date()).await;
 
     // 啟動背景監控任務
     task::spawn(async move {
@@ -154,8 +155,8 @@ async fn wait_until_market_close() {
 }
 
 /// 判斷特定日期是否為台灣證券交易所（TWSE）公告的休假日。
-async fn is_holiday(today: NaiveDate) -> Result<bool> {
-    let holidays = match twse::holiday_schedule::visit(today.year()).await {
+async fn is_holiday(today: Date) -> Result<bool> {
+    let holidays = match twse::holiday_schedule::visit(i32::from(today.year())).await {
         Ok(result) => result,
         Err(err) => {
             anyhow::bail!("Failed to visit TWSE holiday schedule: {:?}", err);

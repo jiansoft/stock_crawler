@@ -1,10 +1,11 @@
 //! `/stocks/{symbol}/holder-levels` handler：單一股票單週的集保股權分散全部持股分級的測試。
 
 use super::*;
+use jiff::civil::date;
 
 fn row(level: i16, holders: i64, percent: Decimal) -> LevelRow {
     LevelRow {
-        date: NaiveDate::from_ymd_opt(2026, 10, 22).unwrap(),
+        date: date(2026, 10, 22),
         level,
         holders,
         shares: holders * 1_000,

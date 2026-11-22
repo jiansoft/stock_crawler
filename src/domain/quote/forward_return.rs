@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 回填的天期（交易日數）。120、240 日供相對強度排行使用。
 pub const FORWARD_HORIZONS: [usize; 5] = [5, 20, 60, 120, 240];
@@ -17,16 +17,11 @@ pub const FORWARD_HORIZONS: [usize; 5] = [5, 20, 60, 120, 240];
 #[async_trait]
 pub trait ForwardReturnRepository: Send + Sync {
     /// `until`（含）之前最近 `count` 個交易日，由新到舊。
-    async fn fetch_trading_dates(&self, until: NaiveDate, count: usize) -> Result<Vec<NaiveDate>>;
+    async fn fetch_trading_dates(&self, until: Date, count: usize) -> Result<Vec<Date>>;
 
     /// 寫入 `base` 當天有成交的上市櫃股票到 `end` 收盤的 `horizon` 日還原報酬，回傳寫入列數；
     /// 其他天期的欄位保留原值。
-    async fn upsert_forward_returns(
-        &self,
-        base: NaiveDate,
-        end: NaiveDate,
-        horizon: usize,
-    ) -> Result<u64>;
+    async fn upsert_forward_returns(&self, base: Date, end: Date, horizon: usize) -> Result<u64>;
 }
 
 /// 大盤（上市櫃全部股票等權）在某個月份的 20 日未來報酬，跨年度合併；讀預先彙總的
@@ -50,8 +45,8 @@ pub trait MarketSeasonalityQuery: Send + Sync {
     async fn fetch_month_seasonality(
         &self,
         month: u32,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<MonthSeasonality>;
 }
 
@@ -70,13 +65,13 @@ pub struct DerivedCounts {
 #[async_trait]
 pub trait DerivedDataQuery: Send + Sync {
     /// `date` 的技術訊號與每日相對強度筆數，以及基準日 `base` 已寫入 5 日報酬的筆數。
-    async fn count_derived(&self, date: NaiveDate, base: NaiveDate) -> Result<DerivedCounts>;
+    async fn count_derived(&self, date: Date, base: Date) -> Result<DerivedCounts>;
 }
 
 /// `end` 往前第 `horizon` 個交易日（`trading_dates` 由新到舊、第一個必須是 `end`）。
 ///
 /// `end` 不是交易日或交易日不足時回 `None`。
-pub fn base_date(end: NaiveDate, horizon: usize, trading_dates: &[NaiveDate]) -> Option<NaiveDate> {
+pub fn base_date(end: Date, horizon: usize, trading_dates: &[Date]) -> Option<Date> {
     if trading_dates.first() != Some(&end) {
         return None;
     }

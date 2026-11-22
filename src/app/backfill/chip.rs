@@ -10,11 +10,12 @@
 //! | [`execute_insider_holdings`] | 董監事持股與設質 | 每月 10–28 日 20:35 | 否，只有最新月份 |
 //! | [`broker_flow_records`] | 券商分點主力進出（只有持股） | 由 20:40 的主力進出通知順便寫入 | 否，只有最近一天 |
 
+use crate::core::util::datetime::{today, ymd};
+use jiff::civil::Date;
 use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-use chrono::{Datelike, Local, NaiveDate};
 
 use crate::{
     domain::{
@@ -56,7 +57,7 @@ pub struct DailySummary {
 
 /// 排程入口：今天的三大法人與融資融券入庫。
 pub async fn execute_daily() -> Result<()> {
-    let date = Local::now().date_naive();
+    let date = today();
     let summary = save_daily(&PgChipRepository::new(), date).await?;
     tracing::info!(
         "籌碼資料入庫結束: date={date}, institutional={}, margin={}, failed_sources={}, rows_written={}, streaks_updated={}",
@@ -72,7 +73,7 @@ pub async fn execute_daily() -> Result<()> {
 /// 抓指定交易日上市、上櫃的三大法人與融資融券並寫入；單一來源失敗只記錄。
 ///
 /// 休市或尚未公布時四個來源都是空的，不寫入任何資料。四個來源全部失敗才回傳錯誤。
-pub async fn save_daily(repository: &dyn ChipRepository, date: NaiveDate) -> Result<DailySummary> {
+pub async fn save_daily(repository: &dyn ChipRepository, date: Date) -> Result<DailySummary> {
     let (listed_flows, otc_flows, listed_margins, otc_margins) = tokio::join!(
         twse::chip::visit_institutional(date),
         tpex::chip::visit_institutional(date),
@@ -90,7 +91,7 @@ pub async fn save_daily(repository: &dyn ChipRepository, date: NaiveDate) -> Res
 /// 寫入 [`collect_daily`] 整理好的三大法人與融資融券，再更新當天的連續買賣超天數；`summary` 補上寫入列數。
 async fn write_daily(
     repository: &dyn ChipRepository,
-    date: NaiveDate,
+    date: Date,
     mut summary: DailySummary,
     flows: &[InstitutionalNet],
     margins: &[MarginRecord],
@@ -107,8 +108,8 @@ async fn write_daily(
 /// 但不會一次鎖住或改寫整張表。
 pub async fn refresh_streaks_since(
     repository: &dyn ChipRepository,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
 ) -> Result<u64> {
     let mut updated = 0;
     for (start, end) in yearly_chunks(from, to) {
@@ -120,14 +121,14 @@ pub async fn refresh_streaks_since(
 }
 
 /// 把 `from`～`to` 依日曆年切段（皆含）；起日晚於迄日回空。
-fn yearly_chunks(from: NaiveDate, to: NaiveDate) -> Vec<(NaiveDate, NaiveDate)> {
+fn yearly_chunks(from: Date, to: Date) -> Vec<(Date, Date)> {
     let mut chunks = Vec::new();
     let mut start = from;
     while start <= to {
-        let year_end = NaiveDate::from_ymd_opt(start.year(), 12, 31).unwrap_or(to);
+        let year_end = ymd(i32::from(start.year()), 12, 31).unwrap_or(to);
         let end = year_end.min(to);
         chunks.push((start, end));
-        match end.succ_opt() {
+        match end.tomorrow().ok() {
             Some(next) => start = next,
             None => break,
         }
@@ -137,7 +138,7 @@ fn yearly_chunks(from: NaiveDate, to: NaiveDate) -> Vec<(NaiveDate, NaiveDate)> 
 
 /// 上市、上櫃各兩個來源的結果轉成入庫記錄；單一來源失敗只記錄並計數，四個都失敗回錯誤。
 fn collect_daily(
-    date: NaiveDate,
+    date: Date,
     [listed_flows, otc_flows]: [Result<HashMap<String, InstitutionalFlow>>; 2],
     [listed_margins, otc_margins]: [Result<HashMap<String, MarginBalance>>; 2],
 ) -> Result<(DailySummary, Vec<InstitutionalNet>, Vec<MarginRecord>)> {
@@ -174,8 +175,8 @@ fn collect_daily(
 /// 回補 `from`～`to`（皆含）每個交易日的三大法人與融資融券，回傳寫入列數。
 ///
 /// 交易日取自日報價（有成交紀錄的日期）；單日失敗只記錄並繼續，重跑只會補上有差異的列。
-pub async fn backfill_daily(from: NaiveDate, to: NaiveDate) -> Result<u64> {
-    let mut dates: Vec<NaiveDate> = PgQuoteRepository::new()
+pub async fn backfill_daily(from: Date, to: Date) -> Result<u64> {
+    let mut dates: Vec<Date> = PgQuoteRepository::new()
         .fetch_market_traded_counts(from, to)
         .await?
         .into_iter()
@@ -189,7 +190,7 @@ pub async fn backfill_daily(from: NaiveDate, to: NaiveDate) -> Result<u64> {
     backfill_dates(
         repo,
         &dates,
-        Local::now().date_naive(),
+        today(),
         move |date| save_daily(repo, date),
         || tokio::time::sleep(BACKFILL_INTERVAL),
     )
@@ -199,13 +200,13 @@ pub async fn backfill_daily(from: NaiveDate, to: NaiveDate) -> Result<u64> {
 /// [`backfill_daily`] 的逐日迴圈：每天呼叫 `save_day`、之後呼叫 `pause`，最後從第一天重算連續天數到 `today`。
 async fn backfill_dates<Save, SaveFut, Pause, PauseFut>(
     repository: &dyn ChipRepository,
-    dates: &[NaiveDate],
-    today: NaiveDate,
+    dates: &[Date],
+    today: Date,
     mut save_day: Save,
     mut pause: Pause,
 ) -> Result<u64>
 where
-    Save: FnMut(NaiveDate) -> SaveFut,
+    Save: FnMut(Date) -> SaveFut,
     SaveFut: Future<Output = Result<DailySummary>>,
     Pause: FnMut() -> PauseFut,
     PauseFut: Future<Output = ()>,

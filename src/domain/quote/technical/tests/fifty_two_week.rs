@@ -1,19 +1,22 @@
 //! 52 週新高／新低與除權息還原。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 /// 前 52 週的日線：每 7 天 5 個交易日、共 `days` 根，最高 10、最低 5，最後加上當日。
 fn year_bars(days: usize, last_high: f64, last_low: f64) -> Vec<PriceBar> {
-    let start = NaiveDate::from_ymd_opt(2025, 1, 6).expect("有效日期");
+    let start = date(2025, 1, 6);
     let mut out: Vec<PriceBar> = (0..days)
         .map(|i| PriceBar {
-            date: start + chrono::Days::new((i / 5 * 7 + i % 5) as u64),
+            date: start + ((i / 5 * 7 + i % 5) as i64).days(),
             close: 8.0,
             high: 10.0,
             low: 5.0,
         })
         .collect();
-    let last_date = out.last().expect("至少一根").date + chrono::Days::new(1);
+    let last_date = out.last().expect("至少一根").date + 1.days();
     out.push(PriceBar {
         date: last_date,
         close: 8.0,
@@ -64,7 +67,7 @@ fn fifty_two_week_low_ignores_missing_prices() {
     assert!(fifty_two_week_signals(&zero_low).is_empty());
 }
 
-fn adjustment(date: NaiveDate, cash: f64, stock: f64, share_ratio: f64) -> PriceAdjustment {
+fn adjustment(date: Date, cash: f64, stock: f64, share_ratio: f64) -> PriceAdjustment {
     PriceAdjustment {
         date,
         cash_dividend: cash,

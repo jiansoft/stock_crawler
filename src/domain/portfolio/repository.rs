@@ -5,7 +5,7 @@ use crate::domain::portfolio::payout::PayoutAllocation;
 use crate::domain::portfolio::view::HoldingView;
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 持股領域之倉儲介面 (Repository Trait)。
@@ -64,8 +64,8 @@ pub trait PortfolioRepository: Send + Sync {
     async fn fetch_payout_allocations(
         &self,
         view: &HoldingView,
-        from: NaiveDate,
-        to: NaiveDate,
-        today: NaiveDate,
+        from: Date,
+        to: Date,
+        today: Date,
     ) -> Result<Vec<PayoutAllocation>>;
 }

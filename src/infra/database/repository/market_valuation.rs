@@ -2,7 +2,8 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use crate::{
     domain::market_index::valuation::{MarketValuationDay, MarketValuationRepository},
@@ -49,7 +50,8 @@ ORDER BY date
 /// [`FETCH_SQL`] 的一列。
 #[derive(sqlx::FromRow)]
 struct ValuationRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     median_pe: Option<f64>,
     median_pb: Option<f64>,
     pe_samples: i64,
@@ -69,11 +71,11 @@ impl PgMarketValuationRepository {
 
 #[async_trait]
 impl MarketValuationRepository for PgMarketValuationRepository {
-    async fn refresh_market_valuation(&self, from: NaiveDate, to: NaiveDate) -> Result<u64> {
+    async fn refresh_market_valuation(&self, from: Date, to: Date) -> Result<u64> {
         // 一年全市場約 50 萬筆日線；用批次連線池（慢查詢門檻較高）。
         let result = sqlx::query(REFRESH_SQL)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .execute(database::get_batch_connection())
             .await
             .with_context(|| format!("重算 {from}～{to} 的市場估值水位失敗"))?;
@@ -83,13 +85,13 @@ impl MarketValuationRepository for PgMarketValuationRepository {
     async fn fetch_market_valuation(
         &self,
         market_id: i32,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<Vec<MarketValuationDay>> {
         let rows: Vec<ValuationRow> = sqlx::query_as(FETCH_SQL)
             .bind(market_id)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .fetch_all(database::get_connection())
             .await
             .context("讀取市場估值水位失敗")?;

@@ -1,9 +1,11 @@
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn date(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, m, d).expect("合法日期")
+fn date(m: u32, d: u32) -> Date {
+    ymd(2026, m, d).expect("合法日期")
 }
 
 /// 入帳逐筆轉成 JSON：每股股利取 4 位、金額取 2 位小數；合計只算現金。

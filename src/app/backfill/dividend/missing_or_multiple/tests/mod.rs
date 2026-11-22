@@ -5,7 +5,7 @@
 mod fetch;
 mod refresh;
 
-use chrono::Local;
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -70,7 +70,7 @@ fn test_make_dividend_key() {
 
 /// 建立測試用的股利實體；只有比對會用到的欄位需要指定。
 fn dividend_for_diff(cash: Decimal, stock: Decimal, ex_dividend_date_stock: &str) -> Dividend {
-    let now = Local::now();
+    let now = TaipeiDateTime::now();
     Dividend {
         serial: 0,
         year: 2026,

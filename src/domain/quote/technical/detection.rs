@@ -4,9 +4,10 @@ use super::FIFTY_TWO_WEEK_INDICATOR;
 use super::bars::PriceBar;
 use super::indicators::IndicatorPoint;
 use super::signal::{SignalKind, TechnicalSignal};
+use jiff::ToSpan;
 
 /// 52 週回看的日曆天數（不含當日），與市場廣度統計 `daily_stock_price_stats` 一致。
-const FIFTY_TWO_WEEK_DAYS: u64 = 364;
+const FIFTY_TWO_WEEK_DAYS: i64 = 364;
 
 /// 前 52 週至少要有的交易日數；不足（例如新上市）不判斷新高新低，與市場廣度統計一致。
 const FIFTY_TWO_WEEK_MIN_PRIOR_DAYS: usize = 200;
@@ -112,7 +113,7 @@ pub fn fifty_two_week_signals(bars: &[PriceBar]) -> Vec<TechnicalSignal> {
     let Some((last, prior)) = bars.split_last() else {
         return Vec::new();
     };
-    let from = last.date - chrono::Days::new(FIFTY_TWO_WEEK_DAYS);
+    let from = last.date - FIFTY_TWO_WEEK_DAYS.days();
     let window: Vec<&PriceBar> = prior
         .iter()
         .filter(|bar| bar.date >= from && bar.date < last.date)

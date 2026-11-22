@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::{
     EtfHoldingPeriods, EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio,
@@ -117,7 +117,7 @@ impl EtfRepository for RecordingEtfRepository {
     async fn nav_series(
         &self,
         _stock_symbols: &[String],
-        _from: NaiveDate,
+        _from: Date,
     ) -> Result<HashMap<String, Vec<PriceBar>>> {
         unimplemented!()
     }
@@ -134,7 +134,7 @@ impl EtfRepository for RecordingEtfRepository {
     async fn holding_periods(
         &self,
         stock_symbols: &[String],
-        _recorded_since: NaiveDate,
+        _recorded_since: Date,
     ) -> Result<Vec<EtfHoldingPeriods>> {
         Ok(self
             .periods

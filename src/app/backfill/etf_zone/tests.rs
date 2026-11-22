@@ -1,6 +1,7 @@
 //! ETF 專區資料的測試。
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
 
 #[test]
 fn heuristic_profile_uses_symbol_and_name_only() {
@@ -151,7 +152,6 @@ fn too_many_failures_means_more_than_half() {
 /// 三個排程入口：週末直接結束；平日以臨時資料庫的假 ETF 跑完整流程（MIS 淨值、Yahoo 頁都導向
 /// mock server：淨值抓不到時其餘步驟照做並回錯誤、Yahoo 查無頁面算查無）。假 ETF 0079979EZ，結束時刪除。
 mod entries {
-    use chrono::TimeZone;
     use wiremock::MockServer;
 
     use super::*;
@@ -161,11 +161,15 @@ mod entries {
     const SYMBOL: &str = "0079979EZ";
 
     /// 1999-03-10 是星期三、03-13 是星期六。
-    fn at(day: u32) -> DateTime<Local> {
-        Local
-            .with_ymd_and_hms(1999, 3, day, 17, 30, 0)
-            .single()
-            .expect("合法時間")
+    fn at(day: u32) -> TaipeiDateTime {
+        TaipeiDateTime::from_datetime(
+            crate::core::util::datetime::ymd(1999, 3, day)
+                .and_then(|day| {
+                    crate::core::util::datetime::hms(17, 30, 0).map(|time| day.to_datetime(time))
+                })
+                .expect("合法時間"),
+        )
+        .expect("合法時間")
     }
 
     async fn cleanup() {

@@ -1,8 +1,8 @@
 //! 共用日線報價解析的單元測試。
 
+use jiff::civil::date;
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -51,7 +51,7 @@ fn twse_map_and_row() -> (HashMap<&'static str, usize>, Vec<String>) {
 #[test]
 fn from_with_map_parses_valid_row() {
     let (map, row) = twse_map_and_row();
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
 
     let dto = DailyQuoteDto::from_with_map(&row, &map, date).unwrap();
 
@@ -69,7 +69,7 @@ fn from_with_map_rejects_missing_column() {
     let (mut map, row) = twse_map_and_row();
     // 模擬來源把「收盤價」改名：對照表中不再有這個欄位。
     map.remove("收盤價");
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
 
     let err = DailyQuoteDto::from_with_map(&row, &map, date).unwrap_err();
 
@@ -84,7 +84,7 @@ fn from_with_map_rejects_missing_column() {
 fn from_with_map_rejects_garbage_price() {
     let (map, mut row) = twse_map_and_row();
     row[7] = "corrupted".to_string(); // 收盤價
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
 
     let err = DailyQuoteDto::from_with_map(&row, &map, date).unwrap_err();
 
@@ -96,7 +96,7 @@ fn from_with_map_rejects_garbage_price() {
 fn from_with_map_soft_change_falls_back_to_zero() {
     let (map, mut row) = twse_map_and_row();
     row[9] = "除息".to_string(); // 漲跌價差
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
 
     let dto = DailyQuoteDto::from_with_map(&row, &map, date).unwrap();
 
@@ -124,7 +124,7 @@ fn from_with_exchange_tpex_parses_valid_row() {
         "100.50".to_string(),    // 12: 最後賣價
         "20".to_string(),        // 13: 最後賣量
     ];
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
 
     let dto = DailyQuoteDto::from_with_exchange(StockExchange::TPEx, &row, date).unwrap();
 
@@ -138,7 +138,7 @@ fn from_with_exchange_tpex_parses_valid_row() {
 #[test]
 fn from_with_exchange_tpex_rejects_short_row() {
     let row = vec!["5483".to_string(), "中美晶".to_string()];
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
 
     let err = DailyQuoteDto::from_with_exchange(StockExchange::TPEx, &row, date).unwrap_err();
 
@@ -172,7 +172,7 @@ fn twse_row(sign: &str, change: &str) -> Vec<String> {
 /// TWSE 位置式解析：漲跌方向放在第 9 欄，含 `-` 時把無號的漲跌價差轉負。
 #[test]
 fn from_with_exchange_twse_applies_sign_column() {
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
 
     let down = DailyQuoteDto::from_with_exchange(
         StockExchange::TWSE,
@@ -198,7 +198,7 @@ fn from_with_exchange_twse_applies_sign_column() {
 /// 除權息日漲跌價差可能是非數字標記：補 0，不拒絕整列。
 #[test]
 fn from_with_exchange_twse_soft_change_falls_back_to_zero() {
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
 
     let dto = DailyQuoteDto::from_with_exchange(StockExchange::TWSE, &twse_row("", "除息"), date)
         .unwrap();
@@ -210,7 +210,7 @@ fn from_with_exchange_twse_soft_change_falls_back_to_zero() {
 /// TWSE 資料列缺欄或價格欄位是垃圾字串時整列被拒絕，錯誤指出欄位名稱。
 #[test]
 fn from_with_exchange_twse_rejects_short_row_and_garbage() {
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
     let mut short = twse_row("+", "1.00");
     short.truncate(15);
     let mut garbage = twse_row("+", "1.00");
@@ -239,7 +239,7 @@ fn from_with_exchange_twse_rejects_short_row_and_garbage() {
 /// 沒有對應解析規則的交易所只留下代號與日期，其餘欄位維持預設值。
 #[test]
 fn from_with_exchange_other_exchange_keeps_defaults() {
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
     let row = vec!["2330".to_string()];
 
     let dto = DailyQuoteDto::from_with_exchange(StockExchange::None, &row, date).unwrap();
@@ -251,7 +251,7 @@ fn from_with_exchange_other_exchange_keeps_defaults() {
 /// 整列為空時連代號都沒有，視為缺欄位。
 #[test]
 fn from_with_exchange_rejects_empty_row() {
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
 
     let err = DailyQuoteDto::from_with_exchange(StockExchange::TWSE, &[], date).unwrap_err();
 

@@ -2,10 +2,11 @@
 //! 估值水位（上市櫃本益比、股價淨值比中位數在近 [`valuation::LEVEL_YEARS`] 年的位置）與本月季節性
 //! （前 [`SEASONALITY_YEARS`] 年同月的大盤等權 20 日報酬）。
 
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::fmt::Write;
 
 use anyhow::Result;
-use chrono::{Datelike, Days, NaiveDate};
 
 use super::WEEK_DAYS;
 use crate::domain::{
@@ -43,19 +44,20 @@ pub(super) struct RegimeSection {
 /// 20 日未來報酬。
 pub(super) async fn month_seasonality(
     repo: &impl MarketSeasonalityQuery,
-    date: NaiveDate,
+    date: Date,
 ) -> Result<MonthSeasonality> {
     let (from, to) = seasonality_range(date);
-    repo.fetch_month_seasonality(date.month(), from, to).await
+    repo.fetch_month_seasonality(u32::from(date.month().unsigned_abs()), from, to)
+        .await
 }
 
 /// [`month_seasonality`] 的查詢期間：`SEASONALITY_YEARS` 年前同月 1 日到今年同月 1 日的前一天。
-pub(super) fn seasonality_range(date: NaiveDate) -> (NaiveDate, NaiveDate) {
-    let first = date.with_day(1).unwrap_or(date);
+pub(super) fn seasonality_range(date: Date) -> (Date, Date) {
+    let first = date.first_of_month();
     let from = first
-        .with_year(first.year() - SEASONALITY_YEARS)
-        .unwrap_or(NaiveDate::MIN);
-    let to = first.checked_sub_days(Days::new(1)).unwrap_or(first);
+        .checked_sub(SEASONALITY_YEARS.years())
+        .unwrap_or(Date::MIN);
+    let to = first.checked_sub(1.days()).ok().unwrap_or(first);
     (from, to)
 }
 
@@ -76,7 +78,7 @@ pub(super) fn seasonality_line(month: u32, seasonality: &MonthSeasonality) -> Op
 /// 中位數；沒有資料回 `None`。
 pub(super) async fn valuation_level(
     repo: &impl MarketValuationRepository,
-    date: NaiveDate,
+    date: Date,
 ) -> Result<Option<ValuationLevel>> {
     valuation::level(repo, date, WEEK_DAYS).await
 }
@@ -87,7 +89,7 @@ pub(super) fn valuation_line(level: &ValuationLevel) -> Option<String> {
     let summary = level.summary()?;
     Some(format!(
         "• 估值水位 {}：{summary}",
-        level.date.format("%m-%d")
+        level.date.strftime("%m-%d")
     ))
 }
 
@@ -95,7 +97,7 @@ pub(super) fn valuation_line(level: &ValuationLevel) -> Option<String> {
 /// [`REGIME_CROSS_DAYS`] 均線的日子與同一天的市場廣度；沒有加權指數回 `None`。
 pub(super) async fn regime_section(
     index: &(impl IndexCloseQuery + BreadthQuery),
-    date: NaiveDate,
+    date: Date,
 ) -> Result<Option<RegimeSection>> {
     let points = regime::load_taiex(index, Some(date)).await?;
     let Some(state) = regime::regime(&points) else {
@@ -132,7 +134,7 @@ fn breadth_line(breadth: &MarketBreadth) -> String {
         });
     format!(
         "• 市場廣度 {}：站上 60 日線 {}{before}、20 日線 {}、240 日線 {}；近 {} 日創 52 週新高 {} 家次、新低 {} 家次",
-        breadth.date.format("%m-%d"),
+        breadth.date.strftime("%m-%d"),
         percent(breadth.above_ma60_percent),
         percent(breadth.above_ma20_percent),
         percent(breadth.above_ma240_percent),
@@ -188,7 +190,7 @@ pub(super) fn lines(section: &RegimeSection) -> Vec<String> {
         .map(|cross| {
             format!(
                 "{} {} {} 日均線",
-                cross.date.format("%m-%d"),
+                cross.date.strftime("%m-%d"),
                 if cross.above { "站上" } else { "跌破" },
                 cross.days
             )
@@ -206,11 +208,9 @@ pub(super) fn lines(section: &RegimeSection) -> Vec<String> {
     if let Some(line) = section.valuation.as_ref().and_then(valuation_line) {
         lines.push(line);
     }
-    if let Some(line) = section
-        .seasonality
-        .as_ref()
-        .and_then(|seasonality| seasonality_line(state.date.month(), seasonality))
-    {
+    if let Some(line) = section.seasonality.as_ref().and_then(|seasonality| {
+        seasonality_line(u32::from(state.date.month().unsigned_abs()), seasonality)
+    }) {
         lines.push(line);
     }
     lines

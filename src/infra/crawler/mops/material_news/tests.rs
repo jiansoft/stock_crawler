@@ -1,15 +1,16 @@
 //! 每日重大訊息的解析與抓取測試；連外的測試標 #[ignore]。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil;
 
 const LISTED_FIXTURE: &str = include_str!("../testdata/material_news_t187ap04_L.json");
 const OTC_FIXTURE: &str = include_str!("../testdata/material_news_t187ap04_O.json");
 
-fn at(date: (i32, u32, u32), time: (u32, u32, u32)) -> NaiveDateTime {
-    NaiveDateTime::new(
-        NaiveDate::from_ymd_opt(date.0, date.1, date.2).unwrap(),
-        NaiveTime::from_hms_opt(time.0, time.1, time.2).unwrap(),
-    )
+fn at(date: (i32, u32, u32), time: (u32, u32, u32)) -> civil::DateTime {
+    ymd(date.0, date.1, date.2)
+        .unwrap()
+        .to_datetime(crate::core::util::datetime::hms(time.0, time.1, time.2).unwrap())
 }
 
 /// 上市欄位：主旨欄名尾端有空白、換行接成一行、發言時間左補零。
@@ -74,9 +75,15 @@ fn parse_otc_fixture() {
 
 #[test]
 fn parse_time_pads_and_rejects_bad_values() {
-    assert_eq!(parse_time("70003"), NaiveTime::from_hms_opt(7, 0, 3));
-    assert_eq!(parse_time("145236"), NaiveTime::from_hms_opt(14, 52, 36));
-    assert_eq!(parse_time("5"), NaiveTime::from_hms_opt(0, 0, 5));
+    assert_eq!(
+        parse_time("70003"),
+        crate::core::util::datetime::hms(7, 0, 3)
+    );
+    assert_eq!(
+        parse_time("145236"),
+        crate::core::util::datetime::hms(14, 52, 36)
+    );
+    assert_eq!(parse_time("5"), crate::core::util::datetime::hms(0, 0, 5));
     assert_eq!(parse_time(""), None);
     assert_eq!(parse_time("1234567"), None);
     assert_eq!(parse_time("12:00"), None);

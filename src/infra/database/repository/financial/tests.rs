@@ -1,6 +1,6 @@
 //! `PgFinancialRepository` 的整合測試：以假代號走一輪寫入、讀回與彙總。
 
-use chrono::Local;
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -39,8 +39,8 @@ fn statement(quarter: &str, eps: Decimal) -> DomainFinancialStatement {
         profit_before_tax: dec!(1.8),
         return_on_equity: dec!(5),
         return_on_assets: dec!(3),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     }
 }
 
@@ -156,7 +156,7 @@ async fn monthly_revenue_and_alert_queries_through_repository() {
         lowest_price: dec!(97),
         highest_price: dec!(104),
         date: 202003,
-        create_time: Local::now(),
+        create_time: TaipeiDateTime::now(),
     };
     repo.save_monthly_revenue(&revenue)
         .await

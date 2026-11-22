@@ -1,6 +1,6 @@
 //! 月營收實體。
 
-use chrono::{DateTime, Local};
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 
 /// 月營收領域實體。
@@ -35,7 +35,7 @@ pub struct MonthlyRevenue {
     /// 營收代表之日期 (timestamp，以 Unix 時間戳記表示，通常對齊至當月 1 日)
     pub date: i64,
     /// 建立時間
-    pub create_time: DateTime<Local>,
+    pub create_time: TaipeiDateTime,
 }
 
 impl Default for MonthlyRevenue {
@@ -54,7 +54,7 @@ impl Default for MonthlyRevenue {
             lowest_price: Decimal::ZERO,
             highest_price: Decimal::ZERO,
             date: 0,
-            create_time: Local::now(),
+            create_time: TaipeiDateTime::now(),
         }
     }
 }

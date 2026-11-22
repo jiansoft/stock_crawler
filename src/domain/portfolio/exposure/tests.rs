@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::domain::portfolio::view::HoldingView;
+use jiff::civil::date;
 
 fn position(symbol: &str, name: &str, value: Option<f64>, is_etf: bool) -> ExposurePosition {
     ExposurePosition {
@@ -15,7 +16,7 @@ fn position(symbol: &str, name: &str, value: Option<f64>, is_etf: bool) -> Expos
 fn constituent(etf: &str, symbol: &str, name: &str, weight: f64) -> EtfConstituent {
     EtfConstituent {
         etf_symbol: etf.to_owned(),
-        as_of: NaiveDate::from_ymd_opt(2026, 9, 30).expect("日期合法"),
+        as_of: date(2026, 9, 30),
         holding_symbol: symbol.to_owned(),
         holding_name: name.to_owned(),
         weight,

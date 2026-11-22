@@ -3,13 +3,15 @@
 //! 持股與股數沿用 `/portfolio/dividend-forecast` 的查詢（未賣出、依代號合併）；除權息與金額規則在
 //! [`crate::app::calculation::upcoming_dividends`]，與週六每週市場摘要的「下週持股除權息」相同。
 
+use crate::core::util::datetime::today;
 use axum::{
     Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Days, Local, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::dividend_fill::summary_dto;
@@ -48,8 +50,8 @@ pub(crate) async fn upcoming_dividends(
     if !(1..=60).contains(&days) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "days 必須介於 1 至 60");
     }
-    let today = Local::now().date_naive();
-    let to = today + Days::new(u64::from(days) - 1);
+    let today = today();
+    let to = today + (i64::from(days) - 1).days();
 
     let members = match holding_view::member_ids(&view).await {
         Ok(members) => members,
@@ -91,8 +93,8 @@ pub(crate) async fn upcoming_dividends(
 /// 組出回應；`hints` 為 `None`（沒有事件）時不附填息。
 fn build_response(
     member_id: i64,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     dividends: &[UpcomingDividend],
     hints: Option<&FillHints>,
 ) -> UpcomingDividendsResponse {

@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 代表個股殖利率排行的領域實體。
@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YieldRank {
     /// 交易日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 股票代號
     pub security_code: String,
     /// 每日個股報價序號 (對應 DailyQuotes.Serial)
@@ -28,7 +28,7 @@ impl YieldRank {
     /// * `dividend_serial` - 股利發放序號
     /// * `r#yield` - 殖利率百分比
     pub fn new(
-        date: NaiveDate,
+        date: Date,
         security_code: String,
         daily_quotes_serial: i64,
         dividend_serial: i64,

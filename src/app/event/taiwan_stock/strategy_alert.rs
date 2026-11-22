@@ -15,9 +15,10 @@
 //!
 //! 回測引擎在 `interfaces::web::data_api`，這裡只透過 [`ports::StrategyGateway`] 取得換股結果。
 
+use crate::core::util::datetime::today;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use chrono::{Local, NaiveDate};
+use jiff::civil::Date;
 
 use self::message::{build_message, overlap_message};
 use super::holdings;
@@ -107,7 +108,7 @@ pub async fn execute() -> Result<()> {
         &PgPortfolioRepository::new(),
         &RoutedOverlap,
         &strategies,
-        Local::now().date_naive(),
+        today(),
     )
     .await
 }
@@ -151,7 +152,7 @@ impl OverlapNotifier for RoutedOverlap {
 /// # Errors
 ///
 /// 讀不到策略、策略 gateway 未註冊、回測失敗或寫入失敗時回傳錯誤。
-pub async fn record_current_rebalance(preset_name: &str) -> Result<Option<(NaiveDate, bool)>> {
+pub async fn record_current_rebalance(preset_name: &str) -> Result<Option<(Date, bool)>> {
     let preset = PgStrategyPresetRepository::new()
         .find(preset_name)
         .await
@@ -180,7 +181,7 @@ async fn notify(
     fundamentals: &dyn HoldingFundamentalsQuery,
     overlap: &dyn OverlapNotifier,
     strategies: &[AlertStrategy],
-    today: NaiveDate,
+    today: Date,
 ) -> Result<()> {
     let mut failures: Vec<String> = Vec::new();
     for strategy in strategies {
@@ -283,7 +284,7 @@ fn rebalance_record(
 async fn rebalance_today(
     gateway: &dyn StrategyGateway,
     query: &str,
-    today: NaiveDate,
+    today: Date,
 ) -> Result<Option<StrategyRebalance>> {
     let Some(rebalance) = gateway.latest_rebalance(query).await? else {
         tracing::info!("策略換股通知：最後一期已滿持有天數，今天不是換股日，略過");

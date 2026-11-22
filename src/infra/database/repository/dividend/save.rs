@@ -1,7 +1,7 @@
 //! 股利的儲存：年度層級列與分期明細的 upsert，以及同一次配息的所屬年度更正。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
-use chrono::Local;
 
 use crate::domain::dividend::entity::Dividend;
 use crate::infra::database;
@@ -129,7 +129,7 @@ pub(super) async fn save(dividend: &Dividend) -> Result<()> {
         .bind(&dividend.payable_date_cash)
         .bind(&dividend.payable_date_stock)
         .bind(dividend.created_time)
-        .bind(Local::now()) // updated_time
+        .bind(TaipeiDateTime::now()) // updated_time
         .bind(dividend.capital_reserve_cash_dividend)
         .bind(dividend.earnings_cash_dividend)
         .bind(dividend.capital_reserve_stock_dividend)

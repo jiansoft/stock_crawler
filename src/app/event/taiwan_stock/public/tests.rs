@@ -1,6 +1,9 @@
 //! 公開發行事件的測試。
 
+use crate::core::util::datetime::today;
 use crate::infra::cache::SHARE;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use super::*;
 
@@ -14,8 +17,8 @@ async fn test_execute() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
     tracing::info!("開始 execute");
-    //let date = NaiveDate::from_ymd_opt(2023, 6, 15);
-    //let today: NaiveDate = Local::today().naive_local();
+    //let date = ymd(2023, 6, 15);
+    //let today: Date = Local::today().datetime();
     match execute().await {
         Ok(_) => {}
         Err(why) => {
@@ -43,7 +46,6 @@ fn calculate_price_change_handles_missing_prices() {
 
 /// 以本機 mock server 取代證交所公開申購公告（G15），驗證提醒流程（G17）。
 mod mock_sources {
-    use chrono::{Datelike, Days, NaiveDate};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -58,7 +60,7 @@ mod mock_sources {
     const BOND: &str = "79979R";
 
     /// 民國年格式（`115/07/14`），與公告表格一致。
-    fn roc(date: NaiveDate) -> String {
+    fn roc(date: Date) -> String {
         format!(
             "{}/{:02}/{:02}",
             date.year() - 1911,
@@ -68,7 +70,7 @@ mod mock_sources {
     }
 
     /// 公告表格的一列（12 欄）。
-    fn row(symbol: &str, market: &str, start: NaiveDate, end: NaiveDate) -> Vec<String> {
+    fn row(symbol: &str, market: &str, start: Date, end: Date) -> Vec<String> {
         [
             "1",
             &roc(end),
@@ -107,10 +109,10 @@ mod mock_sources {
         }
         cleanup().await;
         // 申購期間由公告決定，必須以今天為準才會進入提醒分支；只寫 Redis 旗標，不寫資料庫。
-        let today = Local::now().date_naive();
-        let yesterday = today - Days::new(1);
-        let tomorrow = today + Days::new(1);
-        let last_week = today - Days::new(7);
+        let today = today();
+        let yesterday = today - 1.days();
+        let tomorrow = today + 1.days();
+        let last_week = today - 7.days();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path(PUBLIC_PATH))

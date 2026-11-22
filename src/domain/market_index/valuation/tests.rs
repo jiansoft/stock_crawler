@@ -1,10 +1,11 @@
 //! 市場估值水位：上市櫃官方本益比與股價淨值比的每日中位數的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 
 fn day(d: u32, pe: Option<f64>, samples: i64) -> MarketValuationDay {
     MarketValuationDay {
-        date: NaiveDate::from_ymd_opt(2026, 1, d).expect("合法日期"),
+        date: ymd(2026, 1, d).expect("合法日期"),
         median_pe: pe,
         median_pb: None,
         pe_samples: samples,

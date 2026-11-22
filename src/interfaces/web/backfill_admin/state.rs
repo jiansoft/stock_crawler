@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use std::{
     collections::HashMap,
     sync::{
@@ -6,7 +7,6 @@ use std::{
     },
 };
 
-use chrono::Local;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore, broadcast};
@@ -63,7 +63,7 @@ impl BackfillWebState {
     /// 格式為 `yyyyMMddHHmmss-seq`，同時保留時間排序資訊與單程序內唯一性。
     pub(super) fn next_job_id(&self) -> String {
         let seq = self.next_id.fetch_add(1, Ordering::Relaxed);
-        format!("{}-{seq}", Local::now().format("%Y%m%d%H%M%S"))
+        format!("{}-{seq}", TaipeiDateTime::now().strftime("%Y%m%d%H%M%S"))
     }
 
     /// 嘗試領取一個 job 併行名額，領不到（已達上限）時回傳 `None`。

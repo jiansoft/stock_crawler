@@ -4,7 +4,7 @@ use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database::repository::holding_view;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use sqlx::{FromRow, PgPool};
@@ -187,7 +187,8 @@ struct EtfComponentRow {
     holding_name: String,
     weight: f64,
     industry_name: String,
-    as_of: chrono::NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    as_of: jiff::civil::Date,
 }
 
 /// SQLx 載入的目標配置資料列。
@@ -197,7 +198,8 @@ struct TargetRow {
     dimension: String,
     key: String,
     target_percent: Decimal,
-    updated_time: DateTime<Utc>,
+    #[sqlx(try_from = "jiff_sqlx::Timestamp")]
+    updated_time: Timestamp,
 }
 
 impl TryFrom<TargetRow> for PortfolioTargetRecord {

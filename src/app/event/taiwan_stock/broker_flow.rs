@@ -18,6 +18,8 @@
 //!
 //! 通知依收件者範圍各自產生（會員系統計畫 7.6）：只列範圍內持股的達標股票，範圍內沒有就不發。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write;
 use std::time::Duration;
@@ -36,7 +38,6 @@ use crate::{
     },
 };
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 
 // 門檻與 `/portfolio/chip`、stock_go 持股籌碼頁共用，定義在 domain。
 pub use crate::domain::portfolio::chip::{
@@ -75,7 +76,7 @@ pub async fn execute() -> Result<()> {
         .await
         .context("fetch active holdings for broker flow notification failed")?;
 
-    let today = Local::now().date_naive();
+    let today = today();
     let mut summary = RunSummary {
         holdings: symbols.len(),
         ..Default::default()
@@ -108,7 +109,7 @@ pub async fn execute() -> Result<()> {
 /// 依收件者範圍組訊息：只列範圍內持股的達標股票，「今日資料」檔數也只算範圍內的；範圍內沒有就回 `None`。
 async fn view_message(
     view: &HoldingView,
-    today: NaiveDate,
+    today: Date,
     notable: &[BrokerFlow],
     fetched: &BTreeSet<String>,
 ) -> Result<Option<String>> {
@@ -137,7 +138,7 @@ async fn view_message(
 /// 在 `summary` 記錄取得、過期（休市或尚未更新）與失敗的檔數。單檔失敗只記錄警告。
 async fn collect_flows(
     symbols: &BTreeSet<String>,
-    today: NaiveDate,
+    today: Date,
     summary: &mut RunSummary,
 ) -> Vec<BrokerFlow> {
     let mut flows = Vec::with_capacity(symbols.len());
@@ -167,7 +168,7 @@ struct BrokerHistory {
 /// 只有今天一天時回 `None`，查詢失敗只記錄警告、也回 `None`。
 async fn load_history(
     repository: &impl HoldingBrokerQuery,
-    today: NaiveDate,
+    today: Date,
     symbols: &[String],
 ) -> Option<BrokerHistory> {
     let history = async {
@@ -221,7 +222,7 @@ fn notable_flows(flows: Vec<BrokerFlow>) -> Vec<BrokerFlow> {
 ///
 /// `stock_name` 由呼叫端提供（正式流程讀股票主檔快取），測試時可換成固定對照。
 fn build_message(
-    date: NaiveDate,
+    date: Date,
     flows: &[BrokerFlow],
     checked: usize,
     history: Option<&BrokerHistory>,

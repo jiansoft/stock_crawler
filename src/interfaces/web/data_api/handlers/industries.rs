@@ -4,6 +4,7 @@
 //! 區間起點用遞迴查詢逐日往前跳，每一步都只走 `"Date"` 索引。只算上市櫃普通股（排除
 //! `00` 開頭的 ETF），當日沒有成交的股票不列入。
 
+use jiff_sqlx::ToSqlx;
 use std::collections::BTreeMap;
 
 use axum::{
@@ -12,7 +13,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::{Decimal, RoundingStrategy};
 
 use super::{
@@ -106,22 +107,28 @@ pub(crate) async fn industry_performance(
     }
 
     let pool = database::get_connection();
-    let dates: (Option<NaiveDate>, Option<NaiveDate>) = match sqlx::query_as(DATES_SQL)
-        .bind(date)
-        .bind(i32::from(days))
-        .fetch_one(pool)
-        .await
-    {
-        Ok(dates) => dates,
-        Err(error) => return database_error(error),
-    };
+    let dates: (Option<Date>, Option<Date>) =
+        match sqlx::query_as::<_, (Option<jiff_sqlx::Date>, Option<jiff_sqlx::Date>)>(DATES_SQL)
+            .bind(date.map(ToSqlx::to_sqlx))
+            .bind(i32::from(days))
+            .fetch_one(pool)
+            .await
+            .map(|(c0, c1)| {
+                (
+                    crate::infra::database::jiff_types::from_wire(c0),
+                    crate::infra::database::jiff_types::from_wire(c1),
+                )
+            }) {
+            Ok(dates) => dates,
+            Err(error) => return database_error(error),
+        };
     let (Some(data_date), base_date) = dates else {
         return error_response(StatusCode::NOT_FOUND, "查無產業表現資料");
     };
 
     let rows: Vec<IndustryRow> = match sqlx::query_as(ROWS_SQL)
-        .bind(data_date)
-        .bind(base_date)
+        .bind(data_date.to_sqlx())
+        .bind(base_date.map(ToSqlx::to_sqlx))
         .bind(market_id)
         .fetch_all(pool)
         .await

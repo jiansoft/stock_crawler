@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
 use rust_decimal::Decimal;
 
@@ -97,7 +98,7 @@ async fn calculate_dividend(
         .await?;
 
     let number_of_shares_held = Decimal::new(sod.share_quantity, 0);
-    let holding_date = sod.created_time.date_naive();
+    let holding_date = sod.created_time.date();
 
     let mut total_cash = Decimal::ZERO;
     let mut total_stock = Decimal::ZERO;
@@ -127,8 +128,8 @@ async fn calculate_dividend(
             stock,
             stock_money,
             total,
-            created_time: chrono::Local::now(),
-            updated_time: chrono::Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         });
     }
 
@@ -150,8 +151,8 @@ async fn calculate_dividend(
         stock: total_stock,
         stock_money: total_stock_money,
         total: total_sum,
-        created_time: chrono::Local::now(),
-        updated_time: chrono::Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     };
 
     // 1. 寫入年度總表與配發細項

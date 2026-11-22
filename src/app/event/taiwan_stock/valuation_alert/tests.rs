@@ -1,5 +1,9 @@
 //! 持股估值週報的測試；連外的測試標 #[ignore]。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 use std::collections::HashMap;
 
 use anyhow::anyhow;
@@ -7,8 +11,8 @@ use async_trait::async_trait;
 
 use super::*;
 
-fn day(offset: i64) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 9).expect("有效日期") - chrono::Duration::days(offset)
+fn day(offset: i64) -> Date {
+    date(2026, 10, 9) - (offset).days()
 }
 
 /// `days` 天的每日倍數（由新到舊），最新一天本益比為 `latest_pe`，之前依序為 1..days 倍；
@@ -54,7 +58,7 @@ async fn print_message() {
     let flags = collect_flags(
         &PgQuoteRepository::new(),
         symbols.iter().map(String::as_str),
-        Local::now().date_naive(),
+        today(),
     )
     .await;
     println!("持股 {} 檔、標記 {} 筆", symbols.len(), flags.len());

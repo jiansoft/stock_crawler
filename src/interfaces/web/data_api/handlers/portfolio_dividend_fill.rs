@@ -4,6 +4,9 @@
 //! [`PgDividendFillRepository`]。每列附同殖利率組的全市場基準（與 `/market/dividend-fill-stats`
 //! 共用快取）；基準查詢失敗只記警告、`peer` 為 `null`，不影響持股資料。屬個人持股資料。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::cmp::Reverse;
 
 use anyhow::Result;
@@ -13,7 +16,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Days, Local, NaiveDate};
 use sqlx::PgPool;
 
 use super::dividend_fill::{into_dto, summary_dto};
@@ -32,7 +34,7 @@ use crate::interfaces::web::data_api::dto::{
 };
 
 /// 歷年填息對照回看的天數（約 5 年）。
-const HISTORY_DAYS: u64 = 5 * 365 + 1;
+const HISTORY_DAYS: i64 = 5 * 365 + 1;
 
 /// 同組基準的統計年數；與 [`HISTORY_DAYS`] 一致（`stats_window` 同樣是 5 × 365 + 1 天）。
 const PEER_YEARS: u8 = fill_stats::MARKET_PEER_YEARS;
@@ -81,7 +83,7 @@ pub(crate) async fn portfolio_dividend_fill(
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
-    let today = Local::now().date_naive();
+    let today = today();
     let repository = PgDividendFillRepository::new();
     let outcomes = match collect(&repository, &holdings, today, days).await {
         Ok(outcomes) => outcomes,
@@ -112,11 +114,11 @@ async fn fetch_holdings(pool: &PgPool, members: &[i64]) -> sqlx::Result<Vec<(Str
 async fn collect(
     repository: &impl DividendFillQuery,
     holdings: &[(String, String)],
-    today: NaiveDate,
+    today: Date,
     days: u16,
 ) -> Result<Vec<HoldingFill>> {
-    let since = today - Days::new(u64::from(days));
-    let history_since = today - Days::new(HISTORY_DAYS);
+    let since = today - i64::from(days).days();
+    let history_since = today - HISTORY_DAYS.days();
     let mut collected = Vec::with_capacity(holdings.len());
     for (symbol, name) in holdings {
         let outcomes = fill::recent_outcomes(repository, symbol, history_since, today).await?;

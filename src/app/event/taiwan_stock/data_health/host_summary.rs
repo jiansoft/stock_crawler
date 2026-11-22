@@ -4,12 +4,11 @@
 //! 每日彙總只在 Telegram 以外的日誌裡，一週下來不會有人逐日翻；週報把最差的一天標出來。
 //! 行程當天重啟時彙總只涵蓋重啟之後，同一天有多行時各欄位取最差值。只讀本機檔案。
 
+use jiff::civil::Date;
 use std::path::Path;
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-
-use super::*;
 
 /// 每日彙總行的開頭與日期。
 static DAY_RE: Lazy<Regex> = Lazy::new(|| {
@@ -30,7 +29,7 @@ static DB_DOWN_RE: Lazy<Regex> =
 /// 一天的主機健康彙總；欄位缺漏（例如當天略過 fsync 探針）為 `None`。
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(super) struct HostDay {
-    pub(super) date: Option<NaiveDate>,
+    pub(super) date: Option<Date>,
     pub(super) max_fsync_ms: Option<u64>,
     pub(super) stuck_probes: u32,
     pub(super) min_available_mb: Option<u64>,
@@ -43,7 +42,7 @@ pub(super) struct HostDay {
 pub(super) fn parse_host_line(line: &str) -> Option<HostDay> {
     let date = DAY_RE
         .captures(line)
-        .and_then(|caps| NaiveDate::parse_from_str(&caps[1], "%Y-%m-%d").ok())?;
+        .and_then(|caps| Date::strptime("%Y-%m-%d", &caps[1]).ok())?;
     let number = |re: &Regex, group: usize| -> Option<String> {
         re.captures(line)
             .and_then(|caps| caps.get(group).map(|m| m.as_str().to_owned()))
@@ -64,7 +63,7 @@ pub(super) fn parse_host_line(line: &str) -> Option<HostDay> {
 }
 
 /// 期間內（含起訖）每天 info 檔裡的主機健康彙總，依日期由舊到新；同一天多行時各欄位取最差值。
-pub(super) fn weekly_host_days(dir: &Path, from: NaiveDate, to: NaiveDate) -> Vec<HostDay> {
+pub(super) fn weekly_host_days(dir: &Path, from: Date, to: Date) -> Vec<HostDay> {
     let mut days: Vec<HostDay> = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return days;
@@ -78,7 +77,7 @@ pub(super) fn weekly_host_days(dir: &Path, from: NaiveDate, to: NaiveDate) -> Ve
         // 檔名日期在期間外的不讀：23:30 的彙總寫在當天的檔案裡。
         let Some(file_date) = name
             .get(..10)
-            .and_then(|day| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+            .and_then(|day| Date::strptime("%Y-%m-%d", day).ok())
         else {
             continue;
         };
@@ -126,7 +125,7 @@ pub(super) fn host_summary_line(days: &[HostDay]) -> String {
     }
     let date_of = |day: &HostDay| {
         day.date
-            .map_or_else(String::new, |date| date.format("%m-%d").to_string())
+            .map_or_else(String::new, |date| date.strftime("%m-%d").to_string())
     };
     let fsync = days
         .iter()

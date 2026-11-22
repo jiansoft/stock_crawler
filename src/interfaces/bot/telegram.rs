@@ -1,8 +1,8 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use chrono::Local;
 use serde::{Deserialize, Serialize};
 
 // MarkdownV2 跳脫工具（text::escape_markdown_v2）住在 core 層：
@@ -411,7 +411,11 @@ fn format_alert_message(alert_title: &str, details: &str) -> String {
     format!(
         "⚠️ *【系統關鍵警報】*\n*標題*︰{}\n*時間*︰{}\n*詳情*︰\n```\n{}\n```",
         text::escape_markdown_v2(alert_title),
-        text::escape_markdown_v2(Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+        text::escape_markdown_v2(
+            TaipeiDateTime::now()
+                .strftime("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        ),
         text::escape_markdown_v2(details)
     )
 }

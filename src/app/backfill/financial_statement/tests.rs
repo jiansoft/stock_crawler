@@ -1,5 +1,6 @@
 //! nstock 補 ROE／ROA：純函式的單元測試，以及以假代號、假 nstock 走一輪的整合測試。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -175,7 +176,7 @@ async fn seeded_zero_rows(repo: &PgFinancialRepository) -> Vec<DomainFinancialSt
         .collect()
 }
 
-async fn roe_roa(year: i64) -> (Decimal, Decimal, chrono::DateTime<chrono::Local>) {
+async fn roe_roa(year: i64) -> (Decimal, Decimal, TaipeiDateTime) {
     sqlx::query_as(
         "SELECT return_on_equity, return_on_assets, updated_time FROM financial_statement WHERE security_code = $1 AND year = $2 AND quarter = 'Q1'",
     )

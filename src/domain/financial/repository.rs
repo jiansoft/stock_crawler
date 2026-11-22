@@ -8,7 +8,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 財報與營收領域之倉儲介面 (Repository Trait)。
@@ -71,7 +71,7 @@ pub trait FinancialRepository: Send + Sync {
     // === 價格估值 (PriceEstimate) ===
 
     /// 依指定日期與年份區間，批次重建所有個股價格估值。
-    async fn rebuild_price_estimates(&self, date: NaiveDate, years: String) -> Result<()>;
+    async fn rebuild_price_estimates(&self, date: Date, years: String) -> Result<()>;
 
     // === 持股通知 (Holding alerts) ===
 

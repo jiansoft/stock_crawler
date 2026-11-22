@@ -1,14 +1,19 @@
 //! 慢查詢當日統計的測試：歸類、跨日歸零、彙總文字與事件欄位判斷。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil;
+use jiff::civil::Date;
 
-fn at(day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-    NaiveDate::from_ymd_opt(2026, 10, day)
-        .and_then(|date| date.and_hms_opt(hour, minute, 0))
+fn at(day: u32, hour: u32, minute: u32) -> civil::DateTime {
+    ymd(2026, 10, day)
+        .and_then(|date| {
+            crate::core::util::datetime::hms(hour, minute, 0).map(|time| date.to_datetime(time))
+        })
         .expect("時間應合法")
 }
 
-fn today(day: u32) -> NaiveDate {
+fn today(day: u32) -> Date {
     at(day, 0, 0).date()
 }
 
@@ -102,7 +107,7 @@ fn observe_records_sqlx_warnings_only() {
         tracing::Level::INFO,
         &mut slow_event(summary, 9.0),
     );
-    let date = Local::now().date_naive();
+    let date = crate::core::util::datetime::today();
     assert!(!daily_summary(date).contains("p5_observe_test"));
 
     let mut event = slow_event(summary, 9.0);
@@ -212,7 +217,7 @@ async fn observe_tags_events_with_the_current_origin() {
             .any(|(key, value)| key == SOURCE_FIELD && value == "job:O8 測試"),
         "{event:?}"
     );
-    let date = Local::now().date_naive();
+    let date = crate::core::util::datetime::today();
     assert!(
         daily_summary(date).contains("SELECT o8_origin_test x 1（最長 7.0 秒）"),
         "{}",

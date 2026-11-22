@@ -9,7 +9,7 @@
 //! 來源註明不含鉅額交易，和每日收盤流程的一般交易數字會有些微差距，開高低收則一致。
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, NaiveDate};
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -57,12 +57,12 @@ const THOUSAND: Decimal = Decimal::from_parts(1000, 0, 0, false, 0);
 /// 抓取單一上櫃證券在指定月份的每日成交資訊。
 ///
 /// `month` 只取其年月。查無資料（例如該證券當月尚未掛牌）時回傳空陣列而非錯誤。
-pub async fn visit(stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+pub async fn visit(stock_symbol: &str, month: Date) -> Result<Vec<DailyQuoteDto>> {
     let url = format!(
         "https://{}/www/zh-tw/afterTrading/tradingStock?code={}&date={}&response=json",
         tpex::HOST,
         stock_symbol,
-        month.format("%Y/%m/01")
+        month.strftime("%Y/%m/01")
     );
 
     let response = http::get_json::<TradingStockResponse>(&url)
@@ -70,7 +70,7 @@ pub async fn visit(stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuot
         .with_context(|| {
             format!(
                 "Failed to fetch TPEx tradingStock for {stock_symbol} at {}",
-                month.format("%Y-%m")
+                month.strftime("%Y-%m")
             )
         })?;
 
@@ -142,7 +142,7 @@ pub struct TpexMonthlyQuoteFetcher;
 
 #[async_trait::async_trait]
 impl crate::app::backfill::port::MonthlyQuoteFetcher for TpexMonthlyQuoteFetcher {
-    async fn fetch(&self, stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+    async fn fetch(&self, stock_symbol: &str, month: Date) -> Result<Vec<DailyQuoteDto>> {
         visit(stock_symbol, month).await
     }
 }
@@ -150,12 +150,12 @@ impl crate::app::backfill::port::MonthlyQuoteFetcher for TpexMonthlyQuoteFetcher
 /// 解析民國年日期字串（`108/03/04`）。
 ///
 /// 年份限定在民國 200 年以內：來源若改回西元（`2019/03/04`），不設限會算出西元 3930 年。
-fn parse_roc_date(raw: &str) -> Option<NaiveDate> {
+fn parse_roc_date(raw: &str) -> Option<Date> {
     /// 民國紀年的合理上界。
     const MAX_ROC_YEAR: i32 = 200;
 
     parse_taiwan_date(raw.trim())
-        .filter(|date| date.year() <= roc_year_to_gregorian_year(MAX_ROC_YEAR))
+        .filter(|date| i32::from(date.year()) <= roc_year_to_gregorian_year(MAX_ROC_YEAR))
 }
 
 /// 解析帶千分位逗號、正負號的數字；`--`、空字串等視為解析失敗。

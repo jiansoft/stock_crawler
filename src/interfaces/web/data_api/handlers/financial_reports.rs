@@ -11,7 +11,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use rust_decimal::Decimal;
 
 use super::{analytical_decimal_to_f64, database_error, ensure_stock_exists, error_response};
@@ -164,7 +164,8 @@ struct IncomeRow {
     profit_before_tax_per_share: Option<Decimal>,
     eps: Option<Decimal>,
     bps: Option<Decimal>,
-    updated_at: DateTime<Utc>,
+    #[sqlx(try_from = "jiff_sqlx::Timestamp")]
+    updated_at: Timestamp,
 }
 
 impl IncomeRow {
@@ -197,7 +198,7 @@ impl IncomeRow {
             ),
             eps: convert(self.eps, "eps"),
             bps: convert(self.bps, "bps"),
-            updated_at: self.updated_at.to_rfc3339(),
+            updated_at: crate::core::util::datetime::rfc3339_utc::to_rfc3339(self.updated_at),
         }
     }
 }
@@ -236,7 +237,8 @@ struct BalanceRow {
     retained_earnings: Option<i64>,
     equity: Option<i64>,
     book_value_per_share: Option<Decimal>,
-    updated_at: DateTime<Utc>,
+    #[sqlx(try_from = "jiff_sqlx::Timestamp")]
+    updated_at: Timestamp,
 }
 
 impl BalanceRow {
@@ -278,7 +280,7 @@ impl BalanceRow {
                 symbol,
                 "book_value_per_share",
             ),
-            updated_at: self.updated_at.to_rfc3339(),
+            updated_at: crate::core::util::datetime::rfc3339_utc::to_rfc3339(self.updated_at),
         }
     }
 }
@@ -296,7 +298,8 @@ struct CashFlowRow {
     financing_cash_flow: Option<i64>,
     free_cash_flow: Option<i64>,
     net_cash_flow: Option<i64>,
-    updated_at: DateTime<Utc>,
+    #[sqlx(try_from = "jiff_sqlx::Timestamp")]
+    updated_at: Timestamp,
 }
 
 impl CashFlowRow {
@@ -313,7 +316,7 @@ impl CashFlowRow {
             financing_cash_flow: self.financing_cash_flow,
             free_cash_flow: self.free_cash_flow,
             net_cash_flow: self.net_cash_flow,
-            updated_at: self.updated_at.to_rfc3339(),
+            updated_at: crate::core::util::datetime::rfc3339_utc::to_rfc3339(self.updated_at),
         }
     }
 }

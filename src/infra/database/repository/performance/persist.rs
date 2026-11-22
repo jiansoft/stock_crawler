@@ -1,7 +1,8 @@
 //! CAGR 倉儲的寫入：批次 upsert 與刪除舊資料。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use crate::domain::performance::entity::StockCagr as DomainStockCagr;
 use crate::infra::database;
@@ -134,10 +135,20 @@ updated_time = now();
         }
 
         let result = sqlx::query(sql)
-            .bind(&dates)
+            .bind(
+                dates
+                    .iter()
+                    .map(|value| value.to_sqlx())
+                    .collect::<Vec<_>>(),
+            )
             .bind(&symbols)
             .bind(&periods)
-            .bind(&base_dates)
+            .bind(
+                base_dates
+                    .iter()
+                    .map(|value| value.map(ToSqlx::to_sqlx))
+                    .collect::<Vec<_>>(),
+            )
             .bind(&base_prices)
             .bind(&end_prices)
             .bind(&years)
@@ -155,7 +166,12 @@ updated_time = now();
             .bind(&reinv_end_values)
             .bind(&reinv_return_pcts)
             .bind(&reinv_cagr_pcts)
-            .bind(&first_quote_dates)
+            .bind(
+                first_quote_dates
+                    .iter()
+                    .map(|value| value.map(ToSqlx::to_sqlx))
+                    .collect::<Vec<_>>(),
+            )
             .bind(&shortfall_days)
             .bind(&data_completes)
             .bind(&has_anomalies)
@@ -171,9 +187,9 @@ updated_time = now();
 }
 
 /// 刪除早於指定日期的歷史資料。
-pub(super) async fn delete_before(date: NaiveDate) -> Result<u64> {
+pub(super) async fn delete_before(date: Date) -> Result<u64> {
     let result = sqlx::query("DELETE FROM stock_cagr WHERE date < $1")
-        .bind(date)
+        .bind(date.to_sqlx())
         .execute(database::get_connection())
         .await
         .context("Failed to delete stock_cagr in PgCagrRepository::delete_before")?;

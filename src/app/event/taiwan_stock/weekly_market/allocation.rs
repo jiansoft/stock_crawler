@@ -6,9 +6,10 @@
 //! 試算，只列使用者設了目標的個股；成分資料超過 [`STALE_COMPONENT_DAYS`] 天的 ETF 不計入並註明。
 
 use crate::domain::portfolio::view::HoldingView;
+use jiff::ToSpan;
 use std::collections::HashSet;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::domain::portfolio::{
     rebalance::{
@@ -121,9 +122,9 @@ pub(super) fn section_from_result(result: &PortfolioRebalanceResult) -> Option<A
 fn fresh_components(
     held: &[CurrentPosition],
     components: Vec<crate::domain::portfolio::rebalance::DatedEtfComponent>,
-    today: NaiveDate,
+    today: Date,
 ) -> (Vec<EtfLookThroughComponent>, Vec<String>) {
-    let oldest = today - chrono::Duration::days(STALE_COMPONENT_DAYS);
+    let oldest = today - (STALE_COMPONENT_DAYS).days();
     let mut fresh_etfs = HashSet::new();
     let fresh: Vec<EtfLookThroughComponent> = components
         .into_iter()
@@ -149,7 +150,7 @@ async fn etf_look_through_section(
     targets: &[(String, f64)],
     held: &[CurrentPosition],
     params: &RebalanceParams,
-    today: NaiveDate,
+    today: Date,
 ) -> Option<AllocationSection> {
     let etf_symbols: Vec<String> = held
         .iter()
@@ -198,7 +199,7 @@ pub(super) async fn allocation_sections(
     targets: &impl PortfolioTargetRepository,
     positions: &impl PortfolioPositionQuery,
     view: &HoldingView,
-    today: NaiveDate,
+    today: Date,
 ) -> Vec<AllocationSection> {
     let owner = TargetOwner::new(view.household_id(), view.member_id_or_total().to_string());
     let records = match targets.list_targets(&owner, None).await {

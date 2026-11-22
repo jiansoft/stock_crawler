@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::limit::run_limited;
 use axum::{
@@ -134,7 +134,7 @@ pub(super) fn split_results(
     rows: &[PeriodRow],
     costs: &[PeriodCost],
     hold_days: u16,
-    split: Option<NaiveDate>,
+    split: Option<Date>,
 ) -> Option<(BacktestOffsetResult, BacktestOffsetResult)> {
     let split = split?;
     let in_sample_end =

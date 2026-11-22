@@ -9,7 +9,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Days, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::{analytical_decimal_to_f64, ensure_stock_exists, error_response, repository_error};
@@ -54,7 +55,7 @@ pub(crate) async fn dividend_fill(
 
     let outcomes: Vec<FillOutcome> = match events.last() {
         Some(oldest) => {
-            let since = oldest.ex_date - Days::new(fill::PRE_EX_LOOKBACK_DAYS);
+            let since = oldest.ex_date - fill::PRE_EX_LOOKBACK_DAYS.days();
             let closes = match repository.fetch_daily_closes(&symbol, since).await {
                 Ok(closes) => closes,
                 Err(error) => return repository_error(error),
@@ -83,7 +84,7 @@ pub(crate) async fn dividend_fill(
 /// 略過最新收盤日之後（尚未除權息）的事件，取最近 `limit` 次（由新到舊）。
 fn select_events(
     events: Vec<ExRightEvent>,
-    latest_quote: Option<NaiveDate>,
+    latest_quote: Option<Date>,
     limit: usize,
 ) -> Vec<ExRightEvent> {
     let Some(latest_quote) = latest_quote else {

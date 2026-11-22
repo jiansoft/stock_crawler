@@ -1,5 +1,7 @@
 //! 股利預估、持股籌碼與持股填息 endpoints 的資料庫語意整合測試。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
 use rust_decimal::Decimal;
 
 use super::support::{SEED_STOCK, SYMBOL, cleanup, get, pool_or_skip, seed};
@@ -14,8 +16,6 @@ use super::*;
     ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
 )]
 async fn portfolio_dividend_forecast_endpoint_db_semantics() {
-    use chrono::{Datelike, Days};
-
     const MEMBER: i64 = 979_790;
     let Some(pool) = pool_or_skip("portfolio_dividend_forecast_endpoint_db_semantics").await else {
         return;
@@ -39,11 +39,11 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
     assert_eq!(json["months"].as_array().map(Vec::len), Some(13));
 
     seed(pool, &[SEED_STOCK]).await;
-    let today = chrono::Local::now().date_naive();
-    let fmt = |date: chrono::NaiveDate| date.format("%Y-%m-%d").to_string();
-    let announced_ex = today + Days::new(20);
-    let past_ex = today - Days::new(100);
-    let recorded_ex = today - Days::new(5);
+    let today = today();
+    let fmt = |date: jiff::civil::Date| date.strftime("%Y-%m-%d").to_string();
+    let announced_ex = today + 20.days();
+    let past_ex = today - 100.days();
+    let recorded_ex = today - 5.days();
     // 除息前持有 600 股（有已領明細）、除息後再買 400 股；目前合計 1,000 股。
     let mut lots = Vec::new();
     for shares in [600_i64, 400] {
@@ -70,7 +70,7 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
             "Q4",
             2,
             fmt(announced_ex),
-            fmt(announced_ex + Days::new(20)),
+            fmt(announced_ex + 20.days()),
         ),
         (
             past_ex.year(),
@@ -78,7 +78,7 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
             "Q1",
             1,
             fmt(past_ex),
-            fmt(past_ex + Days::new(20)),
+            fmt(past_ex + 20.days()),
         ),
         (
             today.year(),
@@ -94,7 +94,7 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
             "Q3",
             1,
             fmt(recorded_ex),
-            fmt(recorded_ex + Days::new(15)),
+            fmt(recorded_ex + 15.days()),
         ),
     ] {
         sqlx::query(r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2) VALUES ($1, $2, $3, $4, $5, 0, $5, $6, '-', $7, '-')"#)

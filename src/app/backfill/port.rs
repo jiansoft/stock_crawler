@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::infra::crawler::share::DailyQuoteDto;
 
@@ -18,5 +18,5 @@ pub trait MonthlyQuoteFetcher: Send + Sync {
     ///
     /// `month` 只取年月。查無資料（例如該股當月尚未上市）回傳空陣列而非錯誤；
     /// 只有真正的失敗（網路、來源格式異動）才回傳 `Err`。
-    async fn fetch(&self, stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuoteDto>>;
+    async fn fetch(&self, stock_symbol: &str, month: Date) -> Result<Vec<DailyQuoteDto>>;
 }

@@ -8,7 +8,7 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use moka::future::Cache;
 use once_cell::sync::Lazy;
 
@@ -21,7 +21,7 @@ use crate::domain::dividend::fill_stats::{FillSample, MarketFillQuery, stats_win
 const TIME_TO_LIVE: Duration = Duration::from_secs(7 * 3600);
 
 /// 快取鍵：統計期間（起日、迄日）。
-type WindowKey = (NaiveDate, NaiveDate);
+type WindowKey = (Date, Date);
 
 /// 依統計期間快取的全市場填息樣本。
 static SAMPLES: Lazy<Cache<WindowKey, Arc<Vec<FillSample>>>> = Lazy::new(|| {
@@ -37,8 +37,8 @@ static SAMPLES: Lazy<Cache<WindowKey, Arc<Vec<FillSample>>>> = Lazy::new(|| {
 ///
 /// `load` 失敗時回傳其錯誤（保留原因鏈），且不寫入快取。
 pub async fn market_fill_samples(
-    since: NaiveDate,
-    until: NaiveDate,
+    since: Date,
+    until: Date,
     load: impl Future<Output = Result<Vec<FillSample>>>,
 ) -> Result<Arc<Vec<FillSample>>> {
     SAMPLES
@@ -54,7 +54,7 @@ pub async fn market_fill_samples(
 /// 查詢失敗時回傳錯誤。
 pub async fn market_fill_samples_for(
     query: &impl MarketFillQuery,
-    today: NaiveDate,
+    today: Date,
     years: u8,
 ) -> Result<Arc<Vec<FillSample>>> {
     let (since, until) = stats_window(today, years);
@@ -70,7 +70,7 @@ pub async fn market_fill_samples_for(
 /// 查詢失敗時回傳錯誤，原有的快取保留不動。
 pub async fn refresh_market_fill_samples_for(
     query: &impl MarketFillQuery,
-    today: NaiveDate,
+    today: Date,
     years: u8,
 ) -> Result<usize> {
     let window = stats_window(today, years);

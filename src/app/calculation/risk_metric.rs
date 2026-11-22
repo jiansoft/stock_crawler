@@ -1,7 +1,7 @@
 //! 收盤後寫入每日風險指標（`daily_risk_metric`：近 240 筆日線的年化波動度與對加權指數的 beta）。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::infra::database::repository::risk_metric::PgRiskMetricRepository;
 
@@ -10,7 +10,7 @@ use crate::infra::database::repository::risk_metric::PgRiskMetricRepository;
 /// # Errors
 ///
 /// 查詢或寫入失敗時回傳錯誤。
-pub async fn calculate_risk_metrics(date: NaiveDate) -> Result<u64> {
+pub async fn calculate_risk_metrics(date: Date) -> Result<u64> {
     calculate_risk_metrics_between(date, date).await
 }
 
@@ -19,7 +19,7 @@ pub async fn calculate_risk_metrics(date: NaiveDate) -> Result<u64> {
 /// # Errors
 ///
 /// 查詢或寫入失敗時回傳錯誤。
-pub async fn calculate_risk_metrics_between(from: NaiveDate, to: NaiveDate) -> Result<u64> {
+pub async fn calculate_risk_metrics_between(from: Date, to: Date) -> Result<u64> {
     PgRiskMetricRepository::new()
         .replace_range(from, to)
         .await

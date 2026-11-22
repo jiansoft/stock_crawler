@@ -1,6 +1,8 @@
 //! ETF 折溢價與申贖警示（門檻、連續天數、過期資料與訊息格式）的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff_sqlx::ToSqlx;
 
 #[test]
 fn persistent_premium_requires_three_consecutive_trading_days_and_no_repeat() {
@@ -52,8 +54,8 @@ fn persistent_alert_is_dropped_when_symbol_already_has_premium_alert() {
     assert_eq!(alerts[1], persistent("0056"));
 }
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("日期合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("日期合法")
 }
 
 /// 由新到舊的折溢價，第一筆是 `latest`。
@@ -113,7 +115,7 @@ fn stale_data_is_ignored() {
     assert!(detect(&one("00830", Vec::new()), day(21)).is_empty());
 }
 
-fn units(date: NaiveDate, outstanding: i64, change: i64, nav: Option<f64>) -> UnitsChangePoint {
+fn units(date: Date, outstanding: i64, change: i64, nav: Option<f64>) -> UnitsChangePoint {
     UnitsChangePoint {
         date,
         outstanding_units: outstanding,
@@ -195,15 +197,15 @@ fn message_lists_alerts_in_order() {
 
 /// 排程本體接資料庫：種入假會員持有的假 ETF 與固定日期的淨值，剛轉高溢價與大額申購各發一則。
 mod database {
-    use chrono::NaiveDate;
+    use jiff::civil::Date;
 
     use super::*;
 
     const MEMBER: i64 = 979_794;
     const ETF: &str = "0079979PA";
 
-    fn date(day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(1999, 3, day).expect("固定日期合法")
+    fn date(day: u32) -> Date {
+        ymd(1999, 3, day).expect("固定日期合法")
     }
 
     async fn cleanup(pool: &sqlx::PgPool) {
@@ -233,8 +235,8 @@ mod database {
             r#"INSERT INTO etf_daily_nav (date, stock_symbol, outstanding_units, units_change, estimated_nav, premium_rate)
                VALUES ($1, $3, 1000000, 0, 20, 0.5), ($2, $3, 1100000, 100000, 20, 2.5)"#,
         )
-        .bind(date(9))
-        .bind(date(10))
+        .bind(date(9).to_sqlx())
+        .bind(date(10).to_sqlx())
         .bind(ETF)
         .execute(pool)
         .await

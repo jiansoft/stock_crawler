@@ -2,6 +2,10 @@
 //! 已公布的資料。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 /// 種入 400 張大戶比例（%，千張比例固定 50）。03-08 與換股日同一天，換股日當天還看不到：
 ///
@@ -40,16 +44,16 @@ async fn seed_chip_concentration(pool: &sqlx::PgPool) {
             .expect("種入集保週資料");
         }
     }
-    let start = NaiveDate::from_ymd_opt(1993, 2, 6).expect("固定日期合法");
+    let start = date(1993, 2, 6);
     for (symbol, [base, rest, mar5, mar8]) in [
         ("79979BA", [1000, 800, 900, 100]),
         ("79979BB", [1000, 1000, 500, 5000]),
         ("79979BC", [0, 0, 0, 0]),
     ] {
-        let mut rows: Vec<(NaiveDate, i64)> = (0..21)
+        let mut rows: Vec<(Date, i64)> = (0..21)
             .map(|offset| {
                 let balance = if offset == 0 { base } else { rest };
-                (start + chrono::Duration::days(offset), balance)
+                (start + (offset).days(), balance)
             })
             .collect();
         rows.push((day(5), mar5));
@@ -59,7 +63,7 @@ async fn seed_chip_concentration(pool: &sqlx::PgPool) {
                 r#"INSERT INTO chip_daily ("date", stock_symbol, margin_balance) VALUES ($1, $2, $3)
                    ON CONFLICT ("date", stock_symbol) DO UPDATE SET margin_balance = EXCLUDED.margin_balance"#,
             )
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(symbol)
             .bind(balance)
             .execute(pool)

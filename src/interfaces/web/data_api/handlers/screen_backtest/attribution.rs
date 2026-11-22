@@ -11,6 +11,7 @@
 //! 策略沒持有的產業 rp 取 rb（選股、交互為 0）；基準沒有的產業 rb 取 Rb（配置為 0）。整段與各年度
 //! 是各期效果直接相加，不複利。
 
+use jiff_sqlx::ToSqlx;
 use std::collections::HashMap;
 
 use axum::{
@@ -18,7 +19,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::preset::BacktestQuery;
 use super::{Backtest, PeriodRow};
@@ -183,15 +184,20 @@ pub(crate) async fn screen_backtest_attribution(BacktestQuery(params): BacktestQ
 async fn benchmark_rows(
     backtest: &Backtest<'_>,
     rows: &[&PeriodRow],
-) -> Result<HashMap<NaiveDate, BenchmarkRow>, sqlx::Error> {
-    let dates: Vec<NaiveDate> = rows.iter().map(|row| row.date).collect();
+) -> Result<HashMap<Date, BenchmarkRow>, sqlx::Error> {
+    let dates: Vec<Date> = rows.iter().map(|row| row.date).collect();
     let (Some(first), Some(last)) = (dates.first(), dates.last()) else {
         return Ok(HashMap::new());
     };
     let benchmarks: Vec<BenchmarkRow> = sqlx::query_as(BENCHMARK_SQL)
-        .bind(first)
-        .bind(last)
-        .bind(&dates)
+        .bind(first.to_sqlx())
+        .bind(last.to_sqlx())
+        .bind(
+            dates
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(i32::from(backtest.hold_days))
         .bind(backtest.market_id)
         .bind(BENCHMARK_SIZE)

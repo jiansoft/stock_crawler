@@ -1,6 +1,7 @@
 //! 訊號績效與個股訊號歷史的期間解析、回應組裝與排序測試。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::benchmark::{Benchmark, split_benchmark};
@@ -11,8 +12,8 @@ use super::validation::require_indicator_for_long_period;
 use super::*;
 use crate::interfaces::web::data_api::dto::{BenchmarkStat, HorizonStat, SignalPerformanceParams};
 
-fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("有效日期")
+fn day(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("有效日期")
 }
 
 fn performance_row(indicator: &str, kind: &str, n60: i64) -> PerformanceRow {
@@ -151,7 +152,7 @@ fn long_periods_require_an_indicator() {
     );
 }
 
-fn stock_row(date: NaiveDate, indicator: &str, kind: &str) -> StockSignalRow {
+fn stock_row(date: Date, indicator: &str, kind: &str) -> StockSignalRow {
     StockSignalRow {
         date,
         indicator: indicator.to_owned(),

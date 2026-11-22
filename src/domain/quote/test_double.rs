@@ -9,7 +9,7 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -31,7 +31,7 @@ pub(crate) struct CountingQuoteRepository {
     /// 為 true 時 `insert_missing_daily_quotes` 一律回傳錯誤。
     fail_insert: bool,
     /// 歷次 `recalculate_moving_averages` 收到的 `(代號, 起始日)`。
-    recalculated: Mutex<Vec<(Vec<String>, NaiveDate)>>,
+    recalculated: Mutex<Vec<(Vec<String>, Date)>>,
     /// `rebuild_quote_history_price_extremes` 收到的代號，依呼叫順序展開。
     rebuilt_extremes: Mutex<Vec<String>>,
 }
@@ -56,7 +56,7 @@ impl CountingQuoteRepository {
     }
 
     /// 取得歷次 `recalculate_moving_averages` 收到的 `(代號, 起始日)`。
-    pub(crate) fn recalculated(&self) -> Vec<(Vec<String>, NaiveDate)> {
+    pub(crate) fn recalculated(&self) -> Vec<(Vec<String>, Date)> {
         self.recalculated.lock().expect("測試鎖不應中毒").clone()
     }
 
@@ -69,7 +69,7 @@ impl CountingQuoteRepository {
     }
 
     /// 取得已收到報價的 `(代號, 日期)` 清單，依收到順序排列。
-    pub(crate) fn inserted_keys(&self) -> Vec<(String, NaiveDate)> {
+    pub(crate) fn inserted_keys(&self) -> Vec<(String, Date)> {
         self.inserted
             .lock()
             .expect("測試鎖不應中毒")
@@ -102,19 +102,15 @@ impl QuoteRepository for CountingQuoteRepository {
         unimplemented!("測試不應走到這裡")
     }
 
-    async fn fetch_quotes_by_date(&self, _date: NaiveDate) -> Result<Vec<DailyQuote>> {
+    async fn fetch_quotes_by_date(&self, _date: Date) -> Result<Vec<DailyQuote>> {
         unimplemented!("測試不應走到這裡")
     }
 
-    async fn delete_quotes_by_date(&self, _date: NaiveDate) -> Result<()> {
+    async fn delete_quotes_by_date(&self, _date: Date) -> Result<()> {
         unimplemented!("測試不應走到這裡")
     }
 
-    async fn replace_quotes_by_date(
-        &self,
-        _date: NaiveDate,
-        _quotes: &[DailyQuote],
-    ) -> Result<u64> {
+    async fn replace_quotes_by_date(&self, _date: Date, _quotes: &[DailyQuote]) -> Result<u64> {
         unimplemented!("測試不應走到這裡")
     }
 
@@ -129,7 +125,7 @@ impl QuoteRepository for CountingQuoteRepository {
     async fn recalculate_moving_averages(
         &self,
         stock_symbols: &[String],
-        from: NaiveDate,
+        from: Date,
     ) -> Result<u64> {
         self.recalculated
             .lock()
@@ -146,18 +142,18 @@ impl QuoteRepository for CountingQuoteRepository {
         Ok(0)
     }
 
-    async fn fetch_symbols_quoted_since(&self, _from: NaiveDate) -> Result<Vec<String>> {
+    async fn fetch_symbols_quoted_since(&self, _from: Date) -> Result<Vec<String>> {
         unimplemented!("測試不應走到這裡")
     }
 
-    async fn makeup_for_the_lack_daily_quotes(&self, _date: NaiveDate) -> Result<u64> {
+    async fn makeup_for_the_lack_daily_quotes(&self, _date: Date) -> Result<u64> {
         unimplemented!("測試不應走到這裡")
     }
 
     async fn fetch_market_traded_counts(
         &self,
-        _from: NaiveDate,
-        _to: NaiveDate,
+        _from: Date,
+        _to: Date,
     ) -> Result<Vec<crate::domain::quote::entity::MarketTradedCount>> {
         unimplemented!("測試不應走到這裡")
     }
@@ -187,7 +183,7 @@ impl QuoteRepository for CountingQuoteRepository {
         unimplemented!("測試不應走到這裡")
     }
 
-    async fn save_stock_price_stats(&self, _date: NaiveDate) -> Result<()> {
+    async fn save_stock_price_stats(&self, _date: Date) -> Result<()> {
         unimplemented!("測試不應走到這裡")
     }
 

@@ -4,6 +4,8 @@
 //! [`crate::infra::database::repository::portfolio::forecast::load_inputs`] 讀取（每月快照排程共用），
 //! 預估規則在 [`crate::domain::portfolio::dividend_forecast`]。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use axum::{
@@ -12,7 +14,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::dividend_fill::summary_dto;
@@ -47,7 +48,7 @@ pub(crate) async fn dividend_forecast(
     if !(1..=24).contains(&months) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "months 必須介於 1 至 24");
     }
-    let today = Local::now().date_naive();
+    let today = today();
     let inputs = match forecast::load_inputs(&view, today, u32::from(months)).await {
         Ok(inputs) => inputs,
         Err(error) => return repository_error(error),
@@ -92,7 +93,7 @@ fn attach_fill_hints(
 fn build_response(
     member_id: i64,
     inputs: &ForecastInputs,
-    today: NaiveDate,
+    today: Date,
     months: u8,
 ) -> DividendForecastResponse {
     let result = dividend_forecast::forecast(

@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::domain::performance::entity::{
     CagrCoverage, CagrMetric, CagrPeriod, StockCagr as DomainStockCagr,
@@ -72,7 +72,7 @@ impl CagrRepository for PgCagrRepository {
     /// 取得指定基準日與期間的排行榜，見 [`ranking::fetch_ranking`]。
     async fn fetch_ranking(
         &self,
-        date: NaiveDate,
+        date: Date,
         period: CagrPeriod,
         metric: CagrMetric,
         limit: i64,
@@ -89,7 +89,7 @@ impl CagrRepository for PgCagrRepository {
     /// 取得單一個股在指定基準日的所有期間結果，見 [`lookup::fetch_by_symbol`]。
     async fn fetch_by_symbol(
         &self,
-        date: NaiveDate,
+        date: Date,
         stock_symbol: &str,
     ) -> Result<Vec<DomainStockCagr>> {
         lookup::fetch_by_symbol(date, stock_symbol).await
@@ -98,7 +98,7 @@ impl CagrRepository for PgCagrRepository {
     /// 取得指定基準日與期間的樣本涵蓋統計，見 [`lookup::fetch_coverage`]。
     async fn fetch_coverage(
         &self,
-        date: NaiveDate,
+        date: Date,
         period: CagrPeriod,
         metric: CagrMetric,
     ) -> Result<CagrCoverage> {
@@ -106,16 +106,16 @@ impl CagrRepository for PgCagrRepository {
     }
 
     /// 取得最新一個已完成計算的基準日。
-    async fn fetch_latest_date(&self) -> Result<Option<NaiveDate>> {
+    async fn fetch_latest_date(&self) -> Result<Option<Date>> {
         lookup::fetch_latest_date().await
     }
 
-    async fn fetch_dates_missing_period(&self, period: CagrPeriod) -> Result<Vec<NaiveDate>> {
+    async fn fetch_dates_missing_period(&self, period: CagrPeriod) -> Result<Vec<Date>> {
         lookup::fetch_dates_missing_period(period).await
     }
 
     /// 刪除早於指定日期的歷史資料。
-    async fn delete_before(&self, date: NaiveDate) -> Result<u64> {
+    async fn delete_before(&self, date: Date) -> Result<u64> {
         persist::delete_before(date).await
     }
 }

@@ -17,11 +17,12 @@
 //!    - 融資餘額增減達 [`MARGIN_MIN_PERCENT`]% 且 [`MARGIN_MIN_LOTS`] 張以上
 //!    - 融券餘額增減達 [`SHORT_MIN_PERCENT`]% 且 [`SHORT_MIN_LOTS`] 張以上
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +55,7 @@ const STREAK_TTL_SECONDS: usize = 60 * 60 * 24 * 30;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Streak {
     /// 最後一次更新的交易日。
-    date: NaiveDate,
+    date: Date,
     foreign: i32,
     trust: i32,
 }
@@ -81,7 +82,7 @@ pub struct RunSummary {
 
 /// 依當天籌碼更新每檔持股的連續天數（Redis），挑出符合任一通知條件的持股。
 async fn collect_reports(
-    date: NaiveDate,
+    date: Date,
     symbols: &BTreeSet<String>,
     flows: &HashMap<String, InstitutionalFlow>,
     margins: &HashMap<String, MarginBalance>,
@@ -126,7 +127,7 @@ pub async fn execute() -> Result<()> {
     let symbols = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for chip flow notification failed")?;
-    let date = Local::now().date_naive();
+    let date = today();
 
     let (flows, margins) = fetch_sources(date).await;
     if flows.is_empty() && margins.is_empty() {
@@ -175,7 +176,7 @@ pub async fn execute() -> Result<()> {
 
 /// 併抓上市、上櫃 `date` 的三大法人買賣超與融資融券餘額，各自合併成一張表；失敗的來源只記錄。
 async fn fetch_sources(
-    date: NaiveDate,
+    date: Date,
 ) -> (
     HashMap<String, InstitutionalFlow>,
     HashMap<String, MarginBalance>,
@@ -207,11 +208,7 @@ fn merge<T>(kind: &str, sources: [(&str, Result<HashMap<String, T>>); 2]) -> Has
 }
 
 /// 依當天買賣超方向更新連續天數；同一天重跑時維持原值。
-fn next_streak(
-    previous: Option<Streak>,
-    date: NaiveDate,
-    flow: Option<InstitutionalFlow>,
-) -> Streak {
+fn next_streak(previous: Option<Streak>, date: Date, flow: Option<InstitutionalFlow>) -> Streak {
     let previous = previous.unwrap_or_default();
     if previous.date == date {
         return previous;
@@ -275,7 +272,7 @@ fn reasons(report: &ChipReport) -> Vec<&'static str> {
 ///
 /// `stock_name` 由呼叫端提供（正式流程讀股票主檔快取），測試時可換成固定對照。
 fn build_message(
-    date: NaiveDate,
+    date: Date,
     reports: &[ChipReport],
     stock_name: impl Fn(&str) -> String,
 ) -> String {

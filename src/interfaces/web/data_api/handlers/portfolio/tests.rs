@@ -1,5 +1,6 @@
 //! 持股 Data API 端點的單元測試。
 
+use crate::core::util::datetime::ymd;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -16,7 +17,7 @@ fn build_response_uses_latest_quote_date() {
         name: "測試".to_owned(),
         industry_id: Some(1),
         industry_name: "水泥工業".to_owned(),
-        quote_date: NaiveDate::from_ymd_opt(2026, 4, day),
+        quote_date: ymd(2026, 4, day),
         closing_price: price,
         dividend_yield_percent: Some(dec!(3.5)),
         f_score: Some(7),
@@ -60,7 +61,7 @@ fn attach_indicators_matches_by_symbol() {
         name: symbol.to_owned(),
         industry_id: None,
         industry_name: String::new(),
-        quote_date: NaiveDate::from_ymd_opt(2026, 10, 14),
+        quote_date: ymd(2026, 10, 14),
         closing_price: Some(dec!(10)),
         dividend_yield_percent: None,
         f_score: None,
@@ -83,7 +84,7 @@ fn attach_indicators_matches_by_symbol() {
             closing_price: None,
         },
     };
-    let day = |d: u32| NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期");
+    let day = |d: u32| ymd(2026, 10, d).expect("合法日期");
     let mut response = build_response(1, vec![position("0050"), position("2330")], Vec::new());
     attach_indicators(
         &mut response,

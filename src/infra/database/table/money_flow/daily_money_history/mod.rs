@@ -1,5 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction, postgres::PgQueryResult};
 
@@ -9,11 +11,12 @@ use crate::infra::database;
 #[derive(sqlx::FromRow, Debug)]
 pub struct DailyMoneyHistory {
     /// 交易日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 建立時間。
-    pub created_at: DateTime<Local>,
+    pub created_at: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_at: DateTime<Local>,
+    pub updated_at: TaipeiDateTime,
     /// Unice 帳戶市值總額。
     pub unice: Decimal,
     /// Eddie 帳戶市值總額。
@@ -23,7 +26,7 @@ pub struct DailyMoneyHistory {
 }
 
 impl DailyMoneyHistory {
-    /* pub async fn fetch(date :NaiveDate) -> Result<> {
+    /* pub async fn fetch(date :Date) -> Result<> {
             let sql = format!("");
             sqlx::query_as::<_, DailyMoneyHistory>(&sql)
                 .bind(date.year())
@@ -45,7 +48,7 @@ impl DailyMoneyHistory {
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端傳入 transaction，
     /// 是否回滾由呼叫端決定。
     pub async fn upsert(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
@@ -76,7 +79,7 @@ ON CONFLICT (date) DO UPDATE SET
     updated_time = NOW();
 "#;
 
-        let query = sqlx::query(sql).bind(date);
+        let query = sqlx::query(sql).bind(date.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,

@@ -1,21 +1,27 @@
+use crate::core::util::datetime;
 use anyhow::*;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
 
 use crate::infra::database;
 
 /// 個股歷史價格與股價淨值比極值紀錄。
-#[derive(sqlx::Type, sqlx::FromRow, Debug, Default, Clone)]
+#[derive(sqlx::FromRow, Debug, Default, Clone)]
 pub struct QuoteHistoryRecord {
     /// 歷史最高價發生日期。
-    pub maximum_price_date_on: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub maximum_price_date_on: Date,
     /// 歷史最低價發生日期。
-    pub minimum_price_date_on: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub minimum_price_date_on: Date,
     /// 歷史最高股價淨值比發生日期。
-    pub maximum_price_to_book_ratio_date_on: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub maximum_price_to_book_ratio_date_on: Date,
     /// 歷史最低股價淨值比發生日期。
-    pub minimum_price_to_book_ratio_date_on: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub minimum_price_to_book_ratio_date_on: Date,
     /// 股票代號。
     pub security_code: String,
     /// 歷史最高價。
@@ -33,6 +39,11 @@ impl QuoteHistoryRecord {
     pub fn new(security_code: String) -> Self {
         QuoteHistoryRecord {
             security_code,
+            // 維持 chrono 時代的預設日期（jiff 的 Date 預設是 0000-01-01）
+            maximum_price_date_on: datetime::EPOCH_DATE,
+            minimum_price_date_on: datetime::EPOCH_DATE,
+            maximum_price_to_book_ratio_date_on: datetime::EPOCH_DATE,
+            minimum_price_to_book_ratio_date_on: datetime::EPOCH_DATE,
             ..Default::default()
         }
     }
@@ -152,13 +163,13 @@ SET
         sqlx::query(sql)
             .bind(&self.security_code)
             .bind(self.maximum_price)
-            .bind(self.maximum_price_date_on)
+            .bind(self.maximum_price_date_on.to_sqlx())
             .bind(self.minimum_price)
-            .bind(self.minimum_price_date_on)
+            .bind(self.minimum_price_date_on.to_sqlx())
             .bind(self.maximum_price_to_book_ratio)
-            .bind(self.maximum_price_to_book_ratio_date_on)
+            .bind(self.maximum_price_to_book_ratio_date_on.to_sqlx())
             .bind(self.minimum_price_to_book_ratio)
-            .bind(self.minimum_price_to_book_ratio_date_on)
+            .bind(self.minimum_price_to_book_ratio_date_on.to_sqlx())
             .execute(database::get_connection())
             .await
             .context(format!("Failed to upsert({:#?}) from database", self))

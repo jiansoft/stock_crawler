@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::infra::database;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 #[tokio::test]
 #[ignore]
@@ -17,7 +19,7 @@ async fn test_money_flow_repository_flow() {
     // 建立資金流向與市值倉儲實例
     let repo = PgMoneyFlowRepository::new();
     // 選擇有完整資料之特定測試交易日
-    let test_date = NaiveDate::from_ymd_opt(2026, 4, 20).unwrap();
+    let test_date = date(2026, 4, 20);
 
     // 1. 執行 recalculate_and_save_money_flow，驗證多表交易式批次更新是否可順利執行
     let result = repo.recalculate_and_save_money_flow(test_date).await;
@@ -55,8 +57,8 @@ async fn money_flow_repository_pairs_member_values_with_previous_day() {
         return;
     }
     const MEMBER: i64 = 979_790;
-    let previous = NaiveDate::from_ymd_opt(1990, 3, 1).expect("固定日期合法");
-    let current = NaiveDate::from_ymd_opt(1990, 3, 2).expect("固定日期合法");
+    let previous = date(1990, 3, 1);
+    let current = date(1990, 3, 2);
     let pool = database::get_connection();
     let cleanup = || async {
         for sql in [
@@ -67,7 +69,12 @@ async fn money_flow_repository_pairs_member_values_with_previous_day() {
             "DELETE FROM daily_stock_price_stats WHERE date = ANY($1)",
         ] {
             let _ = sqlx::query(sql)
-                .bind([previous, current])
+                .bind(
+                    ([previous, current])
+                        .iter()
+                        .map(|value| value.to_sqlx())
+                        .collect::<Vec<_>>(),
+                )
                 .execute(pool)
                 .await;
         }
@@ -85,8 +92,8 @@ async fn money_flow_repository_pairs_member_values_with_previous_day() {
         "INSERT INTO daily_money_history_member (household_id, settlement_household_id, date, member_id, market_value)
          VALUES (1, 1, $1, $3, 100), (1, 1, $2, $3, 120)",
     )
-    .bind(previous)
-    .bind(current)
+    .bind(previous.to_sqlx())
+    .bind(current.to_sqlx())
     .bind(MEMBER)
     .execute(pool)
     .await
@@ -128,7 +135,7 @@ async fn settlement_output_matches_snapshot() {
     }
     const MEMBER_A: i64 = 979_801;
     const MEMBER_B: i64 = 979_802;
-    let current = NaiveDate::from_ymd_opt(1987, 7, 16).expect("固定日期合法");
+    let current = date(1987, 7, 16);
     let mut tx = Some(database::get_tx().await.expect("開啟交易"));
 
     {
@@ -225,7 +232,7 @@ async fn settlement_output_matches_snapshot() {
          WHERE date = $1 AND household_id = 1 AND member_id IN (0, $2, $3)
          ORDER BY household_id, member_id",
     )
-    .bind(current)
+    .bind(current.to_sqlx())
     .bind(MEMBER_A)
     .bind(MEMBER_B)
     .fetch_all(&mut **conn)
@@ -240,7 +247,7 @@ async fn settlement_output_matches_snapshot() {
          WHERE date = $1 AND security_code LIKE '79979S%'
          ORDER BY household_id, member_id, security_code",
     )
-    .bind(current)
+    .bind(current.to_sqlx())
     .fetch_all(&mut **conn)
     .await
     .expect("讀取明細");
@@ -252,7 +259,7 @@ async fn settlement_output_matches_snapshot() {
          WHERE date = $1 AND security_code LIKE '79979S%'
          ORDER BY household_id, member_id, security_code, transaction_date",
     )
-    .bind(current)
+    .bind(current.to_sqlx())
     .fetch_all(&mut **conn)
     .await
     .expect("讀取批次明細");

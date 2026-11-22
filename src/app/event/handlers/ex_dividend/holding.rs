@@ -18,7 +18,7 @@ use crate::domain::portfolio::entity::StockOwnershipDetail;
 impl EventDispatcher {
     /// 依今日除權息事件與目前持股，組出第二則持股預估股利通知。
     pub(super) fn build_holding_dividend_message(
-        today: chrono::NaiveDate,
+        today: jiff::civil::Date,
         stocks_dividend_info: &[StockDividendInfo],
         holdings: &[StockOwnershipDetail],
         names: &BTreeMap<i64, String>,
@@ -41,7 +41,7 @@ impl EventDispatcher {
 
         for holding in holdings
             .iter()
-            .filter(|holding| holding.created_time.date_naive() < today)
+            .filter(|holding| holding.created_time.date() < today)
         {
             let Some(stock) = stock_info_map.get(holding.security_code.as_str()) else {
                 continue;

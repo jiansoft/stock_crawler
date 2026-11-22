@@ -1,15 +1,17 @@
 //! 停損與日頻報酬用的日線：持有期間的讀取視窗、還原權值、開盤價比與跨期共用的日線快取。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 各股在指定交易日的開盤價／收盤價比，鍵為 `(代號, 日期)`；次日開盤成交的日頻路徑用。
-pub(in super::super) type OpenRatios = HashMap<(String, NaiveDate), f64>;
+pub(in super::super) type OpenRatios = HashMap<(String, Date), f64>;
 
 /// 換股日之後的第一個交易日（`calendar` 為 0050 或全部日線的交易日）。
 pub(in super::super) fn entry_date(
-    calendar: &std::collections::BTreeSet<NaiveDate>,
-    rebalance: NaiveDate,
-) -> Option<NaiveDate> {
+    calendar: &std::collections::BTreeSet<Date>,
+    rebalance: Date,
+) -> Option<Date> {
     calendar
         .range((
             std::ops::Bound::Excluded(rebalance),
@@ -24,11 +26,11 @@ pub(in super::super) async fn load_open_ratios(
     rows: &[PeriodRow],
     bars: &HashMap<String, Arc<Vec<PriceBar>>>,
 ) -> Result<OpenRatios, sqlx::Error> {
-    let calendar: std::collections::BTreeSet<NaiveDate> = bars
+    let calendar: std::collections::BTreeSet<Date> = bars
         .get(super::super::ETF_BENCHMARK)
         .map(|series| series.iter().map(|bar| bar.date).collect())
         .unwrap_or_default();
-    let mut points: HashSet<(String, NaiveDate)> = HashSet::new();
+    let mut points: HashSet<(String, Date)> = HashSet::new();
     for row in rows.iter().filter(|row| !row.pending) {
         let (Some(exit), Some(entry)) = (
             row.exit_date,
@@ -46,7 +48,7 @@ pub(in super::super) async fn load_open_ratios(
             points.insert((symbol.to_owned(), exit));
         }
     }
-    let points: Vec<(String, NaiveDate)> = points.into_iter().collect();
+    let points: Vec<(String, Date)> = points.into_iter().collect();
     PgQuoteRepository::new().fetch_open_ratios(&points).await
 }
 
@@ -79,10 +81,10 @@ pub(in super::super) async fn load_holding_windows(
 }
 
 /// 已滿持有天數的各期持股要讀的日線期間 `(代號, 起日, 迄日)`，同一檔合併成不重疊的段、依代號排序。
-pub(in super::super) fn holding_windows(rows: &[PeriodRow]) -> Vec<(String, NaiveDate, NaiveDate)> {
-    let lookback = chrono::Duration::days(WINDOW_LOOKBACK_DAYS);
-    let mut spans: HashMap<&str, Vec<(NaiveDate, NaiveDate)>> = HashMap::new();
-    let mut calendar: Option<(NaiveDate, NaiveDate)> = None;
+pub(in super::super) fn holding_windows(rows: &[PeriodRow]) -> Vec<(String, Date, Date)> {
+    let lookback = (WINDOW_LOOKBACK_DAYS).days();
+    let mut spans: HashMap<&str, Vec<(Date, Date)>> = HashMap::new();
+    let mut calendar: Option<(Date, Date)> = None;
     for row in rows.iter().filter(|row| !row.pending) {
         let Some(exit) = row.exit_date else {
             continue;
@@ -102,12 +104,10 @@ pub(in super::super) fn holding_windows(rows: &[PeriodRow]) -> Vec<(String, Naiv
     let mut out = Vec::new();
     for (symbol, mut list) in spans {
         list.sort_unstable();
-        let mut merged: Vec<(NaiveDate, NaiveDate)> = Vec::new();
+        let mut merged: Vec<(Date, Date)> = Vec::new();
         for (start, end) in list {
             match merged.last_mut() {
-                Some(last) if start <= last.1 + chrono::Duration::days(1) => {
-                    last.1 = last.1.max(end)
-                }
+                Some(last) if start <= last.1 + 1.days() => last.1 = last.1.max(end),
                 _ => merged.push((start, end)),
             }
         }
@@ -124,7 +124,7 @@ pub(in super::super) fn holding_windows(rows: &[PeriodRow]) -> Vec<(String, Naiv
 /// 依 `symbol` 在 `windows` 的各段分別還原 `series`（由舊到新、只含這些段內的日線）。
 pub(super) fn adjust_windows(
     series: &[PriceBar],
-    windows: &[(String, NaiveDate, NaiveDate)],
+    windows: &[(String, Date, Date)],
     symbol: &str,
     events: &[PriceAdjustment],
 ) -> Vec<PriceBar> {
@@ -151,8 +151,8 @@ impl BarCache {
     pub(in super::super) async fn load(
         &self,
         rows: &[PeriodRow],
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<HashMap<String, Arc<Vec<PriceBar>>>, sqlx::Error> {
         let mut wanted: HashSet<&str> = rows
             .iter()

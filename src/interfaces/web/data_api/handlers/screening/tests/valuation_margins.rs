@@ -1,6 +1,7 @@
 //! 條件選股整合測試：本益比／股價淨值比上限與三率門檻。
 
 use super::*;
+use jiff::civil::date;
 
 /// 本益比與股價淨值比：取查詢日 1988-03-05 之前 10 天內最新一筆日線，0 轉成 `null` 且不符合上限；
 /// 超過 10 天的日線不採用。
@@ -47,7 +48,7 @@ async fn screen_at_filters_valuation_caps() {
     .await
     .expect("種入日線本益比");
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let query_date = date(1988, 3, 5);
     let run = |max_pe: Option<f64>, max_pb: Option<f64>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);
@@ -142,7 +143,7 @@ async fn screen_at_filters_margins() {
     .await
     .expect("種入損益表");
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let query_date = date(1988, 3, 5);
     let run = |operating: Option<f64>, up: Option<bool>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

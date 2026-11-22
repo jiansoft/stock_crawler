@@ -1,8 +1,8 @@
 //! 比對規則：把交易所除權息事件對應到資料庫的股利列，產生要寫入的異動（不做 I/O）。
 
+use jiff::civil::Date;
 use std::collections::{HashMap, HashSet};
 
-use chrono::{Datelike, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::{DATE_FORMAT, ReconcilePlan, parse_date};
@@ -49,7 +49,7 @@ pub(super) const UNANNOUNCED_TOLERANCE: Decimal = Decimal::from_parts(1, 0, 0, f
 pub(crate) fn build_plan(
     official: &[ExDividendAnnouncement],
     existing: &HashMap<String, Vec<Dividend>>,
-    as_of: NaiveDate,
+    as_of: Date,
 ) -> ReconcilePlan {
     let mut plan = ReconcilePlan::default();
     let mut used: HashSet<(i64, Side)> = HashSet::new();
@@ -61,12 +61,12 @@ pub(crate) fn build_plan(
         official_dates
             .entry(event.stock_symbol.as_str())
             .or_default()
-            .insert(event.ex_date.format(DATE_FORMAT).to_string());
+            .insert(event.ex_date.strftime(DATE_FORMAT).to_string());
     }
 
     for event in official {
         let rows = event_rows(existing, &event.stock_symbol);
-        let date = event.ex_date.format(DATE_FORMAT).to_string();
+        let date = event.ex_date.strftime(DATE_FORMAT).to_string();
         let same_day: Vec<&Dividend> = rows
             .iter()
             .filter(|row| {
@@ -115,7 +115,8 @@ pub(crate) fn build_plan(
                     parse_date(date).is_some_and(|row_date| {
                         row_date <= as_of
                             && !stale_dates.contains(*date)
-                            && (row_date - event.ex_date).num_days().abs() <= SHIFT_WINDOW_DAYS
+                            && i64::from((row_date - event.ex_date).get_days()).abs()
+                                <= SHIFT_WINDOW_DAYS
                     })
                 })
             })
@@ -132,7 +133,8 @@ pub(crate) fn build_plan(
                         .all(|date| parse_date(date).is_none())
                 })
                 .filter(|row| {
-                    row.year == event.ex_date.year() || row.year == event.ex_date.year() + 1
+                    row.year == i32::from(event.ex_date.year())
+                        || row.year == i32::from(event.ex_date.year() + 1)
                 })
                 .filter(|row| amounts_close(row, event, UNANNOUNCED_TOLERANCE, false))
                 .copied()
@@ -220,7 +222,7 @@ pub(super) fn amounts_close(
 
 /// 把交易所日期寫進資料列對應的日期欄。
 pub(super) fn set_event_dates(row: &mut Dividend, event: &ExDividendAnnouncement) {
-    let date = event.ex_date.format(DATE_FORMAT).to_string();
+    let date = event.ex_date.strftime(DATE_FORMAT).to_string();
     if event.is_cash {
         row.ex_dividend_date_cash = date.clone();
     }
@@ -253,7 +255,7 @@ pub(super) fn apply_official(row: &mut Dividend, event: &ExDividendAnnouncement)
         row.sum = row.cash_dividend + row.stock_dividend;
     }
     // 同日比對時日期已經相同；兩種股利同一天除權息時補上另一欄的日期。
-    let date = event.ex_date.format(DATE_FORMAT).to_string();
+    let date = event.ex_date.strftime(DATE_FORMAT).to_string();
     if event.is_cash
         && row.cash_dividend > Decimal::ZERO
         && parse_date(&row.ex_dividend_date_cash).is_none()

@@ -1,5 +1,6 @@
 //! 上櫃個股日本益比與股價淨值比的測試；連外的測試標 #[ignore]。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -54,7 +55,7 @@ fn parse_empty_and_bad_layout() {
 #[ignore = "連線外部網站"]
 async fn test_visit_live() {
     dotenvy::dotenv().ok();
-    let date = NaiveDate::from_ymd_opt(2020, 6, 30).expect("有效日期");
+    let date = date(2020, 6, 30);
     let ratios = visit(date).await.expect("可取得");
     assert!(ratios.len() > 500, "{}", ratios.len());
     assert!(ratios.iter().any(|ratio| ratio.stock_symbol == "6488"));

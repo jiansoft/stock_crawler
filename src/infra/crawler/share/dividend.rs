@@ -3,7 +3,7 @@
 //! 定義 TWSE 與 TPEx 除權除息預告共用的資料結構，
 //! 以及交易所「權/息」類別字串的共用解析規則。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::core::declare::StockExchangeMarket;
@@ -27,7 +27,7 @@ pub struct ExDividendAnnouncement {
     /// 股票名稱。
     pub name: String,
     /// 除權除息交易日。
-    pub ex_date: NaiveDate,
+    pub ex_date: Date,
     /// 是否為除息（配發現金股利）。
     pub is_cash: bool,
     /// 是否為除權（配發股票股利）。

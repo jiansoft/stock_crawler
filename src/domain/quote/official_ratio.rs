@@ -11,7 +11,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 單一股票某日的官方本益比與股價淨值比。
@@ -51,15 +51,15 @@ pub trait OfficialRatioRepository: Send + Sync {
     async fn fetch_dates_to_update(
         &self,
         market_id: i32,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         policy: PePolicy,
-    ) -> Result<Vec<NaiveDate>>;
+    ) -> Result<Vec<Date>>;
 
     /// 把 `ratios` 寫入 `date` 當天的日線，本益比依 `policy`、淨值比只填 0，回傳更新列數。
     async fn fill_official_ratios(
         &self,
-        date: NaiveDate,
+        date: Date,
         ratios: &[OfficialRatio],
         policy: PePolicy,
     ) -> Result<u64>;

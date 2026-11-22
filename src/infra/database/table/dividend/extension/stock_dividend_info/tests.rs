@@ -1,5 +1,6 @@
 //! 除權息日股利資訊查詢的測試。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -56,7 +57,7 @@ async fn fetch_stocks_with_dividends_on_date_covers_next_year_payout() {
             .expect("種入股利");
     }
 
-    let date = NaiveDate::from_ymd_opt(2024, 12, 10).expect("合法日期");
+    let date = date(2024, 12, 10);
     let result = fetch_stocks_with_dividends_on_date(date).await;
     cleanup(pool).await;
     let mut rows: Vec<StockDividendInfo> = result

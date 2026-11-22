@@ -1,6 +1,6 @@
 //! gRPC 請求欄位的解析與 job 回應的轉換；驗證規則與 HTTP 手動回補 API 共用。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use tonic::Status;
 
@@ -22,14 +22,14 @@ pub(super) fn start_job_error_to_status(err: web::backfill_admin::StartJobError)
 }
 
 /// 解析 gRPC request 的日期欄位，格式錯誤時回傳 INVALID_ARGUMENT。
-pub(super) fn parse_grpc_date(date: &str) -> Result<NaiveDate, Status> {
-    NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d")
+pub(super) fn parse_grpc_date(date: &str) -> Result<Date, Status> {
+    Date::strptime("%Y-%m-%d", date.trim())
         .map_err(|why| Status::invalid_argument(format!("date must use YYYY-MM-DD: {why}")))
 }
 
 /// 解析 gRPC request 的月份欄位（`YYYY-MM`），並回傳該月一日。
-pub(super) fn parse_grpc_month(month: &str) -> Result<NaiveDate, Status> {
-    NaiveDate::parse_from_str(&format!("{}-01", month.trim()), "%Y-%m-%d")
+pub(super) fn parse_grpc_month(month: &str) -> Result<Date, Status> {
+    Date::strptime("%Y-%m-%d", format!("{}-01", month.trim()))
         .map_err(|why| Status::invalid_argument(format!("month must use YYYY-MM: {why}")))
 }
 
