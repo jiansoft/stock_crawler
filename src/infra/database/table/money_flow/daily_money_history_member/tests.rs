@@ -266,28 +266,28 @@ async fn test_upsert_covers_all_undeleted_members() {
     let mut ids = Vec::new();
     {
         let conn = tx.as_mut().expect("交易已開啟");
-        // (帳號, 啟用, 已刪除, 建立時間)
-        for (account, active, deleted, created) in [
-            ("__dmh_active__", true, false, "1987-07-01 12:00+08"),
-            ("__dmh_inactive__", false, false, "1987-07-01 12:00+08"),
-            ("__dmh_deleted__", true, true, "1987-07-01 12:00+08"),
-            ("__dmh_future__", true, false, "1987-07-21 12:00+08"),
+        // (帳號, 啟用, 建立時間)；__dmh_deleted__ 在種入持股後才標記刪除
+        for (account, active, created) in [
+            ("__dmh_active__", true, "1987-07-01 12:00+08"),
+            ("__dmh_inactive__", false, "1987-07-01 12:00+08"),
+            ("__dmh_deleted__", true, "1987-07-01 12:00+08"),
+            ("__dmh_future__", true, "1987-07-21 12:00+08"),
         ] {
             let id: i64 = sqlx::query_scalar(
-                r#"INSERT INTO "Member" ("Account", "Name", household_id, is_active, deleted_at, "CreateTime")
-                   VALUES ($1, $1, 1, $2, CASE WHEN $3 THEN now() END, $4::timestamptz)
+                r#"INSERT INTO "Member" ("Account", "Name", household_id, is_active, "CreateTime")
+                   VALUES ($1, $1, 1, $2, $3::timestamptz)
                    RETURNING "Id""#,
             )
             .bind(account)
             .bind(active)
-            .bind(deleted)
             .bind(created)
             .fetch_one(&mut **conn)
             .await
             .expect("建立測試會員");
             ids.push(id);
         }
-        // 已刪除的會員即使還有持股列也不計入
+        // 已刪除的會員即使還有持股列也不計入。隱私守門不允許替已刪除會員寫入持股，
+        // 所以先以未刪除狀態種入持股，再標記刪除（與實際「持股在先、刪除在後」的順序相同）。
         sqlx::query(
             "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, date)
              VALUES ($1, '79979SA', 1, '1987-07-01')",
@@ -295,7 +295,12 @@ async fn test_upsert_covers_all_undeleted_members() {
         .bind(ids[2])
         .execute(&mut **conn)
         .await
-        .expect("種入已刪除會員的持股");
+        .expect("種入待刪除會員的持股");
+        sqlx::query(r#"UPDATE "Member" SET deleted_at = now() WHERE "Id" = $1"#)
+            .bind(ids[2])
+            .execute(&mut **conn)
+            .await
+            .expect("標記會員已刪除");
     }
 
     DailyMoneyHistoryMember::upsert(date, &mut tx)
