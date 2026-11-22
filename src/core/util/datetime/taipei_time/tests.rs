@@ -1,17 +1,7 @@
-use chrono::{FixedOffset, TimeZone as _};
 use jiff::civil::{Weekday, date};
 use jiff::{SignedDuration, ToSpan};
 
 use super::*;
-
-/// 以 chrono 在 UTC+8 下的 `DateTime` 作為對照（chrono 移除前用來確認輸出逐字相同）。
-fn chrono_reference(seconds: i64, nanos: u32) -> chrono::DateTime<FixedOffset> {
-    FixedOffset::east_opt(8 * 3600)
-        .expect("固定偏移 +8 合法")
-        .timestamp_opt(seconds, nanos)
-        .single()
-        .expect("時間點合法")
-}
 
 fn taipei_at(seconds: i64, nanos: i32) -> TaipeiDateTime {
     TaipeiDateTime::from_timestamp(Timestamp::new(seconds, nanos).expect("時間點合法"))
@@ -19,34 +9,39 @@ fn taipei_at(seconds: i64, nanos: i32) -> TaipeiDateTime {
 
 #[test]
 fn test_formats_match_chrono_for_every_fraction_width() {
-    // 2026-11-22T05:05:09Z = 臺灣 13:05:09；涵蓋沒有小數、3、6、9 位與跨日的情況
-    let cases: [(i64, u32); 6] = [
-        (1_795_323_909, 0),
-        (1_795_323_909, 120_000_000),
-        (1_795_323_909, 123_456_000),
-        (1_795_323_909, 123_456_789),
-        (1_795_323_909, 5),
-        (1_795_366_799, 999_999_000),
+    // 期望值取自 chrono `DateTime<FixedOffset>`（+08:00）的實際輸出，移除 chrono 前逐一比對過。
+    // 2026-11-22T05:05:09Z = 臺灣 13:05:09；涵蓋沒有小數、3、6、9 位與跨日的情況。
+    let cases: [(i64, i32, &str, &str); 6] = [
+        (1_795_323_909, 0, "2026-11-22", "13:05:09"),
+        (1_795_323_909, 120_000_000, "2026-11-22", "13:05:09.120"),
+        (1_795_323_909, 123_456_000, "2026-11-22", "13:05:09.123456"),
+        (
+            1_795_323_909,
+            123_456_789,
+            "2026-11-22",
+            "13:05:09.123456789",
+        ),
+        (1_795_323_909, 5, "2026-11-22", "13:05:09.000000005"),
+        (1_795_366_799, 999_999_000, "2026-11-23", "00:59:59.999999"),
     ];
-    for (seconds, nanos) in cases {
-        let ours = taipei_at(seconds, i32::try_from(nanos).expect("奈秒在範圍內"));
-        let chrono = chrono_reference(seconds, nanos);
+    for (seconds, nanos, day, clock) in cases {
+        let ours = taipei_at(seconds, nanos);
         assert_eq!(
             ours.to_string(),
-            chrono.to_string(),
-            "Display 要與 chrono 相同"
+            format!("{day} {clock} +08:00"),
+            "Display 沿用 chrono 格式"
         );
         assert_eq!(
             format!("{ours:?}"),
-            format!("{chrono:?}"),
-            "Debug 要與 chrono 相同"
+            format!("{day}T{clock}+08:00"),
+            "Debug 沿用 chrono 格式"
         );
         assert_eq!(
             serde_json::to_string(&ours).expect("序列化"),
-            serde_json::to_string(&chrono).expect("序列化"),
-            "JSON 要與 chrono 相同"
+            format!("\"{day}T{clock}+08:00\""),
+            "JSON 沿用 chrono 格式"
         );
-        assert_eq!(ours.to_string(), format!("{ours}"));
+        assert_eq!(ours.to_rfc3339(), format!("{day}T{clock}+08:00"));
     }
 }
 
@@ -126,31 +121,38 @@ fn test_arithmetic_and_ordering() {
 
 #[test]
 fn test_ymd_matches_chrono_from_ymd_opt() {
-    let cases: [(i32, u32, u32); 6] = [
-        (2026, 11, 22),
-        (2024, 2, 29),
-        (2026, 2, 29),
-        (2026, 13, 1),
-        (2026, 0, 1),
-        (2026, 4, 31),
+    // 期望值與 chrono `NaiveDate::from_ymd_opt` 相同：不存在的日期與超出範圍的月日回傳 None
+    let cases: [(i32, u32, u32, Option<&str>); 6] = [
+        (2026, 11, 22, Some("2026-11-22")),
+        (2024, 2, 29, Some("2024-02-29")),
+        (2026, 2, 29, None),
+        (2026, 13, 1, None),
+        (2026, 0, 1, None),
+        (2026, 4, 31, None),
     ];
-    for (year, month, day) in cases {
+    for (year, month, day, expected) in cases {
         let ours = ymd(year, month, day).map(|value| value.to_string());
-        let chrono =
-            chrono::NaiveDate::from_ymd_opt(year, month, day).map(|value| value.to_string());
-        assert_eq!(ours, chrono, "{year}-{month}-{day} 的結果要與 chrono 相同");
+        assert_eq!(
+            ours.as_deref(),
+            expected,
+            "{year}-{month}-{day} 的結果要與 chrono 相同"
+        );
     }
     // 已知差異：jiff 的年份只到 9999（chrono 到 262143），超出時回傳 None
     assert_eq!(ymd(10_000, 1, 1), None);
-    assert!(chrono::NaiveDate::from_ymd_opt(10_000, 1, 1).is_some());
+    assert_eq!(ymd(9_999, 12, 31), Some(date(9999, 12, 31)));
 }
 
 #[test]
 fn test_today_and_now_are_taipei_time() {
     let now = TaipeiDateTime::now();
-    let expected = chrono::Utc::now().with_timezone(&FixedOffset::east_opt(8 * 3600).expect("+8"));
-    assert!((now.timestamp().as_second() - expected.timestamp()).abs() <= 2);
-    assert_eq!(now.date().to_string(), expected.date_naive().to_string());
+    let system_now = Timestamp::now();
+    assert!((now.timestamp().as_second() - system_now.as_second()).abs() <= 2);
+    // 同一時間點加 8 小時後的 UTC 日期時間，就是臺灣的日期時間
+    let shifted_utc =
+        tz::TimeZone::UTC.to_datetime(now.timestamp() + SignedDuration::from_hours(8));
+    assert_eq!(now.datetime(), shifted_utc, "臺灣時間固定為 UTC+8");
+    assert_eq!(now.date(), shifted_utc.date());
     assert!(today() >= now.date());
     assert_eq!(taipei().to_offset(now.timestamp()), tz::offset(8));
 }

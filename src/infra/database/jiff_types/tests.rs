@@ -1,4 +1,4 @@
-//! jiff 型別與 PostgreSQL 的往返：與 chrono 讀寫同一筆資料的結果相同。
+//! jiff 型別與 PostgreSQL 的往返。
 
 use jiff::civil::date;
 use jiff_sqlx::ToSqlx;
@@ -22,10 +22,10 @@ struct JiffRow {
     missing_moment: Option<TaipeiDateTime>,
 }
 
-/// 綁定 jiff 值寫入、以 FromRow 讀回，並與 chrono 讀同一個 SQL 字面值的結果比對。
+/// 綁定 jiff 值寫入、以 FromRow 讀回，並與直接讀 SQL 字面值的結果比對。
 #[tokio::test]
 #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
-async fn jiff_values_round_trip_like_chrono() {
+async fn jiff_values_round_trip() {
     dotenvy::dotenv().ok();
     let moment: TaipeiDateTime = "2026-11-22T13:05:09.123456+08:00".parse().expect("解析");
     let present: Option<Date> = Some(date(2024, 2, 29));
@@ -50,15 +50,16 @@ async fn jiff_values_round_trip_like_chrono() {
     assert_eq!(row.moment, moment);
     assert_eq!(row.missing_moment, None);
 
-    // chrono 讀同一個時間點，字串輸出相同
-    let (chrono_moment,): (chrono::DateTime<chrono::Local>,) =
+    // 直接讀 SQL 字面值：微秒精度的時間點與綁定寫入的相同
+    let (literal_moment,): (TaipeiDateTime,) =
         sqlx::query_as("SELECT '2026-11-22T13:05:09.123456+08:00'::timestamptz")
             .fetch_one(get_connection())
             .await
             .expect("查詢");
+    assert_eq!(literal_moment, moment);
     assert_eq!(
-        chrono_moment.timestamp_micros(),
-        moment.timestamp().as_microsecond()
+        literal_moment.timestamp().as_microsecond(),
+        1_795_323_909_123_456
     );
 
     // 陣列綁定

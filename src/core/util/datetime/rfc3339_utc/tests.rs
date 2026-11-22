@@ -9,7 +9,7 @@ struct Wrapper {
 }
 
 #[test]
-fn matches_chrono_utc_format() {
+fn serializes_like_chrono_utc_format() {
     let cases: [(i64, i32, &str); 5] = [
         (1_795_323_909, 0, "2026-11-22T05:05:09Z"),
         (1_795_323_909, 120_000_000, "2026-11-22T05:05:09.120Z"),
@@ -23,7 +23,7 @@ fn matches_chrono_utc_format() {
         assert_eq!(
             json,
             format!("{{\"at\":\"{expected}\"}}"),
-            "與 chrono 的 DateTime<Utc> 相同"
+            "格式沿用 chrono DateTime<Utc> 的輸出"
         );
         assert_eq!(serde_json::from_str::<Wrapper>(&json).expect("還原").at, at);
     }
