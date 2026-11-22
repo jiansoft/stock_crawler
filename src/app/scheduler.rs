@@ -9,19 +9,22 @@ use std::{
 };
 
 use anyhow::{Context, Error, Result};
-use chrono::FixedOffset;
-use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
     app::{calculation, event},
     // 通知一律走 core::alert 抽象介面（port）：app 層不 import
     // interfaces::bot（傳輸層細節），實際的 Telegram adapter 由 main 啟動時註冊。
     // 這樣 use case 可以在單元測試中注入假的 sink 驗證，也能日後替換通知管道。
-    core::{alert, declare, util::text},
+    core::{
+        alert,
+        cron::{CronJob, CronScheduler},
+        declare,
+        util::text,
+    },
 };
 
 /// 啟動排程
-pub async fn start(sched: &JobScheduler) -> Result<()> {
+pub async fn start(sched: &CronScheduler) -> Result<()> {
     let timer = Instant::now();
     tracing::info!("scheduler start begin: run_cron");
     let run_cron_timer = Instant::now();
@@ -97,13 +100,12 @@ fn spawn_market_peer_warmup() -> tokio::task::JoinHandle<()> {
 }
 
 /// 註冊所有 cron 任務並啟動排程器。
-async fn run_cron(sched: &JobScheduler) -> Result<()> {
+async fn run_cron(sched: &CronScheduler) -> Result<()> {
     let timer = Instant::now();
-    //let sched = JobScheduler::new().await?;
-    //                 sec  min   hour   day of month   month   day of week   year
-    //let expression = "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2";
-    // 台北時間（UTC+8）：create_job 內以 Job::new_async_tz 搭配 FixedOffset(+8)
-    // 解讀 cron 表達式，因此以下註解標示的時間皆為台北時間。
+    //                 sec  min   hour   day of month   month   day of week
+    //let expression = "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri";
+    // 台北時間（UTC+8）：core::cron 一律以 UTC+8 解讀 cron 表達式，
+    // 因此以下註解標示的時間皆為台北時間。
 
     let mut job_count = 0usize;
     for definition in jobs::definitions() {
@@ -116,14 +118,11 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             );
             continue;
         };
-        sched
-            .add(job)
-            .await
-            .context("Failed to add job to scheduler")?;
+        sched.add(job);
         job_count += 1;
     }
 
-    sched.start().await.context("Failed to start scheduler")?;
+    sched.start();
     tracing::info!(
         "scheduler run_cron done: jobs={}, elapsed={:?}",
         job_count,
@@ -139,7 +138,7 @@ pub trait Scheduler {
     fn is_weekend(&self) -> bool;
 }
 
-/// 將非同步工作包裝成 `tokio_cron_scheduler::Job`，並自動記錄執行時間。
+/// 將非同步工作包裝成 [`CronJob`]，並自動記錄執行時間。
 ///
 /// 每次任務註冊與觸發時會：
 /// 1. 於啟動註冊階段記錄排程任務名稱與運作週期。
@@ -150,7 +149,7 @@ pub trait Scheduler {
 ///
 /// 結構化欄位（`task`、`name`、`elapsed_ms`）透過 F1 `FieldCollector` 同步送到 Seq，
 /// 讓 ops 可直接在 Seq 查詢特定任務的執行時間趨勢。
-fn create_job<F, Fut>(cron_expr: &'static str, name: &'static str, task: F) -> Result<Job>
+fn create_job<F, Fut>(cron_expr: &'static str, name: &'static str, task: F) -> Result<CronJob>
 where
     F: Fn() -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<(), Error>> + Send + 'static,
@@ -161,7 +160,7 @@ where
 /// 同 [`create_job`]，但 `task.begin`／`task.done` 記為 DEBUG。
 ///
 /// 給每幾分鐘就跑一次的任務：一天上百輪的開始／結束紀錄會淹沒 info 日誌。失敗與逾時照常記 ERROR 並告警。
-fn create_quiet_job<F, Fut>(cron_expr: &'static str, name: &'static str, task: F) -> Result<Job>
+fn create_quiet_job<F, Fut>(cron_expr: &'static str, name: &'static str, task: F) -> Result<CronJob>
 where
     F: Fn() -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<(), Error>> + Send + 'static,
@@ -175,20 +174,20 @@ fn register_job<F, Fut>(
     name: &'static str,
     quiet: bool,
     task: F,
-) -> Result<Job>
+) -> Result<CronJob>
 where
     F: Fn() -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<(), Error>> + Send + 'static,
 {
     tracing::info!("註冊排程任務: [{}] 運作週期: '{}'", name, cron_expr);
-    let tz = FixedOffset::east_opt(8 * 3600).unwrap();
-    Ok(Job::new_async_tz(cron_expr, tz, move |_uuid, _l| {
-        let task = task.clone();
-        Box::pin(run_job(cron_expr, name, quiet, JOB_TIMEOUT, task))
-    })?)
+    CronJob::new(cron_expr, name, move || {
+        run_job(cron_expr, name, quiet, JOB_TIMEOUT, task.clone())
+    })
 }
 
-/// 執行一輪排程任務：登記為進行中、計時、記錄結果，失敗或逾時時告警。
+/// 執行一輪排程任務：計時、記錄結果，失敗或逾時時告警。
+///
+/// 「進行中」的登記由 [`CronScheduler`] 在觸發、spawn 之前取得，關機時會等這一輪結束。
 async fn run_job<F, Fut>(
     cron_expr: &'static str,
     name: &'static str,
@@ -199,10 +198,6 @@ async fn run_job<F, Fut>(
     F: Fn() -> Fut,
     Fut: Future<Output = Result<(), Error>>,
 {
-    // 排程一旦「真正開始執行」才登記為 active，主程式關機時會等待此 use case 離開。
-    // guard 必須在這裡取得，不能放在 create_job 階段；後者只是在啟動時
-    // 註冊排程，若那時就 +1，counter 會在整個服務生命週期永遠無法歸零。
-    let _operation_guard = crate::core::shutdown::BACKGROUND_OPERATIONS.begin();
     if quiet {
         tracing::debug!(task = cron_expr, name = name, "task.begin");
     } else {

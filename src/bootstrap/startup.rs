@@ -5,9 +5,6 @@
 use std::{error::Error, time::Instant};
 
 use tokio::task::JoinHandle;
-// tokio-cron-scheduler 是基於 Tokio 的非同步 cron 排程器，支援標準 cron 語法。
-// 每個 job 在到期時以非同步 task 形式在 Tokio 執行緒池中執行，不阻塞主執行緒。
-use tokio_cron_scheduler::JobScheduler;
 
 use stock_crawler::{app, core, infra, interfaces};
 
@@ -16,7 +13,7 @@ pub(crate) struct Running {
     /// 收到關機訊號後通知 HTTP／gRPC 停止接受新連線。
     pub(crate) shutdown_tx: tokio::sync::watch::Sender<bool>,
     /// 已啟動的排程器。
-    pub(crate) sched: JobScheduler,
+    pub(crate) sched: core::cron::CronScheduler,
     /// gRPC 伺服器 task；`grpc_use_port` 為 0 時沒有。
     pub(crate) rpc_server: Option<JoinHandle<anyhow::Result<()>>>,
     /// Web 伺服器 task。
@@ -141,21 +138,13 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
     app::notify_common::spawn_refresh();
 
     // ── 9. 排程器建立 ───────────────────────────────────────────────────────
-    // `JobScheduler::new()` 建立 tokio-cron-scheduler 實例，但尚未啟動任何 job。
-    // 內部會建立 Tokio channel 與背景輪詢 task，因此需要 .await。
-    // `?` 操作子：若建立失敗（極罕見，通常是 Tokio runtime 問題）直接向上回傳錯誤。
-    tracing::info!("startup phase begin: JobScheduler::new");
-    let scheduler_new_timer = Instant::now();
-    let sched = JobScheduler::new().await?;
-    tracing::info!(
-        "startup phase done: JobScheduler::new elapsed={:?}",
-        scheduler_new_timer.elapsed()
-    );
+    // `CronScheduler::new()` 只建立空的任務清單，start 之前不會啟動任何背景迴圈。
+    let sched = core::cron::CronScheduler::new();
 
     // ── 10. 排程任務註冊與啟動 ──────────────────────────────────────────────
     // `app::scheduler::start(&sched)` 把所有 cron job 加進 `sched`，並呼叫
-    // `sched.start()` 讓排程器的背景執行緒開始輪詢到期任務。
-    // 所有 cron 表達式皆為 UTC 時區（台灣 UTC+8 自行換算，例如 09:00 TWN = 01:00 UTC）。
+    // `sched.start()` 為每個任務啟動等待下次觸發的背景迴圈。
+    // 所有 cron 表達式皆為台北時間（UTC+8），由 core::cron 固定以 +8 解讀。
     // 若其中一個 job 註冊失敗，整體回傳 Err 並中止啟動，避免部分任務靜默遺失。
     tracing::info!("startup phase begin: scheduler::start");
     let scheduler_start_timer = Instant::now();

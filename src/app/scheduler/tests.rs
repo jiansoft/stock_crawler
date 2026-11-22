@@ -1,19 +1,25 @@
 // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
 use super::*;
 
+use jiff::Timestamp;
+use jiff::civil::Weekday;
+
 /// 建立測試用排程器並註冊每秒任務。
-async fn run() -> Result<()> {
-    let sched = JobScheduler::new().await?;
-    let every_minute = Job::new_async("* * * * * *", |_uuid, _l| {
-        Box::pin(async move {
-            tracing::debug!("每秒任務 now: {:?}", chrono::Local::now());
-        })
-    })?;
-    sched.add(every_minute).await?;
+fn run() -> Result<CronScheduler> {
+    let sched = CronScheduler::new();
+    sched.add(CronJob::new("* * * * * *", "每秒任務", || async {
+        tracing::debug!(
+            "每秒任務 now: {:?}",
+            crate::core::util::datetime::TaipeiDateTime::now()
+        );
+    })?);
+    sched.start();
+    Ok(sched)
+}
 
-    sched.start().await?;
-
-    Ok(())
+/// 現在之後的下一次觸發時間（臺灣時間）。
+fn next_tick(job: &CronJob) -> jiff::ZonedDateTime {
+    job.next_after(Timestamp::now()).expect("應有下次觸發時間")
 }
 
 #[tokio::test]
@@ -32,30 +38,24 @@ async fn run_with_timeout_reports_failure() {
     assert!(matches!(outcome, TaskOutcome::Failed(why) if why.to_string() == "boom"));
 }
 
-/// 排程字串解析失敗的任務會在註冊時被 `flatten` 略過而不報錯，
+/// 排程字串解析失敗的任務會在註冊時被略過而不報錯，
 /// 因此用到星期、日期範圍的排程要確認能解析，且下次觸發落在預期的台北時間。
-#[tokio::test]
-async fn range_cron_expressions_parse_and_fire_in_taipei_time() {
-    use chrono::{Datelike, Timelike};
-
-    let taipei = FixedOffset::east_opt(8 * 3600).unwrap();
-    let mut sched = JobScheduler::new().await.expect("建立排程器");
+#[test]
+fn range_cron_expressions_parse_and_fire_in_taipei_time() {
     for (expr, hour, minute) in [
         ("0 30 15 * * Mon-Fri", 15, 30),
         ("0 40 20 * * Mon-Fri", 20, 40),
         ("0 45 20 10-28 * *", 20, 45),
     ] {
         let job = create_job(expr, "test", || async { Ok(()) }).expect(expr);
-        let job_id = sched.add(job).await.expect("加入排程");
-        let next = sched
-            .next_tick_for_job(job_id)
-            .await
-            .expect("取得下次觸發時間")
-            .expect("應有下次觸發時間")
-            .with_timezone(&taipei);
+        let next = next_tick(&job);
         assert_eq!((next.hour(), next.minute()), (hour, minute), "{expr}");
+        assert_eq!(next.offset(), jiff::tz::offset(8), "{expr}");
         if expr.ends_with("Mon-Fri") {
-            assert!(next.weekday().number_from_monday() <= 5, "{expr}: {next}");
+            assert!(
+                !matches!(next.weekday(), Weekday::Saturday | Weekday::Sunday),
+                "{expr}: {next}"
+            );
         } else {
             assert!((10..=28).contains(&next.day()), "{expr}: {next}");
         }
@@ -64,51 +64,25 @@ async fn range_cron_expressions_parse_and_fire_in_taipei_time() {
 }
 
 /// 每 10 分鐘的主機健康檢查落在整十分，23:30 的彙總落在台北時間 23:30。
-#[tokio::test]
-async fn host_health_cron_expressions_fire_on_expected_minutes() {
-    use chrono::Timelike;
-
-    let taipei = FixedOffset::east_opt(8 * 3600).unwrap();
-    let mut sched = JobScheduler::new().await.expect("建立排程器");
+#[test]
+fn host_health_cron_expressions_fire_on_expected_minutes() {
     let quiet = create_quiet_job("0 */10 * * * *", "test", || async { Ok(()) }).expect("*/10");
     let summary = create_job("0 30 23 * * *", "test", || async { Ok(()) }).expect("23:30");
-    let quiet_id = sched.add(quiet).await.expect("加入排程");
-    let summary_id = sched.add(summary).await.expect("加入排程");
-    let quiet_next = sched
-        .next_tick_for_job(quiet_id)
-        .await
-        .expect("取得下次觸發時間")
-        .expect("應有下次觸發時間")
-        .with_timezone(&taipei);
+    let quiet_next = next_tick(&quiet);
     assert_eq!(
         (quiet_next.minute() % 10, quiet_next.second()),
         (0, 0),
         "{quiet_next}"
     );
-    let summary_next = sched
-        .next_tick_for_job(summary_id)
-        .await
-        .expect("取得下次觸發時間")
-        .expect("應有下次觸發時間")
-        .with_timezone(&taipei);
+    let summary_next = next_tick(&summary);
     assert_eq!((summary_next.hour(), summary_next.minute()), (23, 30));
 }
 
 /// 每 5 分鐘的資料庫健康檢查落在 5 的倍數分的第 30 秒，避開整分啟動的排程。
-#[tokio::test]
-async fn db_health_cron_expression_fires_at_half_minute() {
-    use chrono::Timelike;
-
-    let taipei = FixedOffset::east_opt(8 * 3600).unwrap();
-    let mut sched = JobScheduler::new().await.expect("建立排程器");
+#[test]
+fn db_health_cron_expression_fires_at_half_minute() {
     let job = create_quiet_job("30 */5 * * * *", "test", || async { Ok(()) }).expect("*/5");
-    let job_id = sched.add(job).await.expect("加入排程");
-    let next = sched
-        .next_tick_for_job(job_id)
-        .await
-        .expect("取得下次觸發時間")
-        .expect("應有下次觸發時間")
-        .with_timezone(&taipei);
+    let next = next_tick(&job);
 
     assert_eq!((next.minute() % 5, next.second()), (0, 30), "{next}");
 }
@@ -150,20 +124,10 @@ async fn run_job_completes_for_every_outcome() {
 }
 
 /// 策略優勢滾動檢查掛在每月 1–10 日的台北時間 07:30（是否為第一個交易日由任務自己判斷）。
-#[tokio::test]
-async fn strategy_edge_cron_fires_in_first_ten_days() {
-    use chrono::{Datelike, Timelike};
-
-    let taipei = FixedOffset::east_opt(8 * 3600).unwrap();
-    let mut sched = JobScheduler::new().await.expect("建立排程器");
+#[test]
+fn strategy_edge_cron_fires_in_first_ten_days() {
     let job = create_job("0 30 7 1-10 * *", "test", || async { Ok(()) }).expect("1-10");
-    let job_id = sched.add(job).await.expect("加入排程");
-    let next = sched
-        .next_tick_for_job(job_id)
-        .await
-        .expect("取得下次觸發時間")
-        .expect("應有下次觸發時間")
-        .with_timezone(&taipei);
+    let next = next_tick(&job);
     assert_eq!((next.hour(), next.minute()), (7, 30), "{next}");
     assert!((1..=10).contains(&next.day()), "{next}");
 }
@@ -190,7 +154,9 @@ async fn run_with_timeout_aborts_hung_task() {
 #[ignore]
 async fn test_split() {
     dotenvy::dotenv().ok();
-    run().await.expect("TODO: panic message");
+    let sched = run().expect("建立排程器");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    sched.shutdown();
     //sleep(Duration::from_secs(240)).await;
     //loop {}
     //println!("split: {:?}, elapsed time: {:?}", result, end);
