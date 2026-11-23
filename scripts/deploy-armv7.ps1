@@ -16,8 +16,8 @@
       4. ssh 執行 control.sh update（stop → move → start）。
       5. 驗證：9001（gRPC）／9002（Data API）是否監聽、/api/v1/healthz 是否 200、
          今日 error log 與 nohup.out 的尾巴。healthz 會重試——Pi 3 剛啟動時
-         第一個請求特別慢，單發逾時會誤判成失敗。healthz 通過後再以 MCP 的金鑰
-         唯讀呼叫幾個實際查詢資料庫的端點（$SmokePaths），任一不是 200 視為失敗。
+         第一個請求特別慢，單發逾時會誤判成失敗。healthz 通過後再以 stock_crawler .env 的金鑰
+         （持股類端點用 DATA_API_PERSONAL_KEY）唯讀呼叫幾個實際查詢資料庫的端點（$SmokePaths），任一不是 200 視為失敗。
 
     這支腳本預設不建置。要連建置一起做，加 -Build（只建 armv7，不會順便建
     arm64 與 Windows；三個 target 都要請直接跑 build.ps1）。
@@ -90,13 +90,15 @@ $BinaryName = 'stock_crawler_armv7'
 # app.json 的 system.grpc_use_port 與 .env 的 MANUAL_BACKFILL_WEB_ADDR。
 $GrpcPort = 9001
 $WebPort = 9002
-# 部署後冒煙測試：金鑰取自 pi 上 MCP 的設定檔（STOCK_RUST_API_KEY），只打唯讀端點。
-$SmokeKeyFile = '/opt/stock_mcp/.env'
+# 部署後冒煙測試：金鑰取自 pi 上 stock_crawler 自己的 .env，只打唯讀端點。
+# 市場類端點用 DATA_API_KEY；持股類（/api/v1/portfolio/）只接受 DATA_API_PERSONAL_KEY，
+# 且 DATA_API_STRICT_SCOPE=true 時必須帶 household_id（未設定個人金鑰時退回 DATA_API_KEY，僅適用相容期）。
+$SmokeKeyFile = "$RemoteBase/.env"
 $SmokePaths = @(
     '/api/v1/stocks/2330/latest-quote'
     '/api/v1/stocks/screen?min_rs_score=80'
-    '/api/v1/portfolio/targets'
-    '/api/v1/portfolio/targets/revisions?dimension=stock'
+    '/api/v1/portfolio/targets?household_id=1'
+    '/api/v1/portfolio/targets/revisions?dimension=stock&household_id=1'
     # 技術頁含區間突破狀態（多讀成交量覆蓋索引）、全市場訊號依來源篩選。
     '/api/v1/stocks/2330/technicals'
     '/api/v1/market/signals?indicator=range_breakout'
@@ -460,12 +462,15 @@ for i in 1 2 3 4 5 6; do
 done
 echo "--- smoke ---"
 # healthz 不碰資料庫；唯讀打幾個實際查詢的端點，抓出缺表、SQL 錯誤這類只有呼叫才會發現的問題。
-# 金鑰取自 MCP 的設定檔，只在這台機器上用，不印出。
+# 金鑰取自 stock_crawler 的 .env，只在這台機器上用，不印出；以標準輸入交給 curl，不出現在行程列表。
 keyfile="$SmokeKeyFile"
 if [ -r "`$keyfile" ]; then
-  key="`$(grep -E '^STOCK_RUST_API_KEY=' "`$keyfile" | head -1 | cut -d= -f2- | tr -d '\r"')"
+  market_key="`$(grep -E '^DATA_API_KEY=' "`$keyfile" | tail -n 1 | cut -d= -f2- | tr -d '\r"')"
+  personal_key="`$(grep -E '^DATA_API_PERSONAL_KEY=' "`$keyfile" | tail -n 1 | cut -d= -f2- | tr -d '\r"')"
   for path in $(($SmokePaths | ForEach-Object { "'$_'" }) -join ' '); do
-    out="`$(curl -s -m 30 -o /dev/null -w '%{http_code} %{time_total}s' -H "Authorization: Bearer `$key" "http://127.0.0.1:$WebPort`$path" 2>/dev/null || echo '000 -')"
+    key="`$market_key"
+    case "`$path" in /api/v1/portfolio/*) [ -n "`$personal_key" ] && key="`$personal_key" ;; esac
+    out="`$(printf 'Authorization: Bearer %s\n' "`$key" | curl -s -m 30 -o /dev/null -w '%{http_code} %{time_total}s' -H @- "http://127.0.0.1:$WebPort`$path" 2>/dev/null || echo '000 -')"
     echo "smoke `$out `$path"
   done
 else
