@@ -278,3 +278,22 @@ async fn run_queries_holdings_and_builds_message() {
     };
     assert!(run(&failing, date(), &symbols).await.is_err());
 }
+
+/// 排程入口：依收件者範圍讀持股與今天的訊號；測試環境沒有依訂閱分送與 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_reads_holdings_per_view() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_reads_holdings_per_view：無資料庫連接");
+        return;
+    }
+    execute().await.expect("技術訊號通知不應失敗");
+}

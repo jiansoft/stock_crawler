@@ -193,6 +193,53 @@ async fn load_history_spans_recent_broker_days() {
     assert!(load_history(&failing, day(20), &symbols).await.is_none());
 }
 
+/// 收件者範圍的主力通知以資料庫的持股為準：持有 2330 的會員收到（近期累計讀得到時附上），沒有持股不產生訊息。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn view_message_uses_holdings_in_scope() {
+    dotenvy::dotenv().ok();
+    let pool = crate::infra::database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 view_message_uses_holdings_in_scope：無資料庫連接");
+        return;
+    }
+    const MEMBER: i64 = 979_906;
+    let cleanup = || async {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(pool)
+            .await
+            .expect("清除測試持股");
+    };
+    cleanup().await;
+    sqlx::query(
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, created_time, date) \
+         VALUES ($1, '2330', 1000, '1999-03-10 00:00:00+08', '1999-03-10')",
+    )
+    .bind(MEMBER)
+    .execute(pool)
+    .await
+    .expect("插入測試持股");
+    let notable = vec![flow("2330", (2_000_000, dec!(20)), (100_000, dec!(1)))];
+    let fetched = BTreeSet::from(["2330".to_string()]);
+    let today = date(2026, 10, 5);
+    let held = view_message(&HoldingView::member(1, MEMBER), today, &notable, &fetched).await;
+    let empty = view_message(
+        &HoldingView::member(1, MEMBER + 1),
+        today,
+        &notable,
+        &fetched,
+    )
+    .await;
+    cleanup().await;
+    let message = held.expect("查詢持股").expect("持有 2330 應收到主力通知");
+    assert!(message.contains("買方"), "{message}");
+    assert_eq!(empty.expect("查詢持股"), None);
+}
+
 /// 以本機 mock server 取代富邦（MoneyDJ）主力進出頁，測逐檔抓取的三種分類。
 mod collect {
     use std::collections::BTreeSet;

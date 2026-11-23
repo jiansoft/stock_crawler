@@ -31,15 +31,7 @@ impl EventDispatcher {
         // 依收件者範圍只列範圍內成員的市值（會員系統計畫 7.6）
         let dedup_key = format!("{}:{date}", alert::Topic::HoldingsMarketValue.code());
         notify::notify_holdings(alert::Topic::HoldingsMarketValue, &dedup_key, |view| {
-            let rows = &rows;
-            async move {
-                let names = crate::infra::database::repository::member::fetch_names(&view).await?;
-                let members: Vec<i64> = names.keys().copied().collect();
-                Ok(Self::build_money_change_message(
-                    &rows_in_view(rows, &view, &members),
-                    &names,
-                ))
-            }
+            view_message(&rows, view)
         })
         .await;
 
@@ -113,6 +105,23 @@ impl EventDispatcher {
     }
 }
 
+/// 一個收件者範圍的市值變化訊息：只列範圍內成員（以當下名稱顯示）；範圍內沒有市值列時回 `None`。
+///
+/// # Errors
+///
+/// 讀取範圍內會員名稱失敗時回傳錯誤。
+async fn view_message(
+    rows: &[MoneyFlowMemberWithPreviousDay],
+    view: HoldingView,
+) -> Result<Option<String>> {
+    let names = crate::infra::database::repository::member::fetch_names(&view).await?;
+    let members: Vec<i64> = names.keys().copied().collect();
+    Ok(EventDispatcher::build_money_change_message(
+        &rows_in_view(rows, &view, &members),
+        &names,
+    ))
+}
+
 /// 範圍內的市值列：只含本人時只有本人那一列；含家庭成員時為家庭成員與家庭合計（`member_id = 0`）。
 ///
 /// 個人與合計列都須符合收件者家庭，避免同為 member_id = 0 的其他家庭混入。
@@ -130,3 +139,6 @@ fn rows_in_view(
         .cloned()
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

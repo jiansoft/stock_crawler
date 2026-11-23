@@ -98,20 +98,29 @@ pub async fn execute() -> Result<()> {
     if !flags.is_empty() {
         let dedup_key = format!("{}:{today}", Topic::HoldingsValuation.code());
         notify::notify_holdings(Topic::HoldingsValuation, &dedup_key, |view| {
-            let flags = &flags;
-            async move {
-                let held = holdings::common_stock_holdings(&view).await?;
-                let mine: Vec<Flag> = flags
-                    .iter()
-                    .filter(|flag| held.contains(&flag.stock_symbol))
-                    .cloned()
-                    .collect();
-                Ok(build_message(&mine, holdings::stock_name))
-            }
+            view_message(&flags, view)
         })
         .await;
     }
     Ok(())
+}
+
+/// 一個收件者範圍的估值通知：只列範圍內持有的普通股，沒有時回 `None`。
+///
+/// # Errors
+///
+/// 查詢範圍內持股失敗時回傳錯誤。
+async fn view_message(
+    flags: &[Flag],
+    view: crate::domain::portfolio::view::HoldingView,
+) -> Result<Option<String>> {
+    let held = holdings::common_stock_holdings(&view).await?;
+    let mine: Vec<Flag> = flags
+        .iter()
+        .filter(|flag| held.contains(&flag.stock_symbol))
+        .cloned()
+        .collect();
+    Ok(build_message(&mine, holdings::stock_name))
 }
 
 /// 逐檔取每日倍數並找出高檔與低檔；單檔失敗只記錄。

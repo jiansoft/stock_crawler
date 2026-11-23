@@ -211,3 +211,43 @@ async fn personal_topic_builds_per_member_and_fans_out_to_all_their_chats() {
         ]
     );
 }
+
+/// 有 subscriber 時錯誤與摘要日誌的欄位會求值：路由讀取失敗、單一範圍產生失敗都只記錄，不影響其他範圍。
+#[tokio::test]
+async fn failures_are_logged_with_topic_and_household() {
+    let _logs = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_test_writer()
+            .finish(),
+    );
+    let sender = RecordingSender::default();
+    let failed = dispatch_holdings(
+        Topic::HoldingsPayable,
+        "k",
+        build,
+        Some(&FailingRoutes),
+        &sender,
+    )
+    .await;
+    assert_eq!(failed, DispatchSummary::default());
+    let routes = FixedRoutes(vec![route(4, 1, "own", 401), route(2, 1, "own", 201)]);
+    let summary =
+        dispatch_holdings(Topic::HoldingsPayable, "k", build, Some(&routes), &sender).await;
+    assert_eq!(summary, DispatchSummary { built: 2, sent: 1 });
+    assert_eq!(
+        *sender.sent.lock().expect("測試鎖"),
+        ["201:holdings.payable:成員2"]
+    );
+}
+
+/// 正式的 Telegram adapter 未註冊時，直接送聊天室是 no-op，不會出錯。
+#[tokio::test]
+async fn alert_sender_without_adapter_is_a_no_op() {
+    AlertSender
+        .send_to_chat(Topic::HoldingsPayable, 101, "本文")
+        .await;
+    AlertSender
+        .send_legacy(Topic::HoldingsPayable, "本文")
+        .await;
+}

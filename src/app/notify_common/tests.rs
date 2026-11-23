@@ -155,3 +155,63 @@ async fn market_failure_is_closed_and_unrouted_topics_keep_legacy_delivery() {
     dispatch_common(Topic::MarketWeekly, "市場", "", &routes, &cache, &sender).await;
     assert_eq!(*sender.0.lock().expect("測試鎖"), [0]);
 }
+
+/// 讀取很慢的路由來源：超過五秒才回應。
+struct SlowRoutes;
+
+#[async_trait]
+impl NotifyRouteRepository for SlowRoutes {
+    async fn fetch_routes(&self, _: &str) -> Result<Vec<NotifyRoute>> {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        Ok(vec![row()])
+    }
+}
+
+/// 系統路由刷新逾時只等一次上限：沒有快照時退回設定檔聊天室。
+#[tokio::test(start_paused = true)]
+async fn slow_system_route_refresh_times_out_and_falls_back() {
+    let _logs = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_test_writer()
+            .finish(),
+    );
+    let sender = Sender::default();
+    let sent = dispatch_common(
+        Topic::SystemCritical,
+        "關鍵警報",
+        "all",
+        &SlowRoutes,
+        &SystemRouteCache::default(),
+        &sender,
+    )
+    .await;
+    assert_eq!(sent, 1);
+    assert_eq!(*sender.0.lock().expect("測試鎖"), [0]);
+}
+
+/// 市場類讀到路由就逐一送出（同一聊天室只送一次）；空白本文不送。
+#[tokio::test]
+async fn market_routes_are_sent_once_per_chat_and_blank_is_skipped() {
+    let routes = Routes {
+        fail: AtomicBool::new(false),
+        rows: vec![row(), row()],
+    };
+    let sender = Sender::default();
+    let cache = SystemRouteCache::default();
+    assert_eq!(
+        dispatch_common(Topic::MarketWeekly, "  ", "all", &routes, &cache, &sender).await,
+        0
+    );
+    assert_eq!(
+        dispatch_common(Topic::MarketWeekly, "市場", "all", &routes, &cache, &sender).await,
+        1
+    );
+    assert_eq!(*sender.0.lock().expect("測試鎖"), [101]);
+}
+
+/// 正式入口：測試環境沒有設定依訂閱分送，走設定檔聊天室；未註冊 Telegram adapter 時不送出、不出錯。
+#[tokio::test]
+async fn notify_common_entry_uses_legacy_chat_when_not_routed() {
+    notify_common(Topic::MarketWeekly, "市場").await;
+}

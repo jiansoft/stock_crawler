@@ -11,6 +11,7 @@ use rust_decimal_macros::dec;
 use super::*;
 use crate::domain::dividend::fill::{DailyClose, ExRightEvent};
 use crate::domain::dividend::fill_stats::FillSample;
+use crate::domain::portfolio::view::HoldingView;
 
 fn day(d: u32) -> Date {
     ymd(2026, 10, d).expect("日期應合法")
@@ -344,4 +345,58 @@ mod entries {
         fixed.expect("固定日期檢查完成");
         today.expect("今天檢查完成");
     }
+}
+
+/// 依收件者範圍只留範圍內持股的填息與落後事件。
+#[tokio::test]
+async fn within_keeps_only_held_symbols() {
+    let review = review(&FakeFills, &symbols(), &peers(), day(21)).await;
+    let only_fill = review.within(&BTreeSet::from(["2330".to_string()]));
+    assert_eq!(only_fill.filled.len(), 1);
+    assert!(only_fill.lagging.is_empty());
+    let only_lag = review.within(&BTreeSet::from(["2884".to_string()]));
+    assert!(only_lag.filled.is_empty());
+    assert_eq!(only_lag.lagging.len(), 1);
+    assert!(review.within(&BTreeSet::new()).lagging.is_empty());
+}
+
+/// 收件者範圍的訊息以資料庫的持股為準：持有 2330 的會員收到填息，沒有持股的會員不產生訊息。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn view_message_uses_holdings_in_scope() {
+    dotenvy::dotenv().ok();
+    let pool = crate::infra::database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 view_message_uses_holdings_in_scope：無資料庫連接");
+        return;
+    }
+    const MEMBER: i64 = 979_903;
+    let cleanup = || async {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(pool)
+            .await
+            .expect("清除測試持股");
+    };
+    cleanup().await;
+    sqlx::query(
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, created_time, date) \
+         VALUES ($1, '2330', 1000, '1999-03-10 00:00:00+08', '1999-03-10')",
+    )
+    .bind(MEMBER)
+    .execute(pool)
+    .await
+    .expect("插入測試持股");
+    let review = review(&FakeFills, &symbols(), &peers(), day(21)).await;
+    let held = view_message(day(21), &review, HoldingView::member(1, MEMBER)).await;
+    let empty = view_message(day(21), &review, HoldingView::member(1, MEMBER + 1)).await;
+    cleanup().await;
+    assert!(
+        held.expect("查詢持股").is_some(),
+        "持有 2330 應收到填息通知"
+    );
+    assert_eq!(empty.expect("查詢持股"), None, "沒有持股不產生訊息");
 }

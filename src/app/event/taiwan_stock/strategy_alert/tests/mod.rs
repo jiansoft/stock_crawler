@@ -182,3 +182,22 @@ pub(super) fn settlement(etf_weight: u8) -> StrategySettlement {
         etf_cumulative_return: Some(1.25),
     }
 }
+
+/// 正式的持股段：依收件者範圍讀持股並對照策略持股；測試環境沒有依訂閱分送與 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn routed_overlap_reads_holdings_per_view() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 routed_overlap_reads_holdings_per_view：無資料庫連接");
+        return;
+    }
+    RoutedOverlap.notify_overlap(&rebalance(), "測試策略").await;
+}

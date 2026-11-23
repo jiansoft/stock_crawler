@@ -158,19 +158,29 @@ async fn run(today: Date) -> Result<()> {
     if !review.filled.is_empty() || !review.lagging.is_empty() {
         let dedup_key = format!("{}:{today}", Topic::HoldingsPayableFill.code());
         notify::notify_holdings(Topic::HoldingsPayableFill, &dedup_key, |view| {
-            let review = &review;
-            async move {
-                let held = holdings::active_holding_symbols(&view).await?;
-                Ok(build_message(
-                    today,
-                    &review.within(&held),
-                    holdings::stock_name,
-                ))
-            }
+            view_message(today, &review, view)
         })
         .await;
     }
     Ok(())
+}
+
+/// 一個收件者範圍的填息通知：只列範圍內持股的事件，沒有事件時回 `None`。
+///
+/// # Errors
+///
+/// 查詢範圍內持股失敗時回傳錯誤。
+async fn view_message(
+    today: Date,
+    review: &Review,
+    view: crate::domain::portfolio::view::HoldingView,
+) -> Result<Option<String>> {
+    let held = holdings::active_holding_symbols(&view).await?;
+    Ok(build_message(
+        today,
+        &review.within(&held),
+        holdings::stock_name,
+    ))
 }
 
 /// 持股近 [`LOOKBACK_DAYS`] 天內今天填息與今天第一次落後的除權息，依代號、除權息日排序；

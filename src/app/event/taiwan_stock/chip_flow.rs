@@ -151,16 +151,7 @@ pub async fn execute() -> Result<()> {
     if !reports.is_empty() {
         let dedup_key = format!("{}:{date}", Topic::HoldingsChipFlow.code());
         notify::notify_holdings(Topic::HoldingsChipFlow, &dedup_key, |view| {
-            let reports = &reports;
-            async move {
-                let held = holdings::common_stock_holdings(&view).await?;
-                let mine: Vec<ChipReport> = reports
-                    .iter()
-                    .filter(|report| held.contains(&report.stock_symbol))
-                    .cloned()
-                    .collect();
-                Ok((!mine.is_empty()).then(|| build_message(date, &mine, holdings::stock_name)))
-            }
+            view_message(date, &reports, view)
         })
         .await;
     }
@@ -172,6 +163,25 @@ pub async fn execute() -> Result<()> {
         summary.reported
     );
     Ok(())
+}
+
+/// 一個收件者範圍的籌碼通知：只列範圍內持有的普通股，沒有時回 `None`。
+///
+/// # Errors
+///
+/// 查詢範圍內持股失敗時回傳錯誤。
+async fn view_message(
+    date: Date,
+    reports: &[ChipReport],
+    view: crate::domain::portfolio::view::HoldingView,
+) -> Result<Option<String>> {
+    let held = holdings::common_stock_holdings(&view).await?;
+    let mine: Vec<ChipReport> = reports
+        .iter()
+        .filter(|report| held.contains(&report.stock_symbol))
+        .cloned()
+        .collect();
+    Ok((!mine.is_empty()).then(|| build_message(date, &mine, holdings::stock_name)))
 }
 
 /// 併抓上市、上櫃 `date` 的三大法人買賣超與融資融券餘額，各自合併成一張表；失敗的來源只記錄。

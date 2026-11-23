@@ -161,3 +161,21 @@ fn amounts_follow_shares() {
         "1999 × 0.55 ÷ 10 = 109.945 捨去"
     );
 }
+
+/// 依收件者範圍改寫股數：只留範圍內持有的代號，股數換成範圍內的合計。
+#[test]
+fn rescope_keeps_scope_holdings_and_replaces_shares() {
+    let item = |symbol: &str, shares: i64| UpcomingDividend {
+        ex_date: day(21),
+        stock_symbol: symbol.to_owned(),
+        name: format!("名{symbol}"),
+        cash_dividend: dec!(5),
+        stock_dividend: Decimal::ZERO,
+        closing_price: dec!(100),
+        shares,
+    };
+    let all = [item("2330", 3000), item("2412", 2000)];
+    let scoped = rescope(&all, &shares(&[("2330", 1000)]));
+    assert_eq!(scoped, vec![item("2330", 1000)]);
+    assert!(rescope(&all, &BTreeMap::new()).is_empty());
+}
