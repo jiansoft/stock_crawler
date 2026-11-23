@@ -340,3 +340,22 @@ async fn run_appends_valuation_level() {
         .expect("估值失敗不影響通知");
     assert!(message.is_some_and(|message| !message.contains("估值水位")));
 }
+
+/// 排程入口：以今天讀大盤多空；測試環境沒有 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_reads_today_regime() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_reads_today_regime：無資料庫連接");
+        return;
+    }
+    execute().await.expect("大盤多空通知不應失敗");
+}

@@ -277,3 +277,18 @@ fn test_smaller_quarters() {
     assert_eq!(Quarter::Q2.smaller_quarters(), vec![Quarter::Q1]);
     assert_eq!(Quarter::Q1.smaller_quarters(), vec![]);
 }
+
+/// 開盤時間判斷：以目前的臺北時間比較 09:00～13:30，任何時間呼叫都不會失敗。
+#[test]
+fn is_open_compares_taipei_trading_hours() {
+    let now = crate::core::util::datetime::TaipeiDateTime::now().time();
+    let expected = now >= crate::core::util::datetime::hms(9, 0, 0).expect("合法時間")
+        && now <= crate::core::util::datetime::hms(13, 30, 0).expect("合法時間");
+    // 兩次讀取時間之間可能跨過邊界；只在遠離邊界時比較結果
+    let open = StockExchange::TWSE.is_open();
+    let near_boundary =
+        now.hour() == 9 && now.minute() == 0 || now.hour() == 13 && now.minute() == 30;
+    if !near_boundary {
+        assert_eq!(open, expected);
+    }
+}

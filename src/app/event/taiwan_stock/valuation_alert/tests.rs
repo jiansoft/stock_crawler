@@ -184,3 +184,22 @@ async fn view_message_uses_holdings_in_scope() {
     assert!(!message.contains("1101"), "範圍外的持股不可出現：{message}");
     assert_eq!(empty.expect("查詢持股"), None);
 }
+
+/// 排程入口：讀全部持股的估值；測試環境沒有 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_reads_all_holdings() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_reads_all_holdings：無資料庫連接");
+        return;
+    }
+    execute().await.expect("估值通知不應失敗");
+}

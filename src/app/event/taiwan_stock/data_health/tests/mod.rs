@@ -182,3 +182,22 @@ fn counted_problems_are_listed_in_the_report() {
         "{message}"
     );
 }
+
+/// 排程入口：以今天產生資料健康報告；測試環境沒有 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_builds_today_report() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_builds_today_report：無資料庫連接");
+        return;
+    }
+    execute().await.expect("資料健康報告不應失敗");
+}

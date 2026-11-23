@@ -297,3 +297,22 @@ async fn load_snapshot_accuracy_uses_latest_snapshot_before_month_end() {
         "10 月底以前沒有快照時不附誤差：{before_any:?}"
     );
 }
+
+/// 排程入口：以今天讀本月入帳；測試環境沒有 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_reads_this_month_payouts() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_reads_this_month_payouts：無資料庫連接");
+        return;
+    }
+    execute().await.expect("入帳通知不應失敗");
+}

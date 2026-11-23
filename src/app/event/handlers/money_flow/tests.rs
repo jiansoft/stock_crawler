@@ -132,3 +132,24 @@ async fn view_message_reads_names_in_scope() {
         .expect("範圍內有合計列時要有訊息");
     assert!(own.contains("合計"));
 }
+
+/// 事件處理入口：沒有市值列的日期依收件者範圍產生內容後不送出；測試環境沒有 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn handler_builds_per_view_without_routes() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 handler_builds_per_view_without_routes：無資料庫連接");
+        return;
+    }
+    EventDispatcher::handle_money_flow_recalculated(date(1999, 3, 10))
+        .await
+        .expect("市值變化通知不應失敗");
+}
