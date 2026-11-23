@@ -9,9 +9,10 @@
 //! （不合 0.5 元跳動單位，當天實際成交 886～946）、3481 採到 1.59（實際 41.5～43.6），
 //! 屬來源本身的錯，驗價已擋下；價格追蹤讀的是驗證後的快取，不會因此誤發通知。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::{collections::BTreeMap, sync::Mutex};
 
-use chrono::{Local, NaiveDate};
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
@@ -41,19 +42,13 @@ struct SiteCount {
 /// 依站點累計的異常價格；換日時自動清空。
 #[derive(Debug, Default)]
 struct AbnormalPriceStats {
-    day: Option<NaiveDate>,
+    day: Option<Date>,
     sites: BTreeMap<String, SiteCount>,
 }
 
 impl AbnormalPriceStats {
     /// 記一筆被擋的價格，回傳是否為該站當天第一筆；同一檔只留第一次被擋的價格。
-    fn record(
-        &mut self,
-        today: NaiveDate,
-        site: &str,
-        symbol: &str,
-        blocked: BlockedPrice,
-    ) -> bool {
+    fn record(&mut self, today: Date, site: &str, symbol: &str, blocked: BlockedPrice) -> bool {
         if self.day != Some(today) {
             self.day = Some(today);
             self.sites.clear();
@@ -116,7 +111,7 @@ pub fn report_abnormal_price(symbol: &str, price: Decimal, last_close: Decimal, 
         .lock()
         .map(|mut stats| {
             let blocked = BlockedPrice { price, last_close };
-            stats.record(Local::now().date_naive(), site, symbol, blocked)
+            stats.record(today(), site, symbol, blocked)
         })
         .unwrap_or(true);
     if first {

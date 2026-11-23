@@ -7,10 +7,10 @@
 //! [`crate::core::util::datetime::backfill_report_quarter_targets_for_listed_and_otc`]
 //! 依上市/上櫃公司季報法定申報截止日與較保守的預抓視窗決定處理清單。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::future::Future;
 
 use anyhow::Result;
-use chrono::{DateTime, Local};
 use futures::StreamExt;
 
 use crate::{
@@ -29,11 +29,11 @@ use crate::{
 /// 抓取對應資料，回寫 `financial_statement` 後，重新同步 `stocks` 表上的
 /// 最新一季/近四季數據，並觸發估值重算。
 pub async fn execute() -> Result<()> {
-    execute_at(Local::now()).await
+    execute_at(TaipeiDateTime::now()).await
 }
 
 /// 以 `now` 決定目標季度的 [`execute`]；測試以固定的歷史日期執行。
-async fn execute_at(now: DateTime<Local>) -> Result<()> {
+async fn execute_at(now: TaipeiDateTime) -> Result<()> {
     let mut success_count = 0usize;
     // 記錄實際處理過的季度，流程結束後才派發通知事件。
     // 這個排程（04:00）跑在季 EPS 主流程（03:00）之後，補完 ROE/ROA 的資料才算完整，
@@ -95,7 +95,7 @@ async fn dispatch_quarterly_financials_updated(processed_quarters: &[ReportQuart
             |report| crate::domain::events::DomainEvent::QuarterlyFinancialsUpdated {
                 year: report.year,
                 quarter: report.quarter.to_string(),
-                occurred_at: Local::now(),
+                occurred_at: TaipeiDateTime::now(),
             },
         )
         .collect();

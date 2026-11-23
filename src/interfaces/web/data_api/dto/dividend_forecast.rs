@@ -15,6 +15,10 @@ use crate::domain::portfolio::dividend_forecast::{Forecast, ForecastItem, MonthT
 pub(crate) struct DividendForecastParams {
     /// 會員編號；0（預設）為全部會員合計。
     #[param(minimum = 0, default = 0)]
+    #[allow(
+        dead_code,
+        reason = "由 scope middleware 讀取並驗證後轉成 HoldingView；這裡保留給 OpenAPI 文件"
+    )]
     pub(crate) member_id: Option<i64>,
     /// 預估未來幾個月，預設 12，範圍 1–24。
     #[param(minimum = 1, maximum = 24, default = 12)]

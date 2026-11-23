@@ -1,15 +1,16 @@
 //! 預估用的日期與金額小工具：同日去重、月配依間隔排程、發放日推估、月份清單與金額四捨五入。
 
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
-use chrono::{Datelike, Days, Months, NaiveDate};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use super::{DividendEvent, PAYABLE_LAG_DAYS};
 
 /// 有除息日的列，同一除息日只留一列：優先各期列（期別非空），再取金額大者。
 pub(super) fn dedupe_dated<'a>(events: &[&'a DividendEvent]) -> Vec<&'a DividendEvent> {
-    let mut best: HashMap<NaiveDate, &DividendEvent> = HashMap::new();
+    let mut best: HashMap<Date, &DividendEvent> = HashMap::new();
     for event in events {
         let Some(ex_date) = event.ex_date else {
             continue;
@@ -40,9 +41,9 @@ pub(super) fn is_periodic(quarter: &str) -> bool {
 /// 最近一期「除息到發放」的天數。最近一期已超過兩個間隔沒有配息時視為停配，不排。
 pub(super) fn cadence_schedule(
     periodic: &[&DividendEvent],
-    today: NaiveDate,
-    end: NaiveDate,
-) -> Vec<(NaiveDate, NaiveDate)> {
+    today: Date,
+    end: Date,
+) -> Vec<(Date, Date)> {
     let Some((latest, earlier)) = periodic.split_last() else {
         return Vec::new();
     };
@@ -56,7 +57,8 @@ pub(super) fn cadence_schedule(
             months_between(previous_ex, latest_ex).max(1)
         });
     let stale = latest_ex
-        .checked_add_months(Months::new(step * 2))
+        .checked_add(i64::from(step * 2).months())
+        .ok()
         .is_none_or(|limit| limit < today);
     if stale {
         return Vec::new();
@@ -65,7 +67,7 @@ pub(super) fn cadence_schedule(
 
     let mut schedule = Vec::new();
     for count in 1.. {
-        let Some(ex_date) = latest_ex.checked_add_months(Months::new(step * count)) else {
+        let Some(ex_date) = latest_ex.checked_add(i64::from(step * count).months()).ok() else {
             break;
         };
         let pay_date = ex_date + pay_gap;
@@ -80,34 +82,35 @@ pub(super) fn cadence_schedule(
 }
 
 /// `from` 到 `to` 相差的月數（只看年月）。
-pub(super) fn months_between(from: NaiveDate, to: NaiveDate) -> u32 {
-    let months = (to.year() - from.year()) * 12 + to.month() as i32 - from.month() as i32;
+pub(super) fn months_between(from: Date, to: Date) -> u32 {
+    let months = (i32::from(to.year()) - i32::from(from.year())) * 12 + i32::from(to.month())
+        - i32::from(from.month());
     u32::try_from(months).unwrap_or_default()
 }
 
 /// 發放日：已公告用公告日，否則除息日後 [`PAYABLE_LAG_DAYS`] 天。
-pub(super) fn pay_date(event: &DividendEvent) -> NaiveDate {
+pub(super) fn pay_date(event: &DividendEvent) -> Date {
     event.payable_date.unwrap_or_else(|| {
         let ex_date = event.ex_date.unwrap_or_default();
-        ex_date + Days::new(PAYABLE_LAG_DAYS)
+        ex_date + PAYABLE_LAG_DAYS.days()
     })
 }
 
-pub(super) fn next_year(date: NaiveDate) -> Option<NaiveDate> {
-    date.checked_add_months(Months::new(12))
+pub(super) fn next_year(date: Date) -> Option<Date> {
+    date.checked_add(12.months()).ok()
 }
 
-pub(super) fn month_key(date: NaiveDate) -> String {
+pub(super) fn month_key(date: Date) -> String {
     format!("{:04}-{:02}", date.year(), date.month())
 }
 
 /// `today` 所在月份到 `end` 所在月份（含）的每個月。
-pub(super) fn month_range(today: NaiveDate, end: NaiveDate) -> Vec<String> {
+pub(super) fn month_range(today: Date, end: Date) -> Vec<String> {
     let mut months = Vec::new();
-    let mut cursor = today.with_day(1).unwrap_or(today);
+    let mut cursor = today.first_of_month();
     while cursor <= end {
         months.push(month_key(cursor));
-        match cursor.checked_add_months(Months::new(1)) {
+        match cursor.checked_add(1.months()).ok() {
             Some(next) => cursor = next,
             None => break,
         }

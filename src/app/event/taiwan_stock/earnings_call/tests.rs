@@ -1,12 +1,15 @@
 //! 法說會通知的測試。
 
 use super::*;
+use crate::core::util::datetime::{today, ymd};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
-fn day(month: u32, day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, month, day).unwrap()
+fn day(month: u32, day: u32) -> Date {
+    ymd(2026, month, day).unwrap()
 }
 
-fn call(call_id: &str, date: NaiveDate) -> EarningsCall {
+fn call(call_id: &str, date: Date) -> EarningsCall {
     EarningsCall {
         call_id: call_id.to_string(),
         date,
@@ -193,7 +196,6 @@ fn notified_key_uses_the_call_id() {
 /// 假持股代號 799797（全數字才算普通股）、會員 979797；Telegram 導向 mock server，測試也沒有
 /// 註冊告警管道，不會真的送出訊息。結束時刪除持股與 Redis 已通知紀錄。
 mod execute_flow {
-    use chrono::Days;
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -204,7 +206,7 @@ mod execute_flow {
     const SYMBOL: &str = "799797";
     const MEMBER: i64 = 979_797;
 
-    fn call_id(date: NaiveDate) -> String {
+    fn call_id(date: Date) -> String {
         format!("TW_{SYMBOL}.TW_{date}")
     }
 
@@ -229,9 +231,9 @@ mod execute_flow {
             println!("跳過 execute_notifies_recent_ready_call_once：無資料庫連接");
             return;
         }
-        let today = Local::now().date_naive();
+        let today = today();
         let recent = call_id(today);
-        let stale = call_id(today - Days::new(30));
+        let stale = call_id(today - 30.days());
         cleanup(&recent).await;
         sqlx::query(
             "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, created_time, date) \
@@ -250,7 +252,7 @@ mod execute_flow {
                 "result": true,
                 "data": {"list": [
                     {"call_id": recent, "date": today.to_string(), "title": "測試法說會", "has_transcript": true},
-                    {"call_id": stale, "date": (today - Days::new(30)).to_string(), "title": "舊場次", "has_transcript": true}
+                    {"call_id": stale, "date": (today - 30.days()).to_string(), "title": "舊場次", "has_transcript": true}
                 ]}
             })))
             .expect(2)

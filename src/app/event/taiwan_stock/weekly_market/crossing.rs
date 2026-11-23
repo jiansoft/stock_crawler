@@ -1,7 +1,7 @@
 //! 每週市場摘要的相對強度穿越一段：近一週站上、跌破 80 與 50 分的家數與代表股。
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::{TOP, WEEK_DAYS};
 use crate::domain::quote::{
@@ -14,15 +14,15 @@ use crate::domain::quote::{
 /// 一週的相對強度穿越：期間與每檔每個門檻的最後一次穿越。
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct CrossingSection {
-    pub(super) from: NaiveDate,
-    pub(super) to: NaiveDate,
+    pub(super) from: Date,
+    pub(super) to: Date,
     pub(super) crossings: Vec<PeriodCrossing>,
 }
 
 /// 最近 [`WEEK_DAYS`] 個交易日的相對強度穿越；沒有交易日回 `None`。
 pub(super) async fn crossing_section(
     quote: &(impl RelativeStrengthCrossingQuery + ForwardReturnRepository),
-    date: NaiveDate,
+    date: Date,
 ) -> Result<Option<CrossingSection>> {
     let dates = quote.fetch_trading_dates(date, WEEK_DAYS).await?;
     let (Some(&to), Some(&from)) = (dates.first(), dates.last()) else {

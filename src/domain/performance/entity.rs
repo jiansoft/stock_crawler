@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 mod corporate_action;
@@ -172,15 +172,15 @@ impl CagrMetric {
 /// 單一除權息事件。
 ///
 /// 現金與股票股利各有獨立的除權息日，兩者可能不同日甚至只有其中之一，
-/// 因此以兩個 `Option<NaiveDate>` 表達，由模擬器各自判定是否落在期間內。
+/// 因此以兩個 `Option<Date>` 表達，由模擬器各自判定是否落在期間內。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DividendEvent {
     /// 股票代號。
     pub stock_symbol: String,
     /// 除息日（現金股利）。無效或未公布時為 `None`。
-    pub ex_dividend_date_cash: Option<NaiveDate>,
+    pub ex_dividend_date_cash: Option<Date>,
     /// 除權日（股票股利）。無效或未公布時為 `None`。
-    pub ex_dividend_date_stock: Option<NaiveDate>,
+    pub ex_dividend_date_stock: Option<Date>,
     /// 每股現金股利（元）。
     pub cash_dividend: Decimal,
     /// 每股股票股利（元，面額 [`PAR_VALUE`]）。
@@ -191,7 +191,7 @@ impl DividendEvent {
     /// 事件排序用的日期：取現金與股票除權息日中較早者。
     ///
     /// 兩者皆為 `None` 時回傳 `None`，此類事件不應納入模擬。
-    pub fn sort_key(&self) -> Option<NaiveDate> {
+    pub fn sort_key(&self) -> Option<Date> {
         match (self.ex_dividend_date_cash, self.ex_dividend_date_stock) {
             (Some(cash), Some(stock)) => Some(cash.min(stock)),
             (Some(cash), None) => Some(cash),
@@ -226,13 +226,13 @@ pub struct SimulationOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StockCagr {
     /// 計算基準日（期末交易日）。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 股票代號。
     pub stock_symbol: String,
     /// 統計期間。
     pub period: CagrPeriod,
     /// 實際採用的期初交易日。
-    pub base_date: Option<NaiveDate>,
+    pub base_date: Option<Date>,
     /// 期初收盤價。
     pub base_price: Option<Decimal>,
     /// 期末收盤價。
@@ -246,7 +246,7 @@ pub struct StockCagr {
     /// 口徑 C：含息再投入。
     pub reinvested: Option<SimulationOutcome>,
     /// 該股在 `DailyQuotes` 的最早報價日，用於判定新上市／資料未涵蓋。
-    pub first_quote_date: Option<NaiveDate>,
+    pub first_quote_date: Option<Date>,
     /// `base_date` 較名目期初目標日晚幾天；0 表完全對齊。
     pub shortfall_days: Option<i32>,
     /// 期初資料是否齊全。

@@ -1,7 +1,8 @@
 //! 回測參數驗證：檢查範圍、確認產業存在，並決定實際起訖日。
 
 use axum::{http::StatusCode, response::Response};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::super::portfolio::Weighting;
 use super::super::sql::{FIRST_HOLDER_WEEK_SQL, LATEST_RS_DATE_SQL};
@@ -181,11 +182,13 @@ impl<'a> Backtest<'a> {
             }
         }
 
-        let latest: Option<NaiveDate> = sqlx::query_scalar(LATEST_RS_DATE_SQL)
-            .bind(to)
-            .fetch_one(database::get_connection())
-            .await
-            .map_err(|error| Box::new(database_error(error)))?;
+        let latest: Option<Date> =
+            sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(LATEST_RS_DATE_SQL)
+                .bind(to.map(ToSqlx::to_sqlx))
+                .fetch_one(database::get_connection())
+                .await
+                .map(crate::infra::database::jiff_types::from_wire)
+                .map_err(|error| Box::new(database_error(error)))?;
         let Some(to) = latest else {
             return Err(Box::new(error_response(
                 StatusCode::NOT_FOUND,
@@ -193,12 +196,13 @@ impl<'a> Backtest<'a> {
             )));
         };
         let from = resolve_backtest_period(from, to).map_err(unprocessable)?;
-        let first_week: Option<NaiveDate> =
+        let first_week: Option<Date> =
             match params.min_major_change.or(params.min_holder_400_change) {
-                Some(_) => sqlx::query_scalar(FIRST_HOLDER_WEEK_SQL)
+                Some(_) => sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(FIRST_HOLDER_WEEK_SQL)
                     .fetch_one(database::get_connection())
                     .await
-                    .map_err(|error| Box::new(database_error(error)))?,
+                    .map_err(|error| Box::new(database_error(error)))?
+                    .map(jiff_sqlx::Date::to_jiff),
                 None => None,
             };
         validate_major_change_period(params, from, first_week)

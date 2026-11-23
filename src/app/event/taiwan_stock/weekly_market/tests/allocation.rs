@@ -3,9 +3,12 @@
 
 mod etf_look_through;
 
+use crate::domain::portfolio::view::HoldingView;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use chrono::{NaiveDate, Utc};
+use jiff::Timestamp;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 use super::super::allocation::{
     AllocationDrift, AllocationSection, Direction, allocation_sections, lines, section_from_result,
@@ -17,7 +20,9 @@ use crate::domain::portfolio::{
         CurrentPosition, DatedEtfComponent, EtfLookThroughComponent, PortfolioPositionQuery,
         RebalanceParams, calculate_rebalance,
     },
-    target::{PortfolioTargetRecord, PortfolioTargetRepository, TargetDimension},
+    target::{
+        PortfolioTargetRecord, PortfolioTargetRepository, TargetActor, TargetDimension, TargetOwner,
+    },
 };
 
 struct FakeTargets {
@@ -29,20 +34,28 @@ struct FakeTargets {
 impl PortfolioTargetRepository for FakeTargets {
     async fn list_targets(
         &self,
-        _member_id: &str,
+        owner: &TargetOwner,
         _dimension: Option<TargetDimension>,
     ) -> Result<Vec<PortfolioTargetRecord>> {
+        // 週報讀的是預設家庭的全家目標
+        assert_eq!(owner, &TargetOwner::new(1, "0".to_owned()));
         if self.fail {
             return Err(anyhow!("目標讀取失敗"));
         }
         Ok(self.records.clone())
     }
 
-    async fn has_configuration(&self, _: &str, _: TargetDimension) -> Result<bool> {
+    async fn has_configuration(&self, _: &TargetOwner, _: TargetDimension) -> Result<bool> {
         Ok(!self.records.is_empty())
     }
 
-    async fn save_targets(&self, _: &str, _: TargetDimension, _: &[(String, f64)]) -> Result<()> {
+    async fn save_targets(
+        &self,
+        _: &TargetOwner,
+        _: TargetDimension,
+        _: &[(String, f64)],
+        _: &TargetActor,
+    ) -> Result<()> {
         Ok(())
     }
 }
@@ -54,7 +67,7 @@ struct FakePositions {
 
 #[async_trait]
 impl PortfolioPositionQuery for FakePositions {
-    async fn fetch_positions(&self, _: i64, _: &[String]) -> Result<Vec<CurrentPosition>> {
+    async fn fetch_positions(&self, _: &HoldingView, _: &[String]) -> Result<Vec<CurrentPosition>> {
         if self.fail {
             return Err(anyhow!("持股讀取失敗"));
         }
@@ -68,7 +81,7 @@ fn target(dimension: TargetDimension, key: &str, percent: f64) -> PortfolioTarge
         dimension,
         key: key.to_owned(),
         target_percent: percent,
-        updated_time: Utc::now(),
+        updated_time: Timestamp::now(),
     }
 }
 
@@ -101,9 +114,14 @@ async fn no_targets_is_silent() {
         fail: false,
     };
     assert!(
-        allocation_sections(&targets, &even_positions(), today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &targets,
+            &even_positions(),
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
     assert!(lines(&[]).is_empty());
 }
@@ -118,9 +136,14 @@ async fn deviations_inside_tolerance_are_silent() {
         fail: false,
     };
     assert!(
-        allocation_sections(&targets, &even_positions(), today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &targets,
+            &even_positions(),
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
 }
 
@@ -135,7 +158,13 @@ async fn deviations_beyond_tolerance_are_listed_largest_first() {
         ],
         fail: false,
     };
-    let sections = allocation_sections(&targets, &even_positions(), today()).await;
+    let sections = allocation_sections(
+        &targets,
+        &even_positions(),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     // 個股：2330 50→30（+20 減碼）、2317 50→40（+10 減碼）；產業在容忍帶內不列。
     assert_eq!(sections.len(), 1, "{sections:?}");
     assert_eq!(sections[0].dimension, TargetDimension::Stock);
@@ -163,7 +192,13 @@ async fn industry_dimension_and_underweight_direction() {
         records: vec![target(TargetDimension::Industry, "半導體業", 80.0)],
         fail: false,
     };
-    let sections = allocation_sections(&targets, &even_positions(), today()).await;
+    let sections = allocation_sections(
+        &targets,
+        &even_positions(),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert_eq!(sections.len(), 1, "{sections:?}");
     assert_eq!(sections[0].dimension, TargetDimension::Industry);
     // 半導體業 50%→80% 低配 30 點；其他電子業沒有目標（0%）超配 50 點，排在前面。
@@ -221,18 +256,28 @@ async fn source_failures_and_unpriced_positions_degrade_silently() {
         fail: true,
     };
     assert!(
-        allocation_sections(&failing_targets, &even_positions(), today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &failing_targets,
+            &even_positions(),
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
     let failing_positions = FakePositions {
         positions: Vec::new(),
         fail: true,
     };
     assert!(
-        allocation_sections(&ok_targets(), &failing_positions, today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &ok_targets(),
+            &failing_positions,
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
     // 缺收盤價（價格 0）時試算被拒絕，不能憑空算出偏離。
     let unpriced = FakePositions {
@@ -240,9 +285,14 @@ async fn source_failures_and_unpriced_positions_degrade_silently() {
         fail: false,
     };
     assert!(
-        allocation_sections(&ok_targets(), &unpriced, today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &ok_targets(),
+            &unpriced,
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
 }
 
@@ -258,16 +308,12 @@ fn message_includes_allocation_only_when_drifting() {
         uncovered_etfs: Vec::new(),
     };
     let sections = [section];
-    let message = build_message(
+    let message = build_holdings_message(
         None,
-        None,
-        None,
-        &[],
         HoldingSection {
             allocation: &sections,
             ..Default::default()
         },
-        None,
         name,
     )
     .expect("有偏離提醒");
@@ -279,23 +325,19 @@ fn message_includes_allocation_only_when_drifting() {
         message.contains(&esc("• 個股：2330 台積電 +12.3%（可考慮減碼）")),
         "{message}"
     );
-    assert!(build_message(None, None, None, &[], HoldingSection::default(), None, name).is_none());
+    assert!(build_message(None, None, None, &[], MarketExtras::default(), None, name).is_none());
     let empty = [AllocationSection {
         dimension: TargetDimension::Stock,
         drifts: Vec::new(),
         uncovered_etfs: Vec::new(),
     }];
     assert!(
-        build_message(
+        build_holdings_message(
             None,
-            None,
-            None,
-            &[],
             HoldingSection {
                 allocation: &empty,
                 ..Default::default()
             },
-            None,
             name,
         )
         .is_none()
@@ -303,6 +345,6 @@ fn message_includes_allocation_only_when_drifting() {
 }
 
 /// 週報的「今天」（ETF 成分資料是否過舊以此判斷）。
-fn today() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 24).expect("日期應合法")
+fn today() -> Date {
+    date(2026, 10, 24)
 }

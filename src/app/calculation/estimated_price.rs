@@ -1,9 +1,9 @@
 use anyhow::Result;
-use chrono::{Datelike, NaiveDate};
+use jiff::civil::Date;
 
 /// 計算便宜、合理、昂貴價的估算
-pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
-    let years: Vec<i32> = (0..6).map(|i| date.year() - i).collect();
+pub async fn calculate_estimated_price(date: Date) -> Result<()> {
+    let years: Vec<i32> = (0..6).map(|i| i32::from(date.year()) - i).collect();
     let years_str = years
         .iter()
         .map(|&year| year.to_string())
@@ -53,7 +53,7 @@ pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
     if should_save {
         let new_config = SystemConfig::new(
             "estimate-date".to_string(),
-            date.format("%Y-%m-%d").to_string(),
+            date.strftime("%Y-%m-%d").to_string(),
         );
         config_repo.save(&new_config).await?;
     }

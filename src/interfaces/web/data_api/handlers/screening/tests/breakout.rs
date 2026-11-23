@@ -1,6 +1,7 @@
 //! 條件選股：近期區間突破條件的參數驗證與整合測試。
 
 use super::*;
+use jiff::civil::date;
 
 /// 天數 1～20，單獨即可成立篩選。
 #[test]
@@ -68,7 +69,7 @@ async fn screen_at_filters_recent_range_breakouts() {
         .expect("種入訊號");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 4, 11).expect("固定日期合法");
+    let query_date = date(1988, 4, 11);
     let screen = |days: Option<u8>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

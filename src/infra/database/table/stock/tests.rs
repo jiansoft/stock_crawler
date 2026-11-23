@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal_macros::dec;
 
 use crate::domain::registry::repository::StockRepository;
@@ -102,7 +103,7 @@ async fn test_upsert_industry() {
         Decimal::ZERO,
         Decimal::ZERO,
         Decimal::ZERO,
-        Local::now(),
+        TaipeiDateTime::now(),
         4,
         15,
         0,
@@ -119,7 +120,7 @@ async fn test_upsert_industry() {
         Decimal::ZERO,
         Decimal::ZERO,
         Decimal::ZERO,
-        Local::now(),
+        TaipeiDateTime::now(),
         0,
         0,
         0,
@@ -148,7 +149,7 @@ async fn test_upsert_industry() {
         Decimal::ZERO,
         Decimal::ZERO,
         Decimal::ZERO,
-        Local::now(),
+        TaipeiDateTime::now(),
         2,
         8,
         0,

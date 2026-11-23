@@ -2,9 +2,10 @@ use crate::domain::portfolio::entity::{
     ReceivedDividend, ReceivedDividendItem, StockOwnershipDetail,
 };
 use crate::domain::portfolio::payout::PayoutAllocation;
+use crate::domain::portfolio::view::HoldingView;
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 持股領域之倉儲介面 (Repository Trait)。
@@ -16,6 +17,15 @@ pub trait PortfolioRepository: Send + Sync {
     /// 若傳入 `None`，則查詢所有未售出的持股。
     async fn fetch_active_holdings(
         &self,
+        security_codes: Option<Vec<String>>,
+    ) -> Result<Vec<StockOwnershipDetail>>;
+
+    /// 某個可見範圍內「未售出」的持股明細（持股類通知依收件者範圍查詢，7.6）。
+    ///
+    /// `security_codes` 為 `None` 或空清單時不限代號。
+    async fn fetch_active_holdings_in(
+        &self,
+        view: &HoldingView,
         security_codes: Option<Vec<String>>,
     ) -> Result<Vec<StockOwnershipDetail>>;
 
@@ -47,15 +57,15 @@ pub trait PortfolioRepository: Send + Sync {
         holding_serial: i64,
     ) -> Result<(Decimal, Decimal, Decimal, Decimal)>;
 
-    /// 查詢現金或股票股利發放日落在 `from..=to` 的股利，依會員分配（`member_id` 為 0 時查全部會員）。
+    /// 查詢現金或股票股利發放日落在 `from..=to` 的股利，依會員分配；範圍由 `view` 決定（家庭全體或單一成員）。
     ///
     /// 已除權息的取已領股利明細；除權息日在 `today` 以後、還沒有明細的以目前未賣出持股推算
     /// （`estimated`）。年度合計列與分期明細並存時只取分期。
     async fn fetch_payout_allocations(
         &self,
-        member_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-        today: NaiveDate,
+        view: &HoldingView,
+        from: Date,
+        to: Date,
+        today: Date,
     ) -> Result<Vec<PayoutAllocation>>;
 }

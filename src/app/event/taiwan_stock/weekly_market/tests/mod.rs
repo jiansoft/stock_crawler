@@ -15,6 +15,8 @@ mod message;
 mod sections;
 mod upcoming_dividend;
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use anyhow::anyhow;
@@ -35,8 +37,8 @@ use crate::domain::quote::relative_strength::{
     CrossDirection, PeriodCrossing, RelativeStrengthDay, ScoredStock, UniverseRow,
 };
 
-pub(super) fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期")
+pub(super) fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("合法日期")
 }
 
 pub(super) fn esc(line: &str) -> String {

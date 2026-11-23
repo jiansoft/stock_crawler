@@ -1,15 +1,16 @@
 //! 本週主機健康：解析 23:30 每日彙總行、同日多行取最差值、只讀期間內的 info 檔。
 
-use super::*;
 use crate::app::event::taiwan_stock::data_health::host_summary::{
     HostDay, host_summary_line, parse_host_line, weekly_host_days,
 };
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
 const OCT30: &str = "2026-10-30 23:30:00.1 主機健康彙總 2026-10-30：檢查 49 次｜fsync 最大 14318 ms｜MemAvailable 最低 334 MB｜swap 最高 96.7%｜供電／降頻 目前 無；開機以來 曾供電不足｜部署期間 11 次（略過告警 4 項）｜資料庫：連不上 1 次（最長約 4 分鐘）、重啟 0 次、啟動於 10-29 22:55";
 const NOV01: &str = "2026-11-01 23:30:00.2 主機健康彙總 2026-11-01：檢查 134 次｜fsync 最大 351 ms、逾時或失敗 1 次｜MemAvailable 最低 679 MB｜swap 最高 83.9%｜供電／降頻 目前 供電不足；開機以來 曾供電不足｜資料庫：連不上 0 次（最長約 0 分鐘）、重啟 0 次";
 
-fn date(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, m, d).expect("日期應合法")
+fn date(m: u32, d: u32) -> Date {
+    ymd(2026, m, d).expect("日期應合法")
 }
 
 #[test]

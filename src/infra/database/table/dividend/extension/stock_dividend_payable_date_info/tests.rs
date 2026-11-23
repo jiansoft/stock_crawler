@@ -1,8 +1,7 @@
 //! 股利發放日資訊查詢的測試。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use core::result::Result::Ok;
-
-use chrono::{Local, TimeZone};
 
 use super::*;
 
@@ -15,8 +14,9 @@ async fn test_fetch_stocks_with_payable_on_date() {
     dotenvy::dotenv().ok();
     tracing::debug!("開始 fetch_stocks_with_payable_on_date");
 
-    let ex_date = Local.with_ymd_and_hms(2023, 8, 25, 0, 0, 0).unwrap();
-    let d = ex_date.date_naive();
+    let ex_date = TaipeiDateTime::from_datetime(jiff::civil::date(2023, 8, 25).at(0, 0, 0, 0))
+        .expect("合法時間");
+    let d = ex_date.date();
     match fetch(d).await {
         Ok(cd) => {
             dbg!(&cd);

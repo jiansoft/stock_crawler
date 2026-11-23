@@ -1,6 +1,8 @@
 //! HiStock 背景採集任務：快取寫入、診斷計數、失敗分級與每輪結果處理的測試。
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::date;
 
 /// 驗證全量快取更新前，只會針對價格實際異動的股票產生價格事件。
 #[test]
@@ -218,7 +220,7 @@ fn report_cycle_error_marks_dirty_batch_as_seen_today() {
 
     // 當下時段（開盤或盤中）的那一筆已經記過，再來只記 debug。
     assert_eq!(
-        dirty_batch_level(chrono::Local::now().naive_local()),
+        dirty_batch_level(TaipeiDateTime::now().datetime()),
         tracing::Level::DEBUG
     );
 }
@@ -228,13 +230,13 @@ fn report_cycle_error_marks_dirty_batch_as_seen_today() {
 fn dirty_batch_level_is_info_during_the_opening_window() {
     use tracing::Level;
     let _guard = TEST_STATE_LOCK.blocking_lock();
-    let day = chrono::NaiveDate::from_ymd_opt(2020, 3, 2).unwrap();
-    let at = |h, m| day.and_hms_opt(h, m, 0).unwrap();
+    let day = date(2020, 3, 2);
+    let at = |h, m| day.at(h, m, 0, 0);
     assert_eq!(dirty_batch_level(at(9, 2)), Level::INFO);
     assert_eq!(dirty_batch_level(at(9, 10)), Level::DEBUG);
     assert_eq!(dirty_batch_level(at(9, 15)), Level::WARN);
     assert_eq!(dirty_batch_level(at(11, 0)), Level::DEBUG);
-    let next = day.succ_opt().unwrap().and_hms_opt(10, 0, 0).unwrap();
+    let next = day.tomorrow().ok().unwrap().at(10, 0, 0, 0);
     assert_eq!(dirty_batch_level(next), Level::WARN);
 }
 

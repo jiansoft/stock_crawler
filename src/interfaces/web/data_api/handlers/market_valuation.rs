@@ -3,13 +3,15 @@
 //! 每日中位數讀預先算好的 `daily_market_valuation`（官方本益比與股價淨值比，只計大於 0 的值）；
 //! 樣本不足的日子與分布計算見 [`crate::domain::market_index::valuation`]。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Datelike, Local, Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use super::{error_response, market_id_for_stocks, parse_optional_date, repository_error, round2};
 use crate::domain::market_index::valuation::{
@@ -45,10 +47,11 @@ pub(crate) async fn market_valuation(Query(params): Query<MarketValuationParams>
             "market 必須為 all、twse 或 tpex",
         );
     };
-    let until = date.unwrap_or_else(|| Local::now().date_naive());
+    let until = date.unwrap_or_else(today);
     let since = until
-        .checked_sub_months(Months::new(u32::from(years) * 12))
-        .unwrap_or(NaiveDate::MIN);
+        .checked_sub(i64::from(u32::from(years) * 12).months())
+        .ok()
+        .unwrap_or(Date::MIN);
     let days = match PgMarketValuationRepository::new()
         .fetch_market_valuation(market_id, since, until)
         .await

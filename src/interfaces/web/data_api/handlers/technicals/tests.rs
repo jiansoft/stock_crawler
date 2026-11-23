@@ -1,6 +1,7 @@
 //! `/stocks/{symbol}/technicals` handler：均線、乖離率、RSI、KD、MACD 與技術訊號的測試。
 
-use chrono::NaiveDate;
+use jiff::ToSpan;
+use jiff::civil::date;
 
 use super::*;
 
@@ -9,8 +10,7 @@ fn bars(count: usize) -> Vec<PriceBar> {
         .map(|i| {
             let close = 100.0 + i as f64;
             PriceBar {
-                date: NaiveDate::from_ymd_opt(2026, 1, 1).expect("有效日期")
-                    + chrono::Days::new(i as u64),
+                date: date(2026, 1, 1) + (i as i64).days(),
                 close,
                 high: close + 1.0,
                 low: close - 1.0,

@@ -1,6 +1,8 @@
 //! 大盤指數倉儲的測試。
 
 use super::*;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
 #[tokio::test]
@@ -18,12 +20,12 @@ async fn test_pg_market_index_repository_contract() {
 
     let repo = PgMarketIndexRepository::new();
     let test_category = "__TEST_INDEX__";
-    let test_date = NaiveDate::from_ymd_opt(2099, 12, 31).unwrap();
+    let test_date = date(2099, 12, 31);
 
     // 1. 清理潛在殘留數據
     sqlx::query("DELETE FROM \"index\" WHERE category = $1 AND date = $2")
         .bind(test_category)
-        .bind(test_date)
+        .bind(test_date.to_sqlx())
         .execute(database::get_connection())
         .await
         .ok();
@@ -61,7 +63,7 @@ async fn test_pg_market_index_repository_contract() {
         .unwrap();
     assert_eq!(closes, vec![(test_date, 16000.5)]);
     let before = repo
-        .fetch_index_closes(test_category, test_date.pred_opt(), 5)
+        .fetch_index_closes(test_category, test_date.yesterday().ok(), 5)
         .await
         .unwrap();
     assert!(before.is_empty());
@@ -74,7 +76,7 @@ async fn test_pg_market_index_repository_contract() {
     // 4. 清理
     sqlx::query("DELETE FROM \"index\" WHERE category = $1 AND date = $2")
         .bind(test_category)
-        .bind(test_date)
+        .bind(test_date.to_sqlx())
         .execute(database::get_connection())
         .await
         .unwrap();

@@ -1,6 +1,8 @@
 //! 歷史股價紀錄表的測試。
 
+use crate::core::util::datetime::ymd;
 use core::result::Result::Ok;
+use jiff::civil::Date;
 
 use rust_decimal_macros::dec;
 
@@ -14,7 +16,7 @@ use super::*;
 async fn test_upsert() {
     dotenvy::dotenv().ok();
     tracing::info!("開始 upsert");
-    let date = NaiveDate::from_ymd_opt(2023, 8, 2);
+    let date = ymd(2023, 8, 2);
     let mut qhr = QuoteHistoryRecord::new("79979".to_string());
     qhr.maximum_price = dec!(1.1);
     qhr.maximum_price_date_on = date.unwrap();
@@ -121,17 +123,27 @@ async fn rebuild_price_extremes_from_daily_quotes() {
         0
     );
 
-    let row: (Decimal, NaiveDate, Decimal, NaiveDate, Decimal) = sqlx::query_as(
-        r#"SELECT maximum_price, maximum_price_date_on, minimum_price, minimum_price_date_on,
+    let row: (Decimal, Date, Decimal, Date, Decimal) =
+        sqlx::query_as::<_, (Decimal, jiff_sqlx::Date, Decimal, jiff_sqlx::Date, Decimal)>(
+            r#"SELECT maximum_price, maximum_price_date_on, minimum_price, minimum_price_date_on,
                   "maximum_price-to-book_ratio"
            FROM quote_history_record WHERE security_code = $1"#,
-    )
-    .bind(&symbol)
-    .fetch_one(database::get_connection())
-    .await
-    .expect("讀回紀錄");
+        )
+        .bind(&symbol)
+        .fetch_one(database::get_connection())
+        .await
+        .map(|(c0, c1, c2, c3, c4)| {
+            (
+                c0,
+                crate::infra::database::jiff_types::from_wire(c1),
+                c2,
+                crate::infra::database::jiff_types::from_wire(c3),
+                c4,
+            )
+        })
+        .expect("讀回紀錄");
     cleanup().await;
 
-    let day = |d| NaiveDate::from_ymd_opt(2001, 1, d).unwrap();
+    let day = |d| ymd(2001, 1, d).unwrap();
     assert_eq!(row, (dec!(12), day(2), dec!(9), day(4), dec!(3.3)));
 }

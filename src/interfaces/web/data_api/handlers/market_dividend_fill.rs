@@ -3,13 +3,13 @@
 //! 樣本來自 [`PgDividendFillRepository`] 並經 [`dividend_fill_stats`] 快取 6 小時；
 //! 持股填息的同組基準（`peer`）共用同一份樣本。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Local;
 
 use super::{error_response, repository_error};
 use crate::domain::dividend::fill_stats::{
@@ -34,7 +34,7 @@ pub(crate) async fn market_dividend_fill_stats(
     if !(1..=8).contains(&years) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "years 必須介於 1 至 8");
     }
-    let today = Local::now().date_naive();
+    let today = today();
     let samples = match dividend_fill_stats::market_fill_samples_for(
         &PgDividendFillRepository::new(),
         today,

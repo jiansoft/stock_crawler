@@ -8,14 +8,38 @@ use super::*;
 #[test]
 fn test_group_targets_by_symbol() {
     let grouped = group_targets_by_symbol(vec![
-        PriceTrace::new("2330".to_string(), dec!(500), dec!(600)),
-        PriceTrace::new("2317".to_string(), dec!(100), dec!(120)),
-        PriceTrace::new("2330".to_string(), dec!(520), dec!(650)),
+        PriceTrace::new(1, "2330".to_string(), dec!(500), dec!(600)),
+        PriceTrace::new(1, "2317".to_string(), dec!(100), dec!(120)),
+        PriceTrace::new(1, "2330".to_string(), dec!(520), dec!(650)),
     ]);
 
     assert_eq!(grouped.len(), 2);
     assert_eq!(grouped.get("2330").map(Vec::len), Some(2));
     assert_eq!(grouped.get("2317").map(Vec::len), Some(1));
+}
+
+/// 甲、乙追蹤同一檔：快取裡該代號有兩位會員各自的條件，但追蹤代號清單只有一檔（報價只抓一次）。
+#[test]
+fn two_members_tracking_same_symbol_share_one_quote_fetch() {
+    let _lock = crate::infra::cache::REALTIME_TEST_LOCK.blocking_lock();
+    set_trace_targets_for_test(vec![
+        PriceTrace::new(1, "2330".to_string(), dec!(500), dec!(600)),
+        PriceTrace::new(2, "2330".to_string(), dec!(450), dec!(0)),
+    ]);
+    assert_eq!(get_tracked_symbols(), ["2330"]);
+    let members: Vec<i64> = get_targets_by_symbol("2330")
+        .iter()
+        .map(|target| target.member_id)
+        .collect();
+    assert_eq!(members, [1, 2]);
+    assert_eq!(
+        trace_target_diagnostics(),
+        TraceTargetDiagnostics {
+            symbol_count: 1,
+            target_count: 2,
+        }
+    );
+    clear_trace_targets_cache();
 }
 
 #[test]
@@ -29,9 +53,9 @@ fn trace_targets_cache_snapshot_symbols_and_diagnostics_are_consistent() {
     );
 
     let grouped = group_targets_by_symbol(vec![
-        PriceTrace::new("2330".to_string(), dec!(500), dec!(600)),
-        PriceTrace::new("2317".to_string(), dec!(100), dec!(120)),
-        PriceTrace::new("2330".to_string(), dec!(520), dec!(650)),
+        PriceTrace::new(1, "2330".to_string(), dec!(500), dec!(600)),
+        PriceTrace::new(1, "2317".to_string(), dec!(100), dec!(120)),
+        PriceTrace::new(1, "2330".to_string(), dec!(520), dec!(650)),
     ]);
     {
         let mut cache = TRACE_TARGETS.write().unwrap();

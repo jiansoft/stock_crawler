@@ -20,7 +20,7 @@ pub(super) const FAKE_SYMBOL_C: &str = "79977";
 pub(super) const FAKE_SYMBOL_D: &str = "79976";
 pub(super) const FAKE_SYMBOL_E: &str = "79975";
 
-/// 測試用營收月份，固定歷史月份而非 `Local::now()`，避免與真實資料撞期。
+/// 測試用營收月份，固定歷史月份而非 `TaipeiDateTime::now()`，避免與真實資料撞期。
 pub(super) const TEST_DATE: i64 = 202608;
 /// 錨點季底（2026 Q2）對應的營收月份。
 pub(super) const ANCHOR_DATE: i64 = 202606;

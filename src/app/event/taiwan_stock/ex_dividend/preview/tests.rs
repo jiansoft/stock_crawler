@@ -1,4 +1,5 @@
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use sqlx::PgPool;
@@ -6,13 +7,13 @@ use sqlx::PgPool;
 use super::*;
 use crate::infra::database;
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("合法日期")
 }
 
 fn line(
     symbol: &str,
-    ex_date: NaiveDate,
+    ex_date: Date,
     cash: Decimal,
     shares: i64,
     fill: Option<&str>,

@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use tokio::sync::Mutex;
 
 mod next_open;
@@ -69,8 +69,8 @@ impl StopRule {
 /// 當天或之前的日線為空。
 pub(super) fn holding_path(
     bars: &[PriceBar],
-    date: NaiveDate,
-    end: Option<NaiveDate>,
+    date: Date,
+    end: Option<Date>,
     hold_days: u16,
 ) -> Vec<f64> {
     let after = bars.partition_point(|bar| bar.date <= date);
@@ -102,7 +102,7 @@ pub(super) fn apply_stops(
     if !rule.is_active() {
         return;
     }
-    let ends: Vec<Option<NaiveDate>> = (0..rows.len())
+    let ends: Vec<Option<Date>> = (0..rows.len())
         .map(|index| rows.get(index + 1).map(|next| next.date))
         .collect();
     for (row, end) in rows.iter_mut().zip(ends) {
@@ -173,7 +173,7 @@ pub(super) fn populate_daily_returns(
             },
         };
         // 次日開盤成交：買進價用進場日開盤，出場日的路徑值用開盤；其餘（含進場日當天）用收盤。
-        let ratio = |symbol: &str, date: NaiveDate| {
+        let ratio = |symbol: &str, date: Date| {
             open_ratios
                 .and_then(|ratios| ratios.get(&(symbol.to_owned(), date)).copied())
                 .unwrap_or(1.0)
@@ -182,7 +182,7 @@ pub(super) fn populate_daily_returns(
             Some(_) => close * ratio(symbol, start),
             None => close,
         };
-        let price = |symbol: &str, date: NaiveDate, close: f64| match open_ratios {
+        let price = |symbol: &str, date: Date, close: f64| match open_ratios {
             Some(_) if date == exit => close * ratio(symbol, date),
             _ => close,
         };

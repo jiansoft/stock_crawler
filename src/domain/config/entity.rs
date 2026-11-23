@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 代表系統設定（鍵值對）的領域實體。
 ///
@@ -26,8 +26,8 @@ impl SystemConfig {
     ///
     /// # Errors
     /// 當設定值無法正確解析為日期時回傳錯誤。
-    pub fn parse_val_as_date(&self) -> Result<NaiveDate> {
-        NaiveDate::parse_from_str(&self.val, "%Y-%m-%d").map_err(|why| {
+    pub fn parse_val_as_date(&self) -> Result<Date> {
+        Date::strptime("%Y-%m-%d", &self.val).map_err(|why| {
             anyhow!(
                 "Failed to parse config val '{}' as date: {:?}",
                 self.val,
@@ -43,7 +43,7 @@ impl SystemConfig {
     ///
     /// # 參數
     /// * `new_date` - 新的交易/回補日期。
-    pub fn should_update_date(&self, new_date: NaiveDate) -> bool {
+    pub fn should_update_date(&self, new_date: Date) -> bool {
         match self.parse_val_as_date() {
             Ok(current_date) => new_date > current_date,
             Err(_) => true, // 原值不合法時強制允許更新

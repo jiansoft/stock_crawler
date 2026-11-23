@@ -1,6 +1,7 @@
 //! 條件選股回測 endpoint 整合測試：換股當天的官方本益比與股價淨值比上限與排序。
 
 use super::*;
+use jiff_sqlx::ToSqlx;
 
 /// 換股日的本益比／股價淨值比（03-15 沒有日線）：
 ///
@@ -117,7 +118,13 @@ async fn screen_backtest_valuation_caps_use_rebalance_day_ratios() {
     let dates = [day(1), day(8)];
     let clear = || async {
         let _ = sqlx::query("DELETE FROM daily_market_valuation WHERE date = ANY($1)")
-            .bind(dates.to_vec())
+            .bind(
+                dates
+                    .to_vec()
+                    .iter()
+                    .map(|value| value.to_sqlx())
+                    .collect::<Vec<_>>(),
+            )
             .execute(pool)
             .await;
     };
@@ -127,7 +134,7 @@ async fn screen_backtest_valuation_caps_use_rebalance_day_ratios() {
             "INSERT INTO daily_market_valuation (date, stock_exchange_market_id, median_pe, pe_samples, pb_samples)
              VALUES ($1, 0, $2, 3, 3)",
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(rust_decimal::Decimal::from(median_pe))
         .execute(pool)
         .await
@@ -192,7 +199,7 @@ async fn screen_backtest_market_pe_percentile_uses_prior_history_only() {
             "INSERT INTO daily_market_valuation (date, stock_exchange_market_id, median_pe, pe_samples, pb_samples)
              VALUES ($1, 0, $2, 3, 3)",
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(rust_decimal::Decimal::from(median_pe))
         .execute(pool)
         .await

@@ -1,6 +1,8 @@
 //! 減資與分割事件回補的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 
 mod mock_sources;
 use crate::domain::performance::CorporateActionType;
@@ -9,7 +11,7 @@ use rust_decimal_macros::dec;
 fn sample(symbol: &str) -> CorporateAction {
     CorporateAction {
         stock_symbol: symbol.to_string(),
-        effective_date: NaiveDate::from_ymd_opt(1990, 1, 1).expect("測試日期應合法"),
+        effective_date: date(1990, 1, 1),
         action_type: CorporateActionType::CapitalReduction,
         share_ratio: dec!(0.7),
         note: "減資彌補虧損".to_string(),
@@ -20,15 +22,12 @@ fn sample(symbol: &str) -> CorporateAction {
 /// 全量回補會一筆都寫不進去（2026-09-18 就是這樣踩到的）。
 #[test]
 fn full_backfill_start_matches_endpoint_lower_bound() {
-    assert_eq!(
-        full_backfill_start(),
-        NaiveDate::from_ymd_opt(2011, 1, 1).expect("測試日期應合法")
-    );
+    assert_eq!(full_backfill_start(), date(2011, 1, 1));
 
     let (year, month, day) = twse::capital_reduction::EARLIEST_QUERYABLE_DATE;
     assert_eq!(
         full_backfill_start(),
-        NaiveDate::from_ymd_opt(year, month, day).expect("端點下限應為合法日期")
+        ymd(year, month, day).expect("端點下限應為合法日期")
     );
 }
 

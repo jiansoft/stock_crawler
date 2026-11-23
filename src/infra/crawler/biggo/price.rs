@@ -10,17 +10,17 @@
 //!   10-02 的報價，連昨收也是再前一天的。為了不把舊資料當成即時價，`snapshot_date` 不是
 //!   台北時間今天就回錯誤，讓站點池改問下一個站點。
 
+use jiff::Timestamp;
+
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use jiff::civil::Date;
 use rust_decimal::{Decimal, prelude::FromPrimitive};
 use serde::Deserialize;
 
 use super::{BigGo, api_symbol, fetch};
 use crate::{core::declare::StockQuotes, infra::crawler::StockInfo};
-
-/// 台北時區（UTC+8）。
-const TAIPEI_OFFSET_SECONDS: i32 = 8 * 60 * 60;
 
 /// `/stock/current/price` 的回應資料（只取需要的欄位）。
 #[derive(Debug, Deserialize)]
@@ -81,7 +81,7 @@ async fn fetch_quote(stock_symbol: &str) -> Result<Quote> {
 }
 
 /// 檢查報價完整且是 `today`（台北時間）的資料。
-fn validate(stock_symbol: &str, data: CurrentPrice, today: NaiveDate) -> Result<Quote> {
+fn validate(stock_symbol: &str, data: CurrentPrice, today: Date) -> Result<Quote> {
     let price = data
         .current_price
         .filter(|price| *price > 0.0)
@@ -107,15 +107,15 @@ fn validate(stock_symbol: &str, data: CurrentPrice, today: NaiveDate) -> Result<
 }
 
 /// epoch 秒換算成台北時間的日期。
-fn taipei_date(epoch_seconds: i64) -> Option<NaiveDate> {
-    let offset = FixedOffset::east_opt(TAIPEI_OFFSET_SECONDS)?;
-    DateTime::from_timestamp(epoch_seconds, 0).map(|time| time.with_timezone(&offset).date_naive())
+fn taipei_date(epoch_seconds: i64) -> Option<Date> {
+    Timestamp::from_second(epoch_seconds)
+        .ok()
+        .map(|time| TaipeiDateTime::from_timestamp(time).date())
 }
 
 /// 台北時間的今天（與主機時區無關）。
-fn taipei_today() -> NaiveDate {
-    let offset = FixedOffset::east_opt(TAIPEI_OFFSET_SECONDS).expect("UTC+8 is a valid offset");
-    Utc::now().with_timezone(&offset).date_naive()
+fn taipei_today() -> Date {
+    crate::core::util::datetime::today()
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 use rust_decimal_macros::dec;
 
 use super::*;
-use crate::domain::portfolio::target::PortfolioTargetRepository;
+use crate::domain::portfolio::target::{PortfolioTargetRepository, TargetActor, TargetOwner};
 use crate::infra::database;
 
 fn targets(items: &[(&str, f64)]) -> Vec<(String, f64)> {
@@ -41,7 +41,8 @@ async fn save_records_previous_targets_and_keeps_latest_twenty() {
         return;
     }
     let pool = database::get_connection();
-    let member = "79977";
+    let owner = TargetOwner::new(1, "79977".to_owned());
+    let member = &owner;
     let cleanup = || async {
         for sql in [
             "DELETE FROM portfolio_target WHERE member_id='79977'",
@@ -55,15 +56,21 @@ async fn save_records_previous_targets_and_keeps_latest_twenty() {
     let repo = PgPortfolioTargetRepository::with_pool(pool.clone());
     let stock = TargetDimension::Stock;
 
-    repo.save_targets(member, stock, &targets(&[("79977A", 60.0)]))
-        .await
-        .unwrap();
+    repo.save_targets(
+        member,
+        stock,
+        &targets(&[("79977A", 60.0)]),
+        &TargetActor::default(),
+    )
+    .await
+    .unwrap();
     assert!(repo.list_revisions(member, stock).await.unwrap().is_empty());
 
     repo.save_targets(
         member,
         stock,
         &targets(&[("79977A", 40.0), ("79977B", 30.25)]),
+        &TargetActor::default(),
     )
     .await
     .unwrap();
@@ -72,14 +79,22 @@ async fn save_records_previous_targets_and_keeps_latest_twenty() {
         member,
         stock,
         &targets(&[("79977B", 30.25), ("79977A", 40.0)]),
+        &TargetActor::default(),
     )
     .await
     .unwrap();
     // 全現金也是一組設定：記下覆蓋前的兩檔。
-    repo.save_targets(member, stock, &[]).await.unwrap();
-    repo.save_targets(member, stock, &targets(&[("79977C", 10.0)]))
+    repo.save_targets(member, stock, &[], &TargetActor::default())
         .await
         .unwrap();
+    repo.save_targets(
+        member,
+        stock,
+        &targets(&[("79977C", 10.0)]),
+        &TargetActor::default(),
+    )
+    .await
+    .unwrap();
 
     let revisions = repo.list_revisions(member, stock).await.unwrap();
     let contents: Vec<Vec<(String, f64)>> = revisions.iter().map(|r| r.targets.clone()).collect();
@@ -98,7 +113,12 @@ async fn save_records_previous_targets_and_keeps_latest_twenty() {
         repo.get_revision(member, oldest.id).await.unwrap(),
         Some(oldest.clone())
     );
-    assert_eq!(repo.get_revision("79976", oldest.id).await.unwrap(), None);
+    assert_eq!(
+        repo.get_revision(&TargetOwner::new(1, "79976".to_owned()), oldest.id)
+            .await
+            .unwrap(),
+        None
+    );
     // 別的維度不受影響。
     assert!(
         repo.list_revisions(member, TargetDimension::Industry)
@@ -108,9 +128,14 @@ async fn save_records_previous_targets_and_keeps_latest_twenty() {
     );
 
     for percent in 1..=25 {
-        repo.save_targets(member, stock, &targets(&[("79977D", f64::from(percent))]))
-            .await
-            .unwrap();
+        repo.save_targets(
+            member,
+            stock,
+            &targets(&[("79977D", f64::from(percent))]),
+            &TargetActor::default(),
+        )
+        .await
+        .unwrap();
     }
     let revisions = repo.list_revisions(member, stock).await.unwrap();
     assert_eq!(revisions.len(), MAX_TARGET_REVISIONS as usize);

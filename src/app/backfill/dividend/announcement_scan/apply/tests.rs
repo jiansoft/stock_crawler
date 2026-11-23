@@ -1,5 +1,6 @@
 //! 異動計畫的套用的測試。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::super::fixtures::announcement;
@@ -19,7 +20,7 @@ fn event(
 /// 2026-10-09 的 00904：10-16 除息、金額待公告、Yahoo 未列出 → 只是在等公告。
 #[test]
 fn test_is_awaiting_amount_far_from_ex_date() {
-    let today = NaiveDate::from_ymd_opt(2026, 10, 9).unwrap();
+    let today = date(2026, 10, 9);
     let item = event(
         None,
         (2026, 10, 16),
@@ -38,16 +39,16 @@ fn test_is_awaiting_amount_warns_near_ex_date() {
         UnresolvedReason::NoMatchingYahooDividend,
     );
 
-    let near = NaiveDate::from_ymd_opt(2026, 10, 13).unwrap();
+    let near = date(2026, 10, 13);
     assert!(!is_awaiting_amount(&item, near));
-    let day_before = NaiveDate::from_ymd_opt(2026, 10, 12).unwrap();
+    let day_before = date(2026, 10, 12);
     assert!(is_awaiting_amount(&item, day_before));
 }
 
 /// 金額已公布卻對不上、或 Yahoo 抓取失敗，都不是等待狀態。
 #[test]
 fn test_is_awaiting_amount_requires_pending_amount_and_yahoo_miss() {
-    let today = NaiveDate::from_ymd_opt(2026, 10, 9).unwrap();
+    let today = date(2026, 10, 9);
 
     let announced = event(
         Some(dec!(0.5)),

@@ -1,5 +1,8 @@
 //! 未來報酬倉儲與大盤彙總重算的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -27,7 +30,7 @@ async fn forward_returns_adjust_for_events() {
         return;
     }
     let pool = database::get_connection();
-    let day = |d| NaiveDate::from_ymd_opt(1991, 8, d).expect("有效日期");
+    let day = |d| ymd(1991, 8, d).expect("有效日期");
     let symbols = ["79979FA", "79979FB", "79979FC", "79979FD"];
     let cleanup = || async {
         for sql in [
@@ -77,7 +80,7 @@ async fn forward_returns_adjust_for_events() {
             sqlx::query(
                 r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice") VALUES ($1, $2, $3)"#,
             )
-            .bind(day(d))
+            .bind(day(d).to_sqlx())
             .bind(symbol)
             .bind(close)
             .execute(pool)
@@ -112,7 +115,7 @@ async fn forward_returns_adjust_for_events() {
         "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
          VALUES ($1, '79979FA', 'rs50', 'cross_above', '相對強度 40 → 60 分，突破 50 分')",
     )
-    .bind(day(8))
+    .bind(day(8).to_sqlx())
     .execute(pool)
     .await
     .expect("寫入相對強度訊號");
@@ -187,7 +190,7 @@ async fn market_forward_returns_match_row_averages() {
         return;
     }
     let pool = database::get_connection();
-    let day = |d| NaiveDate::from_ymd_opt(1981, 3, d).expect("日期合法");
+    let day = |d| ymd(1981, 3, d).expect("日期合法");
     let symbols = ["79976A", "79976B", "79976C", "79976D"];
     let cleanup = || async {
         for sql in [
@@ -223,7 +226,7 @@ async fn market_forward_returns_match_row_averages() {
     ];
     for (d, symbol, r5, r20) in returns {
         sqlx::query("INSERT INTO daily_forward_return (date, stock_symbol, return_5d, return_20d, return_240d) VALUES ($1, $2, $3, $4, $3)")
-            .bind(day(d)).bind(symbol).bind(r5).bind(r20).execute(pool).await.unwrap();
+            .bind(day(d).to_sqlx()).bind(symbol).bind(r5).bind(r20).execute(pool).await.unwrap();
     }
     assert_eq!(
         refresh_market_forward_returns_between(day(1), day(31))
@@ -232,7 +235,7 @@ async fn market_forward_returns_match_row_averages() {
         3
     );
 
-    type Daily = Vec<(NaiveDate, Option<String>, Option<String>, Option<String>)>;
+    type Daily = Vec<(Date, Option<String>, Option<String>, Option<String>)>;
     type Period = (
         i64,
         Option<String>,
@@ -242,19 +245,19 @@ async fn market_forward_returns_match_row_averages() {
         Option<String>,
     );
     for market in [0, 2, 4] {
-        let old_daily: Daily = sqlx::query_as(
+        let old_daily: Daily = sqlx::query_as::<_, (jiff_sqlx::Date, Option<String>, Option<String>, Option<String>)>(
             r#"SELECT r.date, AVG(r.return_5d)::text, AVG(r.return_20d)::text, AVG(r.return_240d)::text
                FROM daily_forward_return r JOIN stocks s ON s.stock_symbol = r.stock_symbol
                WHERE r.date BETWEEN $1 AND $2 AND ($3 = 0 OR s.stock_exchange_market_id = $3)
                GROUP BY r.date ORDER BY 1"#,
         )
-        .bind(day(1)).bind(day(31)).bind(market).fetch_all(pool).await.unwrap();
-        let new_daily: Daily = sqlx::query_as(
+        .bind(day(1).to_sqlx()).bind(day(31).to_sqlx()).bind(market).fetch_all(pool).await.map(|rows| rows.into_iter().map(|(c0, c1, c2, c3)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2, c3)).collect::<Vec<_>>()).unwrap();
+        let new_daily: Daily = sqlx::query_as::<_, (jiff_sqlx::Date, Option<String>, Option<String>, Option<String>)>(
             r#"SELECT date, (sum5 / NULLIF(n5, 0))::text, (sum20 / NULLIF(n20, 0))::text, (sum240 / NULLIF(n240, 0))::text
                FROM daily_market_forward_return
                WHERE date BETWEEN $1 AND $2 AND market_id = $3 ORDER BY 1"#,
         )
-        .bind(day(1)).bind(day(31)).bind(market).fetch_all(pool).await.unwrap();
+        .bind(day(1).to_sqlx()).bind(day(31).to_sqlx()).bind(market).fetch_all(pool).await.map(|rows| rows.into_iter().map(|(c0, c1, c2, c3)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2, c3)).collect::<Vec<_>>()).unwrap();
         assert_eq!(new_daily, old_daily, "每日平均 market={market}");
 
         let old_period: Period = sqlx::query_as(
@@ -265,7 +268,7 @@ async fn market_forward_returns_match_row_averages() {
                FROM daily_forward_return r JOIN stocks s ON s.stock_symbol = r.stock_symbol
                WHERE r.date BETWEEN $1 AND $2 AND ($3 = 0 OR s.stock_exchange_market_id = $3)"#,
         )
-        .bind(day(1)).bind(day(31)).bind(market).fetch_one(pool).await.unwrap();
+        .bind(day(1).to_sqlx()).bind(day(31).to_sqlx()).bind(market).fetch_one(pool).await.unwrap();
         let new_period: Period = sqlx::query_as(
             r#"SELECT COALESCE(SUM(n5), 0)::bigint, (SUM(sum5) / NULLIF(SUM(n5), 0))::text,
                       (SUM(win5) / NULLIF(SUM(n5), 0))::text,
@@ -274,8 +277,8 @@ async fn market_forward_returns_match_row_averages() {
                FROM daily_market_forward_return
                WHERE date BETWEEN $1 AND $2 AND market_id = $3"#,
         )
-        .bind(day(1))
-        .bind(day(31))
+        .bind(day(1).to_sqlx())
+        .bind(day(31).to_sqlx())
         .bind(market)
         .fetch_one(pool)
         .await
@@ -287,8 +290,8 @@ async fn market_forward_returns_match_row_averages() {
     let left: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM daily_market_forward_return WHERE date BETWEEN $1 AND $2",
     )
-    .bind(day(1))
-    .bind(day(31))
+    .bind(day(1).to_sqlx())
+    .bind(day(31).to_sqlx())
     .fetch_one(pool)
     .await
     .unwrap();
@@ -309,11 +312,11 @@ async fn month_seasonality_merges_the_same_month_across_years() {
         return;
     }
     let pool = database::get_connection();
-    let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("日期合法");
+    let date = |y, m, d| ymd(y, m, d).expect("日期合法");
     let cleanup = || async {
         sqlx::query("DELETE FROM daily_market_forward_return WHERE date BETWEEN $1 AND $2")
-            .bind(date(1972, 1, 1))
-            .bind(date(1974, 12, 31))
+            .bind(date(1972, 1, 1).to_sqlx())
+            .bind(date(1974, 12, 31).to_sqlx())
             .execute(pool)
             .await
             .expect("清理測試資料");
@@ -322,7 +325,7 @@ async fn month_seasonality_merges_the_same_month_across_years() {
 
     // 計入：1972-03 兩天、1973-03 一天（上市櫃全部）。
     // 不計入：1973-03 上市（market 2）、1973-04（別的月份）、1974-03（期間外）。
-    let rows: [(NaiveDate, i16, i64, Decimal, Decimal); 6] = [
+    let rows: [(Date, i16, i64, Decimal, Decimal); 6] = [
         (date(1972, 3, 2), 0, 10, dec!(20), dec!(6)),
         (date(1972, 3, 20), 0, 10, dec!(-5), dec!(4)),
         (date(1973, 3, 5), 0, 20, dec!(45), dec!(12)),
@@ -335,7 +338,7 @@ async fn month_seasonality_merges_the_same_month_across_years() {
             "INSERT INTO daily_market_forward_return (date, market_id, n5, n20, sum20, win20, n60, n120, n240)
              VALUES ($1, $2, 0, $3, $4, $5, 0, 0, 0)",
         )
-        .bind(day)
+        .bind(day.to_sqlx())
         .bind(market)
         .bind(n20)
         .bind(sum20)

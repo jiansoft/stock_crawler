@@ -1,6 +1,7 @@
 //! 相對強度計分母體（近 5 個交易日有收盤）的資料庫語意整合測試。
 
 use super::*;
+use jiff_sqlx::ToSqlx;
 
 /// 母體看「資料日前 5 個交易日內有沒有收盤」，不看目前的下市旗標：RG 每天有日線（構成交易日曆）；
 /// RH 已標記下市但資料日仍有收盤（終止上市後轉上櫃），列入；RI 沒有標記下市，但最後一筆收盤在
@@ -45,9 +46,14 @@ async fn relative_strength_universe_uses_recent_quotes() {
            UNION ALL SELECT $2, '79979RH', 20
            UNION ALL SELECT $3, '79979RI', 30"#,
     )
-    .bind(&dates)
-    .bind(end)
-    .bind(dates[dates.len() - 6])
+    .bind(
+        dates
+            .iter()
+            .map(|value| value.to_sqlx())
+            .collect::<Vec<_>>(),
+    )
+    .bind(end.to_sqlx())
+    .bind((dates[dates.len() - 6]).to_sqlx())
     .execute(pool)
     .await
     .expect("種入日線");
@@ -62,7 +68,7 @@ async fn relative_strength_universe_uses_recent_quotes() {
                      return_120d = COALESCE(EXCLUDED.return_120d, t.return_120d),
                      return_240d = COALESCE(EXCLUDED.return_240d, t.return_240d)",
             )
-            .bind(dates[dates.len() - 1 - horizon])
+            .bind((dates[dates.len() - 1 - horizon]).to_sqlx())
             .bind(symbol)
             .bind(i32::try_from(horizon).expect("天期很小"))
             .execute(pool)

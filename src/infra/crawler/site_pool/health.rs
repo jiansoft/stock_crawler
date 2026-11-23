@@ -19,6 +19,7 @@
 //! 只要其他股票有成功就會重設連續失敗數，不致讓正常站點熔斷。即使全部站點都熔斷，
 //! [`plan_attempt_order`] 仍會回傳完整輪詢順序，不會整個斷線。
 
+use crate::core::util::datetime::today;
 use std::{
     collections::HashMap,
     sync::{
@@ -28,7 +29,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::Local;
 use once_cell::sync::Lazy;
 
 use crate::core::util::daily_seen::ConcurrentDailySeen;
@@ -235,7 +235,7 @@ pub(super) fn record_site_outcome(name: &'static str, ok: bool, started_at: Inst
     match transition {
         Some(Transition::Tripped(cooldown)) => {
             let secs = cooldown.as_secs();
-            if TRIPPED_TODAY.first_today(name, Local::now().date_naive()) {
+            if TRIPPED_TODAY.first_today(name, today()) {
                 tracing::warn!(
                     site = name,
                     cooldown_secs = secs,

@@ -1,6 +1,8 @@
 //! 每日風險指標重算的整合測試（臨時庫、假代號、固定 1985 年資料）。
-
-use chrono::{Days, NaiveDate};
+use crate::core::util::datetime::ymd;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -9,9 +11,9 @@ use crate::infra::database;
 
 const SYMBOLS: [&str; 3] = ["79979RA", "79979RB", "79979RC"];
 
-fn day(n: u64) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1985, 1, 1)
-        .and_then(|first| first.checked_add_days(Days::new(n)))
+fn day(n: u64) -> Date {
+    ymd(1985, 1, 1)
+        .and_then(|first| first.checked_add((n as i64).days()).ok())
         .expect("固定日期合法")
 }
 
@@ -25,8 +27,8 @@ async fn cleanup(pool: &sqlx::PgPool) {
     }
     let _ =
         sqlx::query(r#"DELETE FROM "index" WHERE category = 'TAIEX' AND date BETWEEN $1 AND $2"#)
-            .bind(day(0))
-            .bind(day(399))
+            .bind(day(0).to_sqlx())
+            .bind(day(399).to_sqlx())
             .execute(pool)
             .await;
 }
@@ -64,7 +66,7 @@ async fn calculate_risk_metrics_between_writes_rolling_volatility_and_beta() {
            SELECT 'TAIEX', $1::date + n, CASE WHEN n % 2 = 0 THEN 1 ELSE -1 END, CASE WHEN n % 2 = 0 THEN 101 ELSE 99 END
            FROM generate_series(0, 249) AS n"#,
     )
-    .bind(day(0))
+    .bind(day(0).to_sqlx())
     .execute(pool)
     .await
     .expect("種入加權指數");
@@ -74,7 +76,7 @@ async fn calculate_risk_metrics_between_writes_rolling_volatility_and_beta() {
            UNION ALL SELECT $1::date + n, '79979RB', 0.5 FROM generate_series(0, 249) AS n
            UNION ALL SELECT $1::date + n, '79979RC', 1 FROM generate_series(100, 249) AS n"#,
     )
-    .bind(day(0))
+    .bind(day(0).to_sqlx())
     .execute(pool)
     .await
     .expect("種入日線");
@@ -83,7 +85,7 @@ async fn calculate_risk_metrics_between_writes_rolling_volatility_and_beta() {
         "INSERT INTO daily_risk_metric (date, stock_symbol, volatility_percent, beta, samples)
          VALUES ($1, '79979RA', 99, 9, 200)",
     )
-    .bind(day(0))
+    .bind(day(0).to_sqlx())
     .execute(pool)
     .await
     .expect("種入舊資料");
@@ -91,14 +93,28 @@ async fn calculate_risk_metrics_between_writes_rolling_volatility_and_beta() {
     let written = calculate_risk_metrics_between(day(245), day(249))
         .await
         .expect("重算風險指標");
-    let rows: Vec<(NaiveDate, String, Decimal, Option<Decimal>, i16)> = sqlx::query_as(
-        "SELECT date, stock_symbol, volatility_percent, beta, samples FROM daily_risk_metric
+    let rows: Vec<(Date, String, Decimal, Option<Decimal>, i16)> =
+        sqlx::query_as::<_, (jiff_sqlx::Date, String, Decimal, Option<Decimal>, i16)>(
+            "SELECT date, stock_symbol, volatility_percent, beta, samples FROM daily_risk_metric
          WHERE stock_symbol = ANY($1) ORDER BY stock_symbol, date",
-    )
-    .bind(SYMBOLS)
-    .fetch_all(pool)
-    .await
-    .expect("讀取風險指標");
+        )
+        .bind(SYMBOLS)
+        .fetch_all(pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(c0, c1, c2, c3, c4)| {
+                    (
+                        crate::infra::database::jiff_types::from_wire(c0),
+                        c1,
+                        c2,
+                        c3,
+                        c4,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .expect("讀取風險指標");
     let same_day = calculate_risk_metrics(day(249)).await.expect("重算單日");
     cleanup(pool).await;
 

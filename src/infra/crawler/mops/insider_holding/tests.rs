@@ -1,4 +1,6 @@
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 
 // include_str! 的路徑相對於本檔案（mops/insider_holding/tests.rs）→ mops/testdata/。
 const LISTED_FIXTURE: &str = include_str!("../testdata/insider_holding_t187ap11_L.json");
@@ -17,7 +19,7 @@ fn parse_listed_fixture() {
     let wang: Vec<_> = rows.iter().filter(|row| row.name == "王貴雲").collect();
     assert_eq!(wang.len(), 2);
     assert_eq!(wang[0].stock_symbol, "1303");
-    assert_eq!(wang[0].month, NaiveDate::from_ymd_opt(2026, 8, 1).unwrap());
+    assert_eq!(wang[0].month, date(2026, 8, 1));
     assert_eq!(wang[0].title, "董事本人");
     assert_eq!(wang[0].shares, 10_723_271);
     assert_eq!(wang[0].pledged, 8_300_000);
@@ -150,8 +152,8 @@ fn csv_records_handles_quotes() {
 
 #[test]
 fn parse_month_converts_roc_year_month() {
-    assert_eq!(parse_month("11508"), NaiveDate::from_ymd_opt(2026, 8, 1));
-    assert_eq!(parse_month(" 9912 "), NaiveDate::from_ymd_opt(2010, 12, 1));
+    assert_eq!(parse_month("11508"), ymd(2026, 8, 1));
+    assert_eq!(parse_month(" 9912 "), ymd(2010, 12, 1));
     assert_eq!(parse_month("11513"), None);
     assert_eq!(parse_month("8"), None);
     assert_eq!(parse_month(""), None);

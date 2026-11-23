@@ -10,7 +10,8 @@
 //!   **只讀**。列出上櫃仍未解釋的價格跳動，收斂成逐檔待辦清單，
 //!   供人工登錄或未來接上逐檔來源時當目標清單。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 
 use crate::app::backfill::capital_reduction;
 use crate::app::backfill::capital_reduction_history;
@@ -82,8 +83,8 @@ async fn test_scan_otc_capital_reduction_gaps() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    let to = chrono::Local::now().date_naive();
-    let from = NaiveDate::parse_from_str(MANUAL_CAPITAL_REDUCTION_SCAN_FROM, "%Y-%m-%d")
+    let to = today();
+    let from = Date::strptime("%Y-%m-%d", MANUAL_CAPITAL_REDUCTION_SCAN_FROM)
         .expect("manual capital reduction scan from should be valid");
 
     println!("開始 test_scan_otc_capital_reduction_gaps from={from} to={to}");

@@ -11,7 +11,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::institutional_flow::INVESTORS;
 use super::signal_history::{
@@ -122,14 +123,16 @@ pub(crate) async fn institutional_streak_performance(
     }
 
     let pool = database::get_connection();
-    let latest: Option<NaiveDate> = match sqlx::query_scalar(LATEST_CHIP_DATE_SQL)
-        .bind(to)
-        .fetch_one(pool)
-        .await
-    {
-        Ok(value) => value,
-        Err(error) => return database_error(error),
-    };
+    let latest: Option<Date> =
+        match sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(LATEST_CHIP_DATE_SQL)
+            .bind(to.map(ToSqlx::to_sqlx))
+            .fetch_one(pool)
+            .await
+            .map(crate::infra::database::jiff_types::from_wire)
+        {
+            Ok(value) => value,
+            Err(error) => return database_error(error),
+        };
     let Some(to) = latest else {
         return error_response(StatusCode::NOT_FOUND, "查無籌碼資料");
     };
@@ -144,8 +147,8 @@ pub(crate) async fn institutional_streak_performance(
         STREAK_PERFORMANCE_SQL
     };
     let rows: Vec<PerformanceRow> = match sqlx::query_as(sql)
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .bind(market_id)
         .bind(investor)
         .bind(sign)

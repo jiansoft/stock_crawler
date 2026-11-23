@@ -2,7 +2,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use crate::{
     domain::chip::flow::{ChipFlowQuery, FlowPeriod, MAX_FLOW_DAYS, StockFlow, StockStreak},
@@ -106,18 +107,23 @@ struct FlowRow {
 
 #[async_trait]
 impl ChipFlowQuery for PgChipRepository {
-    async fn fetch_chip_dates(&self, until: NaiveDate) -> Result<Vec<NaiveDate>> {
-        Ok(sqlx::query_scalar(DATES_SQL)
-            .bind(until)
+    async fn fetch_chip_dates(&self, until: Date) -> Result<Vec<Date>> {
+        Ok(sqlx::query_scalar::<_, jiff_sqlx::Date>(DATES_SQL)
+            .bind(until.to_sqlx())
             .bind(MAX_FLOW_DAYS as i64)
             .fetch_all(database::get_connection())
-            .await?)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(crate::infra::database::jiff_types::from_wire)
+                    .collect::<Vec<_>>()
+            })?)
     }
 
     async fn fetch_flows(&self, period: FlowPeriod, investor: &str) -> Result<Vec<StockFlow>> {
         let rows: Vec<FlowRow> = sqlx::query_as(FLOW_SQL)
-            .bind(period.data_date)
-            .bind(period.from)
+            .bind(period.data_date.to_sqlx())
+            .bind(period.from.to_sqlx())
             .bind(investor)
             .fetch_all(database::get_connection())
             .await?;
@@ -140,9 +146,9 @@ impl ChipFlowQuery for PgChipRepository {
             .collect())
     }
 
-    async fn fetch_streaks(&self, data_date: NaiveDate) -> Result<Vec<StockStreak>> {
+    async fn fetch_streaks(&self, data_date: Date) -> Result<Vec<StockStreak>> {
         let rows: Vec<(String, i16, i16)> = sqlx::query_as(STREAKS_SQL)
-            .bind(data_date)
+            .bind(data_date.to_sqlx())
             .fetch_all(database::get_connection())
             .await?;
         Ok(rows

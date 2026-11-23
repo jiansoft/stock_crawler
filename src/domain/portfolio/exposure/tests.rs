@@ -1,6 +1,8 @@
 //! 持股穿透曝險：把持有 ETF 的市值依前十大持股權重拆到成分股，與直接持股合併的測試。
 
 use super::*;
+use crate::domain::portfolio::view::HoldingView;
+use jiff::civil::date;
 
 fn position(symbol: &str, name: &str, value: Option<f64>, is_etf: bool) -> ExposurePosition {
     ExposurePosition {
@@ -14,7 +16,7 @@ fn position(symbol: &str, name: &str, value: Option<f64>, is_etf: bool) -> Expos
 fn constituent(etf: &str, symbol: &str, name: &str, weight: f64) -> EtfConstituent {
     EtfConstituent {
         etf_symbol: etf.to_owned(),
-        as_of: NaiveDate::from_ymd_opt(2026, 9, 30).expect("日期合法"),
+        as_of: date(2026, 9, 30),
         holding_symbol: symbol.to_owned(),
         holding_name: name.to_owned(),
         weight,
@@ -109,8 +111,8 @@ struct FakeRepo(Vec<ExposurePosition>, Vec<EtfConstituent>);
 
 #[async_trait]
 impl EtfExposureQuery for FakeRepo {
-    async fn fetch_exposure_positions(&self, member_id: i64) -> Result<Vec<ExposurePosition>> {
-        assert_eq!(member_id, 7);
+    async fn fetch_exposure_positions(&self, view: &HoldingView) -> Result<Vec<ExposurePosition>> {
+        assert_eq!(view.member_id(), Some(7));
         Ok(self.0.clone())
     }
 
@@ -123,9 +125,12 @@ impl EtfExposureQuery for FakeRepo {
 #[tokio::test]
 async fn build_report_reads_constituents_of_priced_etfs_only() {
     let (positions, constituents) = sample();
-    let report = build_report(&FakeRepo(positions, constituents), 7)
-        .await
-        .expect("計算成功");
+    let report = build_report(
+        &FakeRepo(positions, constituents),
+        &HoldingView::member(1, 7),
+    )
+    .await
+    .expect("計算成功");
     assert_eq!(report.exposures[0].total_value(), 212_000.0);
 
     // 沒有持有 ETF 時不查前十大持股（FakeRepo 的斷言會失敗）。
@@ -133,14 +138,14 @@ async fn build_report_reads_constituents_of_priced_etfs_only() {
     struct NoEtf(Vec<ExposurePosition>);
     #[async_trait]
     impl EtfExposureQuery for NoEtf {
-        async fn fetch_exposure_positions(&self, _: i64) -> Result<Vec<ExposurePosition>> {
+        async fn fetch_exposure_positions(&self, _: &HoldingView) -> Result<Vec<ExposurePosition>> {
             Ok(self.0.clone())
         }
         async fn fetch_etf_constituents(&self, _: &[String]) -> Result<Vec<EtfConstituent>> {
             panic!("沒有 ETF 不應查詢前十大持股");
         }
     }
-    let report = build_report(&NoEtf(only_stocks), 0)
+    let report = build_report(&NoEtf(only_stocks), &HoldingView::default_household())
         .await
         .expect("計算成功");
     assert_eq!(report.etf_value, 0.0);

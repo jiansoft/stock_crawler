@@ -11,13 +11,15 @@ mod sql;
 #[cfg(test)]
 mod tests;
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use self::{
     params::{ValidatedScreeningParams, validate_screening_params},
@@ -57,14 +59,14 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
 
     // 查詢日由 handler 明確綁定，SQL 不直接讀 CURRENT_DATE；測試可傳入任意日期驗證
     // 月份、季度與 31 天邊界，production 則採伺服器台北本地日。
-    screen_at(&params, validated, Local::now().date_naive()).await
+    screen_at(&params, validated, today()).await
 }
 
 /// 以指定查詢日執行已驗證的選股條件。
 async fn screen_at(
     params: &StockScreeningParams,
     validated: ValidatedScreeningParams,
-    query_date: NaiveDate,
+    query_date: Date,
 ) -> Response {
     // 相對強度要以上市櫃普通股（不含 ETF、特別股）排名、連續天數要回看多日籌碼，都無法在單股 LATERAL 內算，
     // 兩者同時先算好再以陣列傳入。
@@ -116,7 +118,7 @@ async fn screen_at(
     let rows: Result<Vec<ScreenedStockRow>, _> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(validated.market_id)
         .bind(params.industry_id)
-        .bind(query_date)
+        .bind(query_date.to_sqlx())
         .bind(validated.min_revenue_yoy_percent)
         .bind(validated.min_eps)
         .bind(validated.min_roe_percent)
@@ -149,7 +151,12 @@ async fn screen_at(
         .bind(&major_changes)
         .bind(validated.min_major_change)
         .bind(&breakout_symbols)
-        .bind(&breakout_dates)
+        .bind(
+            breakout_dates
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(&breakout_descriptions)
         .bind(validated.range_breakout_days.is_some())
         .bind(validated.min_eps_yoy_percent)
@@ -202,13 +209,13 @@ async fn screen_at(
 /// 為 `None`）；都沒有設時不查資料庫，回空清單。
 async fn load_major_changes(
     validated: &ValidatedScreeningParams,
-    query_date: NaiveDate,
+    query_date: Date,
 ) -> Result<Vec<(String, rust_decimal::Decimal, Option<rust_decimal::Decimal>)>, sqlx::Error> {
     if validated.min_major_change.is_none() && validated.min_holder_400_change.is_none() {
         return Ok(Vec::new());
     }
     sqlx::query_as(MAJOR_CHANGES_SQL)
-        .bind(query_date)
+        .bind(query_date.to_sqlx())
         .bind(i32::from(validated.major_change_weeks))
         .fetch_all(database::get_connection())
         .await
@@ -217,22 +224,25 @@ async fn load_major_changes(
 /// 有設 `range_breakout_days` 時讀近期還沒跌回的區間突破（代號、突破日、說明）；沒有設時不查資料庫。
 async fn load_range_breakouts(
     validated: &ValidatedScreeningParams,
-    query_date: NaiveDate,
-) -> Result<Vec<(String, NaiveDate, String)>, sqlx::Error> {
+    query_date: Date,
+) -> Result<Vec<(String, Date, String)>, sqlx::Error> {
     let Some(days) = validated.range_breakout_days else {
         return Ok(Vec::new());
     };
-    sqlx::query_as(RANGE_BREAKOUTS_SQL)
-        .bind(query_date)
+    sqlx::query_as::<_, (String, jiff_sqlx::Date, String)>(RANGE_BREAKOUTS_SQL)
+        .bind(query_date.to_sqlx())
         .bind(days)
         .fetch_all(database::get_connection())
         .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(symbol, date, kind)| (symbol, date.to_jiff(), kind))
+                .collect()
+        })
 }
 
 /// 把全體計分結果拆成資料日與代號、分數兩個平行陣列；查無資料時兩個陣列皆空。
-fn rs_columns(
-    scores: Option<(NaiveDate, Vec<ScoredStock>)>,
-) -> (Option<String>, Vec<String>, Vec<i16>) {
+fn rs_columns(scores: Option<(Date, Vec<ScoredStock>)>) -> (Option<String>, Vec<String>, Vec<i16>) {
     let Some((data_date, scored)) = scores else {
         return (None, Vec::new(), Vec::new());
     };
@@ -245,7 +255,7 @@ fn rs_columns(
 
 /// 籌碼連續天數拆成資料日與代號、外資、投信三個平行陣列；查無資料時陣列皆空。
 fn streak_columns(
-    streaks: Option<(NaiveDate, Vec<StreakRow>)>,
+    streaks: Option<(Date, Vec<StreakRow>)>,
 ) -> (Option<String>, Vec<String>, Vec<i16>, Vec<i16>) {
     let Some((data_date, rows)) = streaks else {
         return (None, Vec::new(), Vec::new(), Vec::new());

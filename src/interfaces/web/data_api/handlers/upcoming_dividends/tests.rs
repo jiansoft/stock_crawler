@@ -1,5 +1,7 @@
 //! 持股近期除權息回應：金額換算、合計、填息自身紀錄優先於同組基準、沒有事件時不附填息。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use rust_decimal_macros::dec;
@@ -8,8 +10,8 @@ use super::*;
 use crate::domain::dividend::fill::FillSummary;
 use crate::domain::dividend::fill_stats::{BucketStats, YieldBucket};
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 11, d).expect("合法日期")
+fn day(d: u32) -> Date {
+    ymd(2026, 11, d).expect("合法日期")
 }
 
 fn dividend(symbol: &str, cash: Decimal, stock: Decimal) -> UpcomingDividend {

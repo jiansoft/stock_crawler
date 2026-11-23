@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::super::holdings;
 use super::super::upcoming_dividend::{UpcomingLine, item_lines, with_fill_hints};
@@ -15,9 +15,10 @@ use super::find_next_trading_day;
 use crate::{
     app::calculation::{
         dividend_fill_hints::FillHints,
-        upcoming_dividends::{UpcomingDividend, total_shares, upcoming_dividends},
+        upcoming_dividends::{UpcomingDividend, rescope, total_shares, upcoming_dividends},
     },
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     infra::{database::repository::dividend::PgDividendRepository, nosql::redis::CLIENT},
 };
 
@@ -28,10 +29,7 @@ const PREVIEW_TRADING_DAYS: usize = 3;
 const NOTIFIED_TTL_SECONDS: usize = 14 * 24 * 60 * 60;
 
 /// 今天之後第 1 個到第 [`PREVIEW_TRADING_DAYS`] 個交易日。
-pub(super) fn preview_window(
-    today: NaiveDate,
-    holidays: &HashSet<NaiveDate>,
-) -> (NaiveDate, NaiveDate) {
+pub(super) fn preview_window(today: Date, holidays: &HashSet<Date>) -> (Date, Date) {
     let from = find_next_trading_day(today, holidays);
     let mut to = from;
     for _ in 1..PREVIEW_TRADING_DAYS {
@@ -49,18 +47,14 @@ fn notified_key(dividend: &UpcomingDividend) -> String {
 }
 
 /// 組出預告訊息（MarkdownV2）；沒有要預告的持股時回 `None`。
-pub(super) fn preview_message(
-    from: NaiveDate,
-    to: NaiveDate,
-    items: &[UpcomingLine],
-) -> Option<String> {
+pub(super) fn preview_message(from: Date, to: Date, items: &[UpcomingLine]) -> Option<String> {
     if items.is_empty() {
         return None;
     }
     let mut lines = vec![format!(
         "持股除權息預告（{}～{}）︰",
-        from.format("%m-%d"),
-        to.format("%m-%d")
+        from.strftime("%m-%d"),
+        to.strftime("%m-%d")
     )];
     lines.extend(item_lines(items));
     lines.push("僅供參考，除權息日與股利以公告為準".to_owned());
@@ -73,9 +67,10 @@ pub(super) fn preview_message(
 /// # Errors
 ///
 /// 查詢持股失敗時回傳錯誤；個別日期查詢失敗只記警告（見 [`upcoming_dividends`]）。
-pub(super) async fn send(today: NaiveDate, holidays: &HashSet<NaiveDate>) -> Result<()> {
+pub(super) async fn send(today: Date, holidays: &HashSet<Date>) -> Result<()> {
     let (from, to) = preview_window(today, holidays);
-    let shares = total_shares(holdings::active_holding_quantities().await?);
+    // 所有會員的持股只用來找出要預告的除權息；預估金額依收件者範圍的股數計算（會員系統計畫 7.6）。
+    let shares = total_shares(holdings::crawl_holding_quantities().await?);
     let dividends = upcoming_dividends(&PgDividendRepository::new(), &shares, from, to).await;
 
     let mut fresh = Vec::with_capacity(dividends.len());
@@ -100,9 +95,19 @@ pub(super) async fn send(today: NaiveDate, holidays: &HashSet<NaiveDate>) -> Res
         .map(|dividend| dividend.stock_symbol.clone())
         .collect();
     let hints = FillHints::load(&symbols, today).await;
-    if let Some(message) = preview_message(from, to, &with_fill_hints(fresh, &hints)) {
-        alert::send_message(&message).await;
-    }
+    let dedup_key = format!("{}:{today}", Topic::HoldingsExDividendPreview.code());
+    notify::notify_holdings(Topic::HoldingsExDividendPreview, &dedup_key, |view| {
+        let (fresh, hints) = (&fresh, &hints);
+        async move {
+            let shares = total_shares(holdings::active_holding_quantities(&view).await?);
+            Ok(preview_message(
+                from,
+                to,
+                &with_fill_hints(rescope(fresh, &shares), hints),
+            ))
+        }
+    })
+    .await;
     Ok(())
 }
 

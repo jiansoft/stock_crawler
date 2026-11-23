@@ -12,7 +12,8 @@
 //! - `test_save_insider_holdings`：
 //!   立即把最新月份的董監事持股與設質寫入 `insider_holding`（排程是每月 10–28 日 20:50）。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 
 use crate::app::backfill::qualified_foreign_institutional_investor;
 
@@ -36,7 +37,7 @@ async fn test_backfill_foreign_holding_history() {
 
     let parse = |name: &str, default: &str| {
         let value = std::env::var(name).unwrap_or_else(|_| default.to_string());
-        NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+        Date::strptime("%Y-%m-%d", &value)
             .unwrap_or_else(|_| panic!("{name} should be YYYY-MM-DD, got {value}"))
     };
     let start = parse("MANUAL_QFII_HISTORY_START", MANUAL_QFII_HISTORY_START);
@@ -64,7 +65,7 @@ async fn test_backfill_chip_daily() {
 
     let parse = |name: &str, default: &str| {
         let value = std::env::var(name).unwrap_or_else(|_| default.to_string());
-        NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+        Date::strptime("%Y-%m-%d", &value)
             .unwrap_or_else(|_| panic!("{name} should be YYYY-MM-DD, got {value}"))
     };
     let from = parse("MANUAL_CHIP_FROM", MANUAL_CHIP_FROM);
@@ -91,9 +92,9 @@ async fn test_backfill_chip_streaks() {
 
     let raw = std::env::var("MANUAL_CHIP_STREAK_FROM")
         .unwrap_or_else(|_| MANUAL_CHIP_STREAK_FROM.to_string());
-    let from = NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+    let from = Date::strptime("%Y-%m-%d", &raw)
         .unwrap_or_else(|_| panic!("MANUAL_CHIP_STREAK_FROM should be YYYY-MM-DD, got {raw}"));
-    let to = chrono::Local::now().date_naive();
+    let to = today();
 
     let updated = crate::app::backfill::chip::refresh_streaks_since(
         &crate::infra::database::repository::chip::PgChipRepository::new(),

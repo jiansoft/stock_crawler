@@ -1,15 +1,17 @@
 //! 每檔股票的歷年填息提示：近 5 年填息次數與平均天數；沒有自身紀錄時改用同現金殖利率組的的測試。
 
+use crate::core::util::datetime::ymd;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 use crate::domain::dividend::fill::{DailyClose, ExRightEvent};
 use crate::domain::dividend::fill_stats::FillSample;
 
-fn day(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, m, d).expect("日期應合法")
+fn day(m: u32, d: u32) -> Date {
+    ymd(2026, m, d).expect("日期應合法")
 }
 
 /// 2330 9 月除息第 2 天填息；9999 查詢失敗；其他代號沒有除權息。
@@ -17,7 +19,7 @@ struct FakeFills;
 
 #[async_trait]
 impl DividendFillQuery for FakeFills {
-    async fn fetch_latest_quote_date(&self, _symbol: &str) -> Result<Option<NaiveDate>> {
+    async fn fetch_latest_quote_date(&self, _symbol: &str) -> Result<Option<Date>> {
         unreachable!("不需要最新收盤日")
     }
 
@@ -33,11 +35,7 @@ impl DividendFillQuery for FakeFills {
         }
     }
 
-    async fn fetch_daily_closes(
-        &self,
-        _symbol: &str,
-        _since: NaiveDate,
-    ) -> Result<Vec<DailyClose>> {
+    async fn fetch_daily_closes(&self, _symbol: &str, _since: Date) -> Result<Vec<DailyClose>> {
         let close = |date, close| DailyClose { date, close };
         Ok(vec![
             close(day(9, 12), dec!(100)),

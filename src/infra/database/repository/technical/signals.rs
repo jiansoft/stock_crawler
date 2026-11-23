@@ -1,6 +1,8 @@
 //! 全市場技術訊號的寫入與查詢，以及訊號之後的報酬統計。
 
 use super::*;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 /// 指定交易日有成交、未暫停交易的上市櫃股票。
 const SIGNAL_SYMBOLS_SQL: &str = r#"
@@ -23,23 +25,19 @@ FROM UNNEST($2::varchar[], $3::varchar[], $4::varchar[], $5::text[])
 
 #[async_trait]
 impl TechnicalSignalRepository for PgQuoteRepository {
-    async fn fetch_signal_symbols(&self, date: NaiveDate) -> Result<Vec<String>> {
+    async fn fetch_signal_symbols(&self, date: Date) -> Result<Vec<String>> {
         let rows: Vec<(String,)> = sqlx::query_as(SIGNAL_SYMBOLS_SQL)
-            .bind(date)
+            .bind(date.to_sqlx())
             .fetch_all(database::get_connection())
             .await?;
         Ok(rows.into_iter().map(|(symbol,)| symbol).collect())
     }
 
-    async fn replace_signals(
-        &self,
-        date: NaiveDate,
-        signals: &[StockTechnicalSignal],
-    ) -> Result<()> {
+    async fn replace_signals(&self, date: Date, signals: &[StockTechnicalSignal]) -> Result<()> {
         let mut tx = database::get_tx().await?;
         // 相對強度穿越訊號由每日相對強度的寫入負責，這裡不動。
         sqlx::query("DELETE FROM daily_technical_signal WHERE date = $1 AND indicator <> ALL($2)")
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(&CROSSING_INDICATORS[..])
             .execute(&mut *tx)
             .await?;
@@ -48,10 +46,10 @@ impl TechnicalSignalRepository for PgQuoteRepository {
         Ok(())
     }
 
-    async fn fetch_traded_symbols(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<String>> {
+    async fn fetch_traded_symbols(&self, from: Date, to: Date) -> Result<Vec<String>> {
         let rows: Vec<(String,)> = sqlx::query_as(TRADED_SYMBOLS_SQL)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .fetch_all(database::get_batch_connection())
             .await?;
         Ok(rows.into_iter().map(|(symbol,)| symbol).collect())
@@ -60,8 +58,8 @@ impl TechnicalSignalRepository for PgQuoteRepository {
     async fn replace_indicator_signals(
         &self,
         indicator: &str,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         signals: &[StockTechnicalSignal],
     ) -> Result<()> {
         let mut tx = database::get_tx().await?;
@@ -69,12 +67,12 @@ impl TechnicalSignalRepository for PgQuoteRepository {
             "DELETE FROM daily_technical_signal WHERE indicator = $1 AND date BETWEEN $2 AND $3",
         )
         .bind(indicator)
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .execute(&mut *tx)
         .await?;
         if !signals.is_empty() {
-            let dates: Vec<NaiveDate> = signals.iter().map(|s| s.date).collect();
+            let dates: Vec<Date> = signals.iter().map(|s| s.date).collect();
             let symbols: Vec<&str> = signals.iter().map(|s| s.stock_symbol.as_str()).collect();
             let indicators: Vec<&str> = signals.iter().map(|s| s.signal.indicator).collect();
             let kinds: Vec<&str> = signals.iter().map(|s| s.signal.kind.as_str()).collect();
@@ -83,7 +81,12 @@ impl TechnicalSignalRepository for PgQuoteRepository {
                 .map(|s| s.signal.description.as_str())
                 .collect();
             sqlx::query(INSERT_DATED_SIGNALS_SQL)
-                .bind(dates)
+                .bind(
+                    dates
+                        .iter()
+                        .map(|value| value.to_sqlx())
+                        .collect::<Vec<_>>(),
+                )
                 .bind(symbols)
                 .bind(indicators)
                 .bind(kinds)
@@ -124,7 +127,7 @@ FROM UNNEST($1::date[], $2::varchar[], $3::varchar[], $4::varchar[], $5::text[])
 /// 在呼叫端的交易內寫入 `date` 的訊號；空清單不送查詢。
 pub(in crate::infra::database::repository) async fn insert_signals(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    date: NaiveDate,
+    date: Date,
     signals: &[StockTechnicalSignal],
 ) -> Result<()> {
     if signals.is_empty() {
@@ -138,7 +141,7 @@ pub(in crate::infra::database::repository) async fn insert_signals(
         .map(|s| s.signal.description.as_str())
         .collect();
     sqlx::query(INSERT_SIGNALS_SQL)
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbols)
         .bind(indicators)
         .bind(kinds)
@@ -176,11 +179,11 @@ ORDER BY t.indicator, t.kind
 impl TechnicalSignalQuery for PgQuoteRepository {
     async fn fetch_signals(
         &self,
-        date: NaiveDate,
+        date: Date,
         stock_symbols: &[String],
     ) -> Result<Vec<StockTechnicalSignal>> {
         let rows: Vec<(String, String, String, String)> = sqlx::query_as(SIGNALS_OF_SYMBOLS_SQL)
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(stock_symbols)
             .fetch_all(database::get_connection())
             .await?;
@@ -198,14 +201,14 @@ impl TechnicalSignalQuery for PgQuoteRepository {
 
     async fn fetch_signal_outcomes(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         indicators: &[&str],
     ) -> Result<Vec<SignalOutcome>> {
         let indicators: Vec<String> = indicators.iter().map(|s| (*s).to_owned()).collect();
         let rows: Vec<(String, String, i64, f64, f64)> = sqlx::query_as(SIGNAL_OUTCOMES_SQL)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .bind(&indicators)
             .fetch_all(database::get_connection())
             .await?;
@@ -245,14 +248,14 @@ LIMIT $4
 impl RankedSignalQuery for PgQuoteRepository {
     async fn fetch_ranked_signals(
         &self,
-        date: NaiveDate,
+        date: Date,
         indicator: &str,
         kind: SignalKind,
         limit: i64,
     ) -> Result<(Vec<RankedSignal>, i64)> {
         let rows: Vec<(String, String, String, f64, String, i64)> =
             sqlx::query_as(RANKED_SIGNALS_SQL)
-                .bind(date)
+                .bind(date.to_sqlx())
                 .bind(indicator)
                 .bind(kind.as_str())
                 .bind(limit)
@@ -305,14 +308,27 @@ ORDER BY b.stock_symbol, b.date DESC
 impl BreakoutFollowUpQuery for PgQuoteRepository {
     async fn fetch_breakout_follow_ups(
         &self,
-        date: NaiveDate,
+        date: Date,
         days: i64,
     ) -> Result<Vec<BreakoutFollowUp>> {
-        let rows: Vec<(String, String, NaiveDate, bool)> = sqlx::query_as(BREAKOUT_FOLLOW_UPS_SQL)
-            .bind(date)
-            .bind(days)
-            .fetch_all(database::get_connection())
-            .await?;
+        let rows: Vec<(String, String, Date, bool)> =
+            sqlx::query_as::<_, (String, String, jiff_sqlx::Date, bool)>(BREAKOUT_FOLLOW_UPS_SQL)
+                .bind(date.to_sqlx())
+                .bind(days)
+                .fetch_all(database::get_connection())
+                .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|(c0, c1, c2, c3)| {
+                            (
+                                c0,
+                                c1,
+                                crate::infra::database::jiff_types::from_wire(c2),
+                                c3,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })?;
         Ok(rows
             .into_iter()
             .map(

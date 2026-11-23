@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::{
     core::declare::StockExchangeMarket,
@@ -53,7 +53,7 @@ pub(super) struct ScanPlan {
 pub(super) fn build_scan_plan(
     announcements: &[ExDividendAnnouncement],
     allotments: &HashMap<String, Vec<DividendAllotment>>,
-    schedules: &HashMap<(String, NaiveDate), DividendSchedule>,
+    schedules: &HashMap<(String, Date), DividendSchedule>,
     existing: &HashMap<String, Vec<Dividend>>,
 ) -> ScanPlan {
     let mut plan = ScanPlan::default();
@@ -90,15 +90,15 @@ pub(super) fn apply_event(
     plan: &mut ScanPlan,
     announcement: &ExDividendAnnouncement,
     resolved: Option<&ResolvedDividend>,
-    schedules: &HashMap<(String, NaiveDate), DividendSchedule>,
+    schedules: &HashMap<(String, Date), DividendSchedule>,
     existing: &HashMap<String, Vec<Dividend>>,
     fallback_reason: UnresolvedReason,
 ) {
-    let ex_date_text = announcement.ex_date.format(DATE_FORMAT).to_string();
+    let ex_date_text = announcement.ex_date.strftime(DATE_FORMAT).to_string();
     let payable_date_cash = schedules
         .get(&(announcement.stock_symbol.clone(), announcement.ex_date))
         .and_then(|schedule| schedule.cash_payable_date)
-        .map(|date| date.format(DATE_FORMAT).to_string());
+        .map(|date| date.strftime(DATE_FORMAT).to_string());
     let rows = existing
         .get(&announcement.stock_symbol)
         .map(Vec::as_slice)

@@ -1,8 +1,10 @@
 //! ETF 倉儲的淨值回填、基本資料、持股、績效與快照測試。
 
+use crate::core::util::datetime::ymd;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::*;
@@ -15,8 +17,8 @@ use crate::infra::database;
 /// 測試用的假代號；寫入後一律清除。
 const FAKE: &str = "79979ET";
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 4, d).expect("日期應合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 4, d).expect("日期應合法")
 }
 
 async fn cleanup() {
@@ -43,14 +45,14 @@ async fn cleanup() {
 }
 
 /// 在加權指數日曆補上交易日（回填前一個交易日要用），回傳本測試新增的列，結束時交給 [`remove_trading_days`]。
-async fn trading_days(dates: &[NaiveDate]) -> Vec<i64> {
+async fn trading_days(dates: &[Date]) -> Vec<i64> {
     let mut serials = Vec::new();
     for date in dates {
         let inserted: Option<i64> = sqlx::query_scalar(
             r#"INSERT INTO "index" (category, "date") VALUES ('TAIEX', $1)
                ON CONFLICT DO NOTHING RETURNING serial"#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .fetch_optional(database::get_connection())
         .await
         .expect("寫入交易日");
@@ -67,7 +69,7 @@ async fn remove_trading_days(serials: &[i64]) {
         .expect("清除交易日");
 }
 
-fn nav(date: NaiveDate, units: i64, previous_nav: Option<Decimal>) -> EtfNavRecord {
+fn nav(date: Date, units: i64, previous_nav: Option<Decimal>) -> EtfNavRecord {
     EtfNavRecord {
         date,
         stock_symbol: FAKE.to_string(),

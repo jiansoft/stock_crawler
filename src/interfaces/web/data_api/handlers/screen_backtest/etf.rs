@@ -1,8 +1,7 @@
 //! 0050 停牌期間缺失的基準報酬，以與日頻路徑相同的還原日線補算。
 
+use jiff::ToSpan;
 use std::{collections::HashMap, sync::Arc};
-
-use chrono::Duration;
 
 use super::{ETF_BENCHMARK, PeriodRow, stops::OpenRatios};
 use crate::domain::quote::technical::PriceBar;
@@ -40,7 +39,7 @@ pub(super) fn fill_missing_returns(
         let Ok(end) = series.binary_search_by_key(&exit, |bar| bar.date) else {
             continue;
         };
-        if entry.date < start - Duration::days(30) {
+        if entry.date < start - 30.days() {
             continue;
         }
         let ratio = |date| {

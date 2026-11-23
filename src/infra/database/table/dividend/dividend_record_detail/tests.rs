@@ -42,8 +42,10 @@ async fn test_calculate_cumulate_dividend() {
     tracing::debug!("結束 calculate_cumulate_dividend");
 }
 
-/// 假持股序號（`stock_ownership_details` 沒有這筆，表上也沒有外鍵）。
-const FAKE_OWNERSHIP: i64 = 979_794_001;
+/// 測試會員編號；`Member` 沒有這筆，隱私守門視為未刪除會員。
+const FAKE_MEMBER: i64 = 979_789;
+/// 測試持股的證券代號（只用在 `stock_ownership_details`，不需要股票主檔）。
+const FAKE_SYMBOL: &str = "79979";
 
 /// 第一次寫入走連線池、回傳新序號；同一持股同一年度再寫一次走交易，
 /// 依主鍵更新金額、序號不變，交易提交後才看得到新值。
@@ -60,16 +62,33 @@ async fn upsert_inserts_then_updates_by_ownership_and_year() {
         return;
     }
     let cleanup = || async {
-        sqlx::query("DELETE FROM dividend_record_detail WHERE stock_ownership_details_serial = $1")
-            .bind(FAKE_OWNERSHIP)
+        sqlx::query(
+            "DELETE FROM dividend_record_detail WHERE stock_ownership_details_serial IN              (SELECT serial FROM stock_ownership_details WHERE member_id = $1)",
+        )
+        .bind(FAKE_MEMBER)
+        .execute(pool)
+        .await
+        .expect("清除測試股利明細");
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(FAKE_MEMBER)
             .execute(pool)
             .await
-            .expect("清除測試股利明細");
+            .expect("清除測試持股");
     };
     cleanup().await;
 
+    // 股利明細的隱私守門要求持股存在（會員系統 7-10），先種一筆測試持股。
+    let ownership: i64 = sqlx::query_scalar(
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, is_sold)          VALUES ($1, $2, 1000, -1, false) RETURNING serial",
+    )
+    .bind(FAKE_MEMBER)
+    .bind(FAKE_SYMBOL)
+    .fetch_one(pool)
+    .await
+    .expect("種入測試持股");
+
     let mut first = DividendRecordDetail::new(
-        FAKE_OWNERSHIP,
+        ownership,
         1999,
         Decimal::new(1500, 0),
         Decimal::ZERO,
@@ -79,7 +98,7 @@ async fn upsert_inserts_then_updates_by_ownership_and_year() {
     let inserted = first.upsert(&mut None).await;
 
     let mut second = DividendRecordDetail::new(
-        FAKE_OWNERSHIP,
+        ownership,
         1999,
         Decimal::new(2000, 0),
         Decimal::new(10, 0),
@@ -95,7 +114,7 @@ async fn upsert_inserts_then_updates_by_ownership_and_year() {
         "SELECT serial, cash, stock, stock_money, total FROM dividend_record_detail \
          WHERE stock_ownership_details_serial = $1",
     )
-    .bind(FAKE_OWNERSHIP)
+    .bind(ownership)
     .fetch_all(pool)
     .await
     .expect("讀回股利明細");

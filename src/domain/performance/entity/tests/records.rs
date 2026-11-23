@@ -1,10 +1,12 @@
 //! 股利事件排序、CAGR 覆蓋率與快取鍵的測試。
 
 use super::*;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 #[test]
 fn dividend_event_sort_key_takes_the_earlier_of_two_dates() {
-    let make = |cash: Option<NaiveDate>, stock: Option<NaiveDate>| DividendEvent {
+    let make = |cash: Option<Date>, stock: Option<Date>| DividendEvent {
         stock_symbol: "2330".to_string(),
         ex_dividend_date_cash: cash,
         ex_dividend_date_stock: stock,

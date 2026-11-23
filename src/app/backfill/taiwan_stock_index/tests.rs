@@ -1,6 +1,10 @@
 //! taiwan_stock_index的測試；連外的測試標 #[ignore]。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 /// 只寫入指定日期那一筆：其他日期與格式不符的資料列略過，寫入後快取也有這一天。
 #[tokio::test]
@@ -15,11 +19,16 @@ async fn upsert_for_date_writes_only_the_requested_day() {
         println!("跳過 upsert_for_date_writes_only_the_requested_day：無資料庫連接");
         return;
     }
-    let date = NaiveDate::from_ymd_opt(1989, 6, 2).expect("固定日期合法");
-    let other = NaiveDate::from_ymd_opt(1989, 6, 1).expect("固定日期合法");
+    let date = date(1989, 6, 2);
+    let other = jiff::civil::date(1989, 6, 1);
     let cleanup = || async {
         sqlx::query(r#"DELETE FROM "index" WHERE category = 'TAIEX' AND "date" = ANY($1)"#)
-            .bind(vec![date, other])
+            .bind(
+                ([date, other])
+                    .iter()
+                    .map(|value| value.to_sqlx())
+                    .collect::<Vec<_>>(),
+            )
             .execute(pool)
             .await
             .expect("清除測試指數");
@@ -39,12 +48,12 @@ async fn upsert_for_date_writes_only_the_requested_day() {
     assert_eq!(upsert_for_date(Some(data), date).await, 1);
     assert_eq!(upsert_for_date(None, date).await, 0);
 
-    let saved: Vec<(NaiveDate, rust_decimal::Decimal, rust_decimal::Decimal)> = sqlx::query_as(
+    let saved: Vec<(Date, rust_decimal::Decimal, rust_decimal::Decimal)> = sqlx::query_as::<_, (jiff_sqlx::Date, rust_decimal::Decimal, rust_decimal::Decimal)>(
         r#"SELECT "date", index, change FROM "index" WHERE category = 'TAIEX' AND "date" = ANY($1)"#,
     )
-    .bind(vec![date, other])
+    .bind(([date, other]).iter().map(|value| value.to_sqlx()).collect::<Vec<_>>())
     .fetch_all(pool)
-    .await
+    .await.map(|rows| rows.into_iter().map(|(c0, c1, c2)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2)).collect::<Vec<_>>())
     .expect("讀回測試指數");
     assert_eq!(
         saved,
@@ -88,24 +97,29 @@ mod mock_sources {
         server
     }
 
-    fn day(month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(1989, month, day).expect("固定日期合法")
+    fn day(month: u32, day: u32) -> Date {
+        ymd(1989, month, day).expect("固定日期合法")
     }
 
     /// 讀回 1989 年測試日期的 TAIEX 指數，依日期排序。
-    async fn saved(dates: &[NaiveDate]) -> Vec<(NaiveDate, Decimal)> {
-        sqlx::query_as(
+    async fn saved(dates: &[Date]) -> Vec<(Date, Decimal)> {
+        sqlx::query_as::<_, (jiff_sqlx::Date, Decimal)>(
             r#"SELECT "date", index FROM "index" WHERE category = 'TAIEX' AND "date" = ANY($1) ORDER BY "date""#,
         )
-        .bind(dates)
+        .bind(dates.iter().map(|value| value.to_sqlx()).collect::<Vec<_>>())
         .fetch_all(crate::infra::database::get_connection())
-        .await
+        .await.map(|rows| rows.into_iter().map(|(c0, c1)| (crate::infra::database::jiff_types::from_wire(c0), c1)).collect::<Vec<_>>())
         .expect("讀回測試指數")
     }
 
-    async fn cleanup(dates: &[NaiveDate]) {
+    async fn cleanup(dates: &[Date]) {
         sqlx::query(r#"DELETE FROM "index" WHERE category = 'TAIEX' AND "date" = ANY($1)"#)
-            .bind(dates)
+            .bind(
+                dates
+                    .iter()
+                    .map(|value| value.to_sqlx())
+                    .collect::<Vec<_>>(),
+            )
             .execute(crate::infra::database::get_connection())
             .await
             .expect("清除測試指數");

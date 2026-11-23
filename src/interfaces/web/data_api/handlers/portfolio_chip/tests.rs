@@ -1,11 +1,12 @@
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 use crate::domain::portfolio::chip::HoldingBroker;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("固定日期合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("固定日期合法")
 }
 
 fn chip() -> HoldingChip {
@@ -69,7 +70,7 @@ fn response_converts_lots_and_reasons() {
         buy_days: 1,
         sell_days: 4,
     }];
-    let body = response(Some(day), vec![chip(), empty], (5, recent));
+    let body = response(0, Some(day), vec![chip(), empty], (5, recent));
     assert_eq!(body.broker_recent_days, 5);
     assert_eq!(body.date.as_deref(), Some("2026-10-20"));
     assert_eq!(body.previous_date.as_deref(), Some("2026-10-19"));
@@ -117,7 +118,8 @@ fn response_converts_lots_and_reasons() {
     assert!(quiet.foreign_share.is_none() && quiet.margin_change.is_none());
     assert_eq!(quiet.foreign_streak, 0);
 
-    let none = response(None, Vec::new(), (0, Vec::new()));
+    let none = response(2, None, Vec::new(), (0, Vec::new()));
+    assert_eq!(none.member_id, 2);
     assert!(none.date.is_none() && none.items.is_empty() && none.notable == 0);
     assert_eq!(none.broker_recent_days, 0);
 }
@@ -132,19 +134,19 @@ fn share_of_volume_needs_positive_volume() {
 }
 
 /// 回傳固定主力交易日的假倉儲；期間合計檢查收到的起訖日，並對每個代號回一筆。
-struct FakeBrokers(Vec<NaiveDate>);
+struct FakeBrokers(Vec<Date>);
 
 #[async_trait::async_trait]
 impl HoldingBrokerQuery for FakeBrokers {
-    async fn fetch_broker_dates(&self, until: NaiveDate, limit: usize) -> Result<Vec<NaiveDate>> {
+    async fn fetch_broker_dates(&self, until: Date, limit: usize) -> Result<Vec<Date>> {
         assert_eq!((until, limit), (day(20), BROKER_RECENT_DAYS));
         Ok(self.0.clone())
     }
 
     async fn fetch_broker_period(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         symbols: &[String],
     ) -> Result<Vec<BrokerPeriodNet>> {
         assert_eq!((from, to), (day(14), day(20)));

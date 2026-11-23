@@ -1,6 +1,7 @@
 //! 除權息填息事件重算的整合測試（臨時庫、假代號、固定 1990／1995 年資料）。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -21,16 +22,16 @@ async fn cleanup(pool: &sqlx::PgPool) {
 
 /// 一列 `(除息日, 現金股利, 除息前收盤, 第幾個交易日填息, 填息日, 觀察期滿日)`。
 type EventRow = (
-    NaiveDate,
+    Date,
     Decimal,
     Option<Decimal>,
     Option<i16>,
-    Option<NaiveDate>,
-    Option<NaiveDate>,
+    Option<Date>,
+    Option<Date>,
 );
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("固定日期合法")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("固定日期合法")
 }
 
 /// 1995-03-01 除息 1 元：除息前收盤 10 元，03-01 收 9、03-02 收 9.5、03-03 起收 10（第 3 個交易日填息）；
@@ -74,13 +75,37 @@ async fn execute_rebuilds_fill_events_from_dividends_and_quotes() {
 
     execute().await.expect("重算填息事件");
 
-    let rows: Vec<EventRow> = sqlx::query_as(
+    let rows: Vec<EventRow> = sqlx::query_as::<
+        _,
+        (
+            jiff_sqlx::Date,
+            Decimal,
+            Option<Decimal>,
+            Option<i16>,
+            Option<jiff_sqlx::Date>,
+            Option<jiff_sqlx::Date>,
+        ),
+    >(
         "SELECT ex_date, cash_dividend, pre_ex_close, days_to_fill, fill_date, mature_date
          FROM dividend_fill_event WHERE stock_symbol = $1 ORDER BY ex_date",
     )
     .bind(SYMBOL)
     .fetch_all(pool)
     .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(|(c0, c1, c2, c3, c4, c5)| {
+                (
+                    crate::infra::database::jiff_types::from_wire(c0),
+                    c1,
+                    c2,
+                    c3,
+                    crate::infra::database::jiff_types::from_wire(c4),
+                    crate::infra::database::jiff_types::from_wire(c5),
+                )
+            })
+            .collect::<Vec<_>>()
+    })
     .expect("讀取填息事件");
     cleanup(pool).await;
 

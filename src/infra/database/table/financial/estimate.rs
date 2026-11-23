@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
-use chrono::NaiveDate;
 use futures::{StreamExt, TryStreamExt};
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use sqlx::postgres::PgQueryResult;
 
 use self::sql::ESTIMATE_UPSERT_SQL;
@@ -15,7 +16,8 @@ mod sql;
 #[derive(sqlx::FromRow, Debug, Default)]
 pub struct Estimate {
     /// 估值日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 參考的最後一筆日報價日期（字串格式）。
     pub last_daily_quote_date: String,
     /// 股票代號。
@@ -64,7 +66,7 @@ pub struct Estimate {
 
 impl Estimate {
     /// 建立單一股票指定日期的估值模型預設值。
-    pub fn new(security_code: String, date: NaiveDate) -> Self {
+    pub fn new(security_code: String, date: Date) -> Self {
         Estimate {
             date,
             last_daily_quote_date: "".to_string(),
@@ -142,7 +144,7 @@ impl Estimate {
     ///
     /// # Errors
     /// 當 SQL 執行失敗時回傳錯誤。
-    pub async fn upsert_all(date: NaiveDate, years: String) -> Result<PgQueryResult> {
+    pub async fn upsert_all(date: Date, years: String) -> Result<PgQueryResult> {
         // 依股票代號雜湊分成 ESTIMATE_BUCKETS 桶（最多同時 8 桶，等於批次池上限）：瓶頸是 297 萬筆日K 的 5 組
         // 百分位數排序，ordered-set aggregate 無法平行化，單一語句只用得到一顆 CPU
         // （2026-10-08 正式庫實測 7.6～8.2 秒 → 4 桶 2.8～3.0 秒，結果逐筆相同）。
@@ -224,7 +226,7 @@ where
 ///
 /// `(bucket_count, bucket)` 只處理代號雜湊落在第 `bucket` 桶的股票；`(1, 0)` 為不分桶。
 async fn run_estimate_upsert(
-    date: NaiveDate,
+    date: Date,
     years: &str,
     security_code: Option<&str>,
     (bucket_count, bucket): (i32, i32),
@@ -236,7 +238,7 @@ async fn run_estimate_upsert(
         Some(_) => database::get_connection(),
     };
     sqlx::query(ESTIMATE_UPSERT_SQL)
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(years)
         .bind(Industry::ExchangeTradedFund.serial())
         .bind(security_code)

@@ -1,5 +1,6 @@
 //! TPEx 上櫃除權除息預告表採集器的測試；連外的測試標 #[ignore]。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -19,10 +20,7 @@ fn test_parse_announcements_with_fixture() {
 
     let cash_only = &result[0];
     assert_eq!(cash_only.stock_symbol, "3287");
-    assert_eq!(
-        cash_only.ex_date,
-        chrono::NaiveDate::from_ymd_opt(2026, 8, 26).unwrap()
-    );
+    assert_eq!(cash_only.ex_date, date(2026, 8, 26));
     assert!(cash_only.is_cash);
     assert!(!cash_only.is_stock);
     assert_eq!(cash_only.cash_dividend, Some(dec!(1.5)));

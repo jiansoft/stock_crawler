@@ -1,6 +1,8 @@
 //! 各快取的整批替換與單筆更新（不需外部服務）。
 
 use super::*;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 fn make_test_revenue(stock_symbol: &str, date: i64) -> revenue::Revenue {
     let mut r = revenue::Revenue::new();
@@ -9,7 +11,7 @@ fn make_test_revenue(stock_symbol: &str, date: i64) -> revenue::Revenue {
     r
 }
 
-fn make_test_index(category: &str, date: NaiveDate) -> MarketIndex {
+fn make_test_index(category: &str, date: Date) -> MarketIndex {
     MarketIndex::new(
         category.to_string(),
         date,
@@ -24,8 +26,8 @@ fn make_test_index(category: &str, date: NaiveDate) -> MarketIndex {
 #[test]
 fn test_replace_indices_cache_overwrites_old_entries() {
     let share = Share::new();
-    let old_date = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
-    let new_date = NaiveDate::from_ymd_opt(2025, 2, 1).unwrap();
+    let old_date = date(2025, 1, 1);
+    let new_date = date(2025, 2, 1);
 
     share.replace_indices_cache(vec![make_test_index("TAIEX", old_date)]);
     assert!(share.get_stock_index("2025-01-01-TAIEX").is_some());
@@ -82,7 +84,7 @@ async fn test_replace_last_trading_day_quotes_cache_overwrites() {
     let mut q1 = LastDailyQuotes::new();
     q1.stock_symbol = "2330".to_string();
     q1.closing_price = dec!(500);
-    q1.date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+    q1.date = date(2025, 1, 2);
 
     let mut q2 = LastDailyQuotes::new();
     q2.stock_symbol = "2317".to_string();
@@ -115,14 +117,14 @@ async fn test_set_stock_last_price_updates_existing_entry() {
     let mut q = LastDailyQuotes::new();
     q.stock_symbol = "2330".to_string();
     q.closing_price = dec!(500);
-    q.date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+    q.date = date(2025, 1, 2);
 
     share.replace_last_trading_day_quotes_cache(vec![q]);
 
     let before = share.get_stock_last_price("2330").await.unwrap();
     assert_eq!(before.closing_price, dec!(500));
 
-    let new_date = NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
+    let new_date = date(2025, 6, 1);
     // 初始化 DailyQuote 並覆寫部分預設欄位
     let dq = DailyQuote {
         stock_symbol: "2330".to_string(),

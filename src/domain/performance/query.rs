@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::domain::performance::entity::{CagrCoverage, CagrMetric, CagrPeriod, StockCagr};
 
@@ -48,7 +48,7 @@ impl CagrSortKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CagrRankingQuery {
     /// 計算基準日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 統計期間。
     pub period: CagrPeriod,
     /// 報酬口徑。
@@ -74,7 +74,7 @@ pub struct CagrRankingQuery {
 
 impl CagrRankingQuery {
     /// 以基準日與期間建立預設查詢：主指標口徑、依期間長度決定排序鍵。
-    pub fn new(date: NaiveDate, period: CagrPeriod) -> Self {
+    pub fn new(date: Date, period: CagrPeriod) -> Self {
         Self {
             date,
             period,

@@ -1,6 +1,8 @@
 //! 資料健康週報的測試：落後天數判斷、衍生表與未來報酬缺漏、訊息格式。
 
 use super::*;
+use crate::core::util::datetime::{today, ymd};
+use jiff::civil::Date;
 
 mod abnormal_prices;
 mod db_statements;
@@ -21,9 +23,7 @@ mod trading;
 #[ignore]
 async fn print_report() {
     dotenvy::dotenv().ok();
-    let message = build_report(Local::now().date_naive())
-        .await
-        .expect("量測應成功");
+    let message = build_report(today()).await.expect("量測應成功");
     println!("{message}");
 }
 
@@ -51,11 +51,11 @@ use crate::domain::{
     quote::entity::MarketTradedCount,
 };
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("日期應合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("日期應合法")
 }
 
-fn count(date: NaiveDate, market_id: i32, traded: i64) -> MarketTradedCount {
+fn count(date: Date, market_id: i32, traded: i64) -> MarketTradedCount {
     MarketTradedCount {
         date,
         market_id,
@@ -100,7 +100,7 @@ fn healthy() -> DataHealthSnapshot {
         latest_holder_week: Some(day(2)),
         latest_holder_level_week: Some(day(2)),
         holder_level_rows: 69_700,
-        latest_insider_month: NaiveDate::from_ymd_opt(2026, 8, 1),
+        latest_insider_month: ymd(2026, 8, 1),
         // 最新交易日 10-09 的正式淨值下一個營業日才回填。
         etf_nav_counts: std::iter::once(day(2))
             .chain(days)
@@ -110,7 +110,7 @@ fn healthy() -> DataHealthSnapshot {
     }
 }
 
-fn etf_nav(date: NaiveDate, rows: i64, missing_nav: i64) -> EtfNavDayCount {
+fn etf_nav(date: Date, rows: i64, missing_nav: i64) -> EtfNavDayCount {
     EtfNavDayCount {
         date,
         rows,
@@ -181,4 +181,23 @@ fn counted_problems_are_listed_in_the_report() {
         message.contains("test\\_recalculate\\_moving\\_averages"),
         "{message}"
     );
+}
+
+/// 排程入口：以今天產生資料健康報告；測試環境沒有 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_builds_today_report() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_builds_today_report：無資料庫連接");
+        return;
+    }
+    execute().await.expect("資料健康報告不應失敗");
 }

@@ -1,5 +1,6 @@
 //! 全市場填息樣本查詢的整合測試：事件規則、依配股調整的目標價與無效日期。
 
+use crate::core::util::datetime::ymd;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -54,7 +55,7 @@ async fn market_fill_samples_follow_event_rules() {
             .expect("寫入測試資料");
     }
 
-    let day = |m: u32, d: u32| NaiveDate::from_ymd_opt(2001, m, d).expect("日期應合法");
+    let day = |m: u32, d: u32| ymd(2001, m, d).expect("日期應合法");
     let samples = PgDividendFillRepository::new()
         .fetch_market_fill_samples(day(2, 1), day(3, 31))
         .await;

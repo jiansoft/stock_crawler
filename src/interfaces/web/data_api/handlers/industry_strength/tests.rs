@@ -2,9 +2,11 @@
 
 use super::super::relative_strength::UniverseRow;
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
-fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn day(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("合法日期")
 }
 
 fn stock(symbol: &str, market_id: i32, industry: &str, rs_score: u8) -> ScoredStock {

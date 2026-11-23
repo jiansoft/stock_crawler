@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use sqlx::FromRow;
 
@@ -29,7 +29,7 @@ pub struct StockDividendPayableDateInfo {
 }
 
 /// 取得指定日期為股利發放日的股票
-pub async fn fetch(date: NaiveDate) -> Result<Vec<StockDividendPayableDateInfo>> {
+pub async fn fetch(date: Date) -> Result<Vec<StockDividendPayableDateInfo>> {
     let sql = r#"
 SELECT
     s.stock_symbol,
@@ -50,7 +50,7 @@ WHERE security_code in (select security_code from stock_ownership_details where 
 "#;
 
     sqlx::query_as::<_, StockDividendPayableDateInfo>(sql)
-        .bind(date.format("%Y-%m-%d").to_string())
+        .bind(date.strftime("%Y-%m-%d").to_string())
         .fetch_all(database::get_connection())
         .await
         .context(format!(

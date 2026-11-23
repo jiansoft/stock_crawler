@@ -1,9 +1,11 @@
 //! `/market/institutional-flow` handler：三大法人買賣超排行的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
-fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn day(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("合法日期")
 }
 
 fn row(symbol: &str, market_id: i32, industry: &str, net_shares: i64, amount: f64) -> FlowRow {

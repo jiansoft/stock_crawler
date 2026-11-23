@@ -1,7 +1,9 @@
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
-fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("有效日期")
+fn day(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("有效日期")
 }
 
 /// 每季一期、報酬依序取 `returns`（扣成本後相同），0050 固定 1%。

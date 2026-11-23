@@ -1,11 +1,13 @@
 //! 異常價格過濾的紀錄與收盤統計的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("日期合法")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("日期合法")
 }
 
 fn blocked(price: Decimal, last_close: Decimal) -> BlockedPrice {

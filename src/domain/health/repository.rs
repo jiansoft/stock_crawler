@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::entity::{DataHealthSnapshot, StatementStats};
 
@@ -14,11 +14,11 @@ pub trait DataHealthRepository: Send + Sync {
     /// `profile_due` 之前就沒再更新的 ETF 基本資料算停更。
     async fn fetch_snapshot(
         &self,
-        baseline_from: NaiveDate,
-        from: NaiveDate,
-        to: NaiveDate,
+        baseline_from: Date,
+        from: Date,
+        to: Date,
         current_year: i32,
-        profile_due: NaiveDate,
+        profile_due: Date,
     ) -> Result<DataHealthSnapshot>;
 
     /// 讀資料庫端各語句的累計耗時（`pg_stat_statements`）；沒有安裝這個擴充時回 `None`。

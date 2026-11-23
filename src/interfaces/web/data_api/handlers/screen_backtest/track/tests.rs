@@ -1,11 +1,13 @@
 //! 實盤追蹤的單元測試。
 
+use crate::core::util::datetime::ymd;
 use crate::domain::strategy::rebalance::RecordedHolding;
+use jiff::civil::Date;
 
 use super::*;
 
-fn day(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, m, d).expect("固定日期合法")
+fn day(m: u32, d: u32) -> Date {
+    ymd(2026, m, d).expect("固定日期合法")
 }
 
 fn bar(m: u32, d: u32, close: f64) -> PriceBar {
@@ -25,7 +27,7 @@ fn holding(symbol: &str, weight: f64) -> RecordedHolding {
     }
 }
 
-fn record(date: NaiveDate, holdings: Vec<RecordedHolding>, cash: f64) -> StrategyRebalanceRecord {
+fn record(date: Date, holdings: Vec<RecordedHolding>, cash: f64) -> StrategyRebalanceRecord {
     StrategyRebalanceRecord {
         preset_name: "最佳組合".to_owned(),
         date,

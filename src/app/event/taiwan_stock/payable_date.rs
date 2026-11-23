@@ -4,16 +4,19 @@
 //! 已領股利明細，所以除權息後才賣出、今天才發放的也會列入，金額與
 //! `/portfolio/upcoming-payouts` 一致。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::{collections::BTreeMap, fmt::Write};
 
 use anyhow::Result;
-use chrono::{Datelike, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 // 通知走 core::alert（port），跳脫工具走 core::util::text——
 // app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
+use crate::domain::portfolio::view::HoldingView;
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::dividend::entity::StockDividendPayableDateInfo,
     domain::dividend::repository::DividendRepository,
     domain::portfolio::payout::{self, DividendPayout},
@@ -22,15 +25,16 @@ use crate::{
     infra::database::repository::portfolio::PgPortfolioRepository,
 };
 
-use super::{format_decimal_with_commas, format_share_quantity, member_label};
+use super::{format_decimal_with_commas, format_share_quantity, holdings, member_label};
 
 /// 組出持股今天入帳的明細與本月至今的現金合計；今天沒有持股入帳時回 `None`。
 ///
 /// `today_payouts` 與 `month_payouts` 都依會員分列（不合併），本月至今依會員加總。
 fn build_batch_dividend_message(
-    today: NaiveDate,
+    today: Date,
     today_payouts: &[DividendPayout],
     month_payouts: &[DividendPayout],
+    names: &BTreeMap<i64, String>,
 ) -> Option<String> {
     if today_payouts.is_empty() {
         return None;
@@ -46,7 +50,7 @@ fn build_batch_dividend_message(
         let mut line = format!(
             "{} {} 持股:{}股 現金:{}元",
             item.name,
-            member_label(item.member_id),
+            member_label(names, item.member_id),
             format_share_quantity(item.shares),
             format_decimal_with_commas(item.cash_amount)
         );
@@ -73,7 +77,7 @@ fn build_batch_dividend_message(
         .map(|(member_id, cash)| {
             format!(
                 "{} {}元",
-                member_label(*member_id),
+                member_label(names, *member_id),
                 format_decimal_with_commas(*cash)
             )
         })
@@ -96,7 +100,7 @@ fn build_batch_dividend_message(
 /// 同一筆股利的現金與股票發放日可能不同天（例如現金 9/02、股票 9/10），
 /// 因此只列出發放日確實落在今天的項目，合計也只加總今天入帳的部分。
 fn build_payable_summary_message(
-    today: NaiveDate,
+    today: Date,
     stocks_payable_date_info: &[StockDividendPayableDateInfo],
 ) -> Option<String> {
     let today_str = today.to_string();
@@ -161,23 +165,44 @@ fn build_payable_summary_message(
 
 /// 提醒本日發放股利的股票，並通知持股今天入帳的明細。
 pub async fn execute() -> Result<()> {
-    notify(Local::now().date_naive()).await
+    notify(today()).await
 }
 
 /// 以 `today` 為今天發送通知；整合測試以固定日期呼叫。
-async fn notify(today: NaiveDate) -> Result<()> {
+async fn notify(today: Date) -> Result<()> {
     let dividend_repo = PgDividendRepository::new();
     let stocks_payable_date_info = dividend_repo.fetch_payable_date_info_on_date(today).await?;
-    //群內通知（只列目前仍持有的股票）
-    if let Some(msg) = build_payable_summary_message(today, &stocks_payable_date_info) {
-        alert::send_message(&msg).await;
-    }
+    // 今天發放的股票：只列收件者範圍內目前仍持有的（會員系統計畫 7.6）
+    let summary_key = format!("{}:{today}:summary", Topic::HoldingsPayable.code());
+    notify::notify_holdings(Topic::HoldingsPayable, &summary_key, |view| {
+        let infos = &stocks_payable_date_info;
+        async move {
+            let held = holdings::active_holding_symbols(&view).await?;
+            let mine: Vec<StockDividendPayableDateInfo> = infos
+                .iter()
+                .filter(|info| held.contains(&info.stock_symbol))
+                .cloned()
+                .collect();
+            Ok(build_payable_summary_message(today, &mine))
+        }
+    })
+    .await;
 
-    // 持股入帳不受上面清單限制：除權息後已全部賣出的，今天仍會入帳。
+    // 持股入帳不受上面清單限制：除權息後已全部賣出的，今天仍會入帳。入帳金額依收件者範圍查詢。
+    let batch_key = format!("{}:{today}:payout", Topic::HoldingsPayable.code());
+    notify::notify_holdings(Topic::HoldingsPayable, &batch_key, |view| async move {
+        payout_message(&view, today).await
+    })
+    .await;
 
-    let month_start = today.with_day(1).unwrap_or(today);
+    Ok(())
+}
+
+/// 一個範圍今天入帳的明細與本月累計；今天沒有入帳回 `None`。
+async fn payout_message(view: &HoldingView, today: Date) -> Result<Option<String>> {
+    let month_start = today.first_of_month();
     let allocations = PgPortfolioRepository::new()
-        .fetch_payout_allocations(0, month_start, today, today)
+        .fetch_payout_allocations(view, month_start, today, today)
         .await?;
     let month_payouts = payout::split_by_payable_date(&allocations, month_start, today);
     let today_payouts: Vec<DividendPayout> = month_payouts
@@ -185,11 +210,13 @@ async fn notify(today: NaiveDate) -> Result<()> {
         .filter(|item| item.payable_date == today)
         .cloned()
         .collect();
-    if let Some(batch_msg) = build_batch_dividend_message(today, &today_payouts, &month_payouts) {
-        alert::send_message(&batch_msg).await;
-    }
-
-    Ok(())
+    let names = crate::infra::database::repository::member::fetch_names(view).await?;
+    Ok(build_batch_dividend_message(
+        today,
+        &today_payouts,
+        &month_payouts,
+        &names,
+    ))
 }
 
 #[cfg(test)]

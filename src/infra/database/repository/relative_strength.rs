@@ -2,7 +2,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use crate::{
     domain::quote::{
@@ -121,7 +122,8 @@ struct UniverseSqlRow {
 #[derive(sqlx::FromRow)]
 struct HistoryRow {
     stock_symbol: String,
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     weighted: f64,
     rs_score: i16,
     rank: i32,
@@ -132,12 +134,12 @@ struct HistoryRow {
 impl RelativeStrengthQuery for PgQuoteRepository {
     async fn fetch_relative_strength(
         &self,
-        until: NaiveDate,
+        until: Date,
         days: u16,
         stock_symbols: &[String],
     ) -> Result<Vec<RelativeStrengthDay>> {
         let rows: Vec<HistoryRow> = sqlx::query_as(HISTORY_SQL)
-            .bind(until)
+            .bind(until.to_sqlx())
             .bind(i32::from(days))
             .bind(stock_symbols)
             .fetch_all(database::get_connection())
@@ -160,7 +162,7 @@ impl RelativeStrengthQuery for PgQuoteRepository {
 impl RelativeStrengthRepository for PgQuoteRepository {
     async fn replace_relative_strength(
         &self,
-        date: NaiveDate,
+        date: Date,
         scored: &[ScoredStock],
         signals: &[StockTechnicalSignal],
     ) -> Result<u64> {
@@ -180,11 +182,11 @@ impl RelativeStrengthRepository for PgQuoteRepository {
         let universe = i32::try_from(scored.len()).unwrap_or(i32::MAX);
         let mut tx = database::get_tx().await?;
         sqlx::query(DELETE_DAY_SQL)
-            .bind(date)
+            .bind(date.to_sqlx())
             .execute(&mut *tx)
             .await?;
         let written = sqlx::query(INSERT_DAY_SQL)
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(&symbols)
             .bind(&weighted)
             .bind(&scores)
@@ -194,7 +196,7 @@ impl RelativeStrengthRepository for PgQuoteRepository {
             .await?
             .rows_affected();
         sqlx::query(DELETE_DAY_SIGNALS_SQL)
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(&CROSSING_INDICATORS[..])
             .execute(&mut *tx)
             .await?;
@@ -206,14 +208,10 @@ impl RelativeStrengthRepository for PgQuoteRepository {
 
 #[async_trait]
 impl RelativeStrengthCrossingQuery for PgQuoteRepository {
-    async fn fetch_period_crossings(
-        &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<PeriodCrossing>> {
+    async fn fetch_period_crossings(&self, from: Date, to: Date) -> Result<Vec<PeriodCrossing>> {
         let rows: Vec<(String, String, String, Option<i16>)> = sqlx::query_as(PERIOD_CROSSINGS_SQL)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .bind(&CROSSING_INDICATORS[..])
             .fetch_all(database::get_connection())
             .await?;
@@ -234,22 +232,19 @@ impl RelativeStrengthCrossingQuery for PgQuoteRepository {
 
 #[async_trait]
 impl ScoredUniverseQuery for PgQuoteRepository {
-    async fn fetch_scored_universe(
-        &self,
-        until: NaiveDate,
-    ) -> Result<Option<(NaiveDate, Vec<ScoredStock>)>> {
+    async fn fetch_scored_universe(&self, until: Date) -> Result<Option<(Date, Vec<ScoredStock>)>> {
         let dates = self.fetch_trading_dates(until, LONGEST + 2).await?;
         for offset in 0..2 {
             let Some(bases) = dates.get(offset..).and_then(base_dates) else {
                 break;
             };
             let rows: Vec<UniverseSqlRow> = sqlx::query_as(UNIVERSE_SQL)
-                .bind(bases.end)
-                .bind(bases.d20)
-                .bind(bases.d60)
-                .bind(bases.d120)
-                .bind(bases.d240)
-                .bind(bases.active_since)
+                .bind(bases.end.to_sqlx())
+                .bind(bases.d20.to_sqlx())
+                .bind(bases.d60.to_sqlx())
+                .bind(bases.d120.to_sqlx())
+                .bind(bases.d240.to_sqlx())
+                .bind(bases.active_since.to_sqlx())
                 .fetch_all(database::get_connection())
                 .await?;
             if !rows.is_empty() {
@@ -296,13 +291,15 @@ impl PgQuoteRepository {
     /// 查詢已留存的每日 RS 母體，排序與回測完全共用；未計算的日期向前找。
     pub(crate) async fn fetch_stored_scored_universe(
         &self,
-        until: NaiveDate,
-    ) -> Result<Option<(NaiveDate, Vec<ScoredStock>)>> {
-        let date: Option<NaiveDate> =
-            sqlx::query_scalar("SELECT MAX(date) FROM daily_relative_strength WHERE date <= $1")
-                .bind(until)
-                .fetch_one(database::get_connection())
-                .await?;
+        until: Date,
+    ) -> Result<Option<(Date, Vec<ScoredStock>)>> {
+        let date: Option<Date> = sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(
+            "SELECT MAX(date) FROM daily_relative_strength WHERE date <= $1",
+        )
+        .bind(until.to_sqlx())
+        .fetch_one(database::get_connection())
+        .await
+        .map(crate::infra::database::jiff_types::from_wire)?;
         let Some(date) = date else { return Ok(None) };
         let dates = self.fetch_trading_dates(date, LONGEST + 2).await?;
         let Some(bases) = base_dates(&dates) else {
@@ -329,17 +326,17 @@ ORDER BY "#,
             rs_rank_order!()
         );
         let records: Vec<StoredUniverseRow> = sqlx::query_as(STORED_SQL)
-            .bind(date)
-            .bind(bases.d20)
-            .bind(bases.d60)
-            .bind(bases.d120)
-            .bind(bases.d240)
+            .bind(date.to_sqlx())
+            .bind(bases.d20.to_sqlx())
+            .bind(bases.d60.to_sqlx())
+            .bind(bases.d120.to_sqlx())
+            .bind(bases.d240.to_sqlx())
             .fetch_all(database::get_connection())
             .await?;
         // 不重算或捏造缺少歷史明細的排名；資料不完整時回查無資料。
         let expected: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM daily_relative_strength WHERE date=$1")
-                .bind(date)
+                .bind(date.to_sqlx())
                 .fetch_one(database::get_connection())
                 .await?;
         if records.len() as i64 != expected || records.is_empty() {

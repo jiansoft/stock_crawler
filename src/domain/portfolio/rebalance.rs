@@ -3,6 +3,7 @@
 //! 提供個股（Stock）、產業（Industry）與 ETF 穿透（EtfLookThrough）三種維度的資產配置偏離試算
 //! 與具體股數／金額調整建議。本模組為純函式與無狀態計算，易於單元測試。
 
+use super::view::HoldingView;
 use anyhow::Result;
 
 mod industry;
@@ -199,11 +200,11 @@ fn round2(val: f64) -> f64 {
 /// 載入目前持股（含收盤價與產業）的查詢介面，供週報等非 HTTP 呼叫端重用。
 #[async_trait::async_trait]
 pub trait PortfolioPositionQuery: Send + Sync {
-    /// 回傳 `member_id` 的未售出持股（`0` 為全部會員）；`extra_symbols` 內未持有的代號
+    /// 回傳 `view` 範圍內的未售出持股；`extra_symbols` 內未持有的代號
     /// 以零股數補上，供目標中尚未持有的標的試算加碼。收盤價缺漏時 `current_price` 為 0。
     async fn fetch_positions(
         &self,
-        member_id: i64,
+        view: &HoldingView,
         extra_symbols: &[String],
     ) -> Result<Vec<CurrentPosition>>;
 
@@ -221,7 +222,7 @@ pub struct DatedEtfComponent {
     /// 成分股與權重。
     pub component: EtfLookThroughComponent,
     /// 成分資料的日期。
-    pub as_of: chrono::NaiveDate,
+    pub as_of: jiff::civil::Date,
 }
 
 /// 計算持股再平衡建議之純函式。

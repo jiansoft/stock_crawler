@@ -1,5 +1,7 @@
 //! Yahoo ETF 頁（基本資料、持股、淨值報酬）的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -8,8 +10,8 @@ const ETF_0050: &str = include_str!("../testdata/etf_holding_0050.html");
 const ETF_00632R: &str = include_str!("../testdata/etf_holding_00632R.html");
 const ETF_00679B: &str = include_str!("../testdata/etf_holding_00679B.html");
 
-fn day(y: i32, m: u32, d: u32) -> Option<NaiveDate> {
-    NaiveDate::from_ymd_opt(y, m, d)
+fn day(y: i32, m: u32, d: u32) -> Option<Date> {
+    ymd(y, m, d)
 }
 
 #[test]

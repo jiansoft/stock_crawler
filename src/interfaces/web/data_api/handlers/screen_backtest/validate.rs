@@ -1,6 +1,8 @@
 //! 回測參數的驗證與解析：基本面門檻範圍、排除產業清單與回測期間。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 檢查基本面門檻的範圍（與 `/stocks/screen` 相同）；超出時回錯誤訊息。
 pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(), &'static str> {
@@ -167,8 +169,8 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
 /// 第一期才有兩週可比；不足或沒有任何大戶資料時回錯誤訊息，不靜默略過條件。
 pub(super) fn validate_major_change_period(
     params: &ScreenBacktestParams,
-    from: NaiveDate,
-    first_week: Option<NaiveDate>,
+    from: Date,
+    first_week: Option<Date>,
 ) -> Result<(), String> {
     let field = match (params.min_major_change, params.min_holder_400_change) {
         (Some(_), _) => "min_major_change",
@@ -183,7 +185,7 @@ pub(super) fn validate_major_change_period(
     let weeks = params
         .major_change_weeks
         .unwrap_or(super::super::DEFAULT_MAJOR_CHANGE_WEEKS);
-    let earliest = first_week + chrono::Duration::weeks(i64::from(weeks));
+    let earliest = first_week + (i64::from(weeks) * 7).days();
     if from <= earliest {
         return Err(format!(
             "設定 {field} 時 from 必須晚於 {earliest}（集保大戶資料自 {first_week} 起，往後 {weeks} 週才有可比的兩週）"
@@ -208,15 +210,12 @@ pub(super) fn parse_excluded_industries(value: Option<&str>) -> Result<Vec<Strin
 }
 
 /// 起日：未指定為迄日往前 [`DEFAULT_PERIOD_DAYS`] 天；晚於迄日或期間超過上限回錯誤訊息。
-pub(super) fn resolve_backtest_period(
-    from: Option<NaiveDate>,
-    to: NaiveDate,
-) -> Result<NaiveDate, &'static str> {
-    let from = from.unwrap_or(to - chrono::Duration::days(DEFAULT_PERIOD_DAYS));
+pub(super) fn resolve_backtest_period(from: Option<Date>, to: Date) -> Result<Date, &'static str> {
+    let from = from.unwrap_or(to - (DEFAULT_PERIOD_DAYS).days());
     if from > to {
         return Err("from 不可晚於 to");
     }
-    if (to - from).num_days() >= MAX_PERIOD_DAYS {
+    if i64::from((to - from).get_days()) >= MAX_PERIOD_DAYS {
         return Err("回測期間最長 3,653 天");
     }
     Ok(from)

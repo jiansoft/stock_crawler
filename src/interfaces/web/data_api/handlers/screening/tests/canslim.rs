@@ -1,6 +1,7 @@
 //! 條件選股：CANSLIM 的 C（單季 EPS 年增）、A（年度 EPS 成長）、N（52 週新高）條件。
 
 use super::*;
+use jiff::civil::date;
 
 /// 三個條件各自的範圍邊界，且單獨即可成立篩選。
 #[test]
@@ -121,7 +122,7 @@ async fn screen_at_filters_canslim_growth_and_new_highs() {
         .expect("種入訊號");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |configure: fn(&mut StockScreeningParams)| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

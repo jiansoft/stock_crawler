@@ -14,23 +14,23 @@
 //! - 排程在 19:15（週一至週五），排在 19:00 收盤資料完整性檢查之後，重跑收盤匯總的訊號也已定案。
 //! - 沒有任何持股出現訊號（含休市日）時不發送。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use chrono::{Days, Local, NaiveDate};
 
 use super::holdings;
 use crate::{
-    core::{alert, util::text},
-    domain::{
-        portfolio::repository::PortfolioRepository,
-        quote::technical::{
-            FIFTY_TWO_WEEK_INDICATOR, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RS50_INDICATOR,
-            RS80_INDICATOR, SignalOutcome, StockTechnicalSignal, TechnicalSignalQuery,
-        },
+    app::notify,
+    core::{notify_topic::Topic, util::text},
+    domain::quote::technical::{
+        FIFTY_TWO_WEEK_INDICATOR, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RS50_INDICATOR,
+        RS80_INDICATOR, SignalOutcome, StockTechnicalSignal, TechnicalSignalQuery,
     },
-    infra::database::repository::{portfolio::PgPortfolioRepository, quote::PgQuoteRepository},
+    infra::database::repository::quote::PgQuoteRepository,
 };
 
 /// 要通知的訊號來源，也是同一檔股票內訊號的排列順序。
@@ -45,7 +45,7 @@ pub const NOTIFY_INDICATORS: [&str; 7] = [
 ];
 
 /// 歷史表現統計的回看天數（日曆天）。
-const OUTCOME_LOOKBACK_DAYS: u64 = 364;
+const OUTCOME_LOOKBACK_DAYS: i64 = 364;
 
 /// 歷史表現樣本少於此數時不顯示（避免少數樣本的勝率誤導）。
 pub const MIN_OUTCOME_SAMPLES: i64 = 30;
@@ -54,28 +54,24 @@ pub const MIN_OUTCOME_SAMPLES: i64 = 30;
 ///
 /// # Errors
 ///
-/// 查詢持股或訊號失敗時回傳錯誤。
+/// 目前不會回傳錯誤：查詢持股或訊號失敗只記錄，這個範圍不發。內容依收件者範圍產生（會員系統計畫 7.6）。
 pub async fn execute() -> Result<()> {
-    let holdings = PgPortfolioRepository::new()
-        .fetch_active_holdings(None)
-        .await
-        .context("fetch active holdings for technical alert failed")?;
-    let symbols: BTreeSet<String> = holdings
-        .into_iter()
-        .map(|holding| holding.security_code)
-        .collect();
-    let date = Local::now().date_naive();
-    let message = run(&PgQuoteRepository::new(), date, &symbols).await?;
-    if let Some(message) = message {
-        alert::send_message(&message).await;
-    }
+    let date = today();
+    let dedup_key = format!("{}:{date}", Topic::HoldingsTechnical.code());
+    notify::notify_holdings(Topic::HoldingsTechnical, &dedup_key, |view| async move {
+        let symbols = holdings::active_holding_symbols(&view)
+            .await
+            .context("fetch active holdings for technical alert failed")?;
+        run(&PgQuoteRepository::new(), date, &symbols).await
+    })
+    .await;
     Ok(())
 }
 
 /// 讀取持股訊號並組出通知內容；沒有要通知的訊號時回 `None`。
 async fn run(
     repo: &impl TechnicalSignalQuery,
-    date: NaiveDate,
+    date: Date,
     symbols: &BTreeSet<String>,
 ) -> Result<Option<String>> {
     let symbols: Vec<String> = symbols.iter().cloned().collect();
@@ -94,7 +90,7 @@ async fn run(
     if notable.is_empty() {
         return Ok(None);
     }
-    let from = date - Days::new(OUTCOME_LOOKBACK_DAYS);
+    let from = date - OUTCOME_LOOKBACK_DAYS.days();
     let outcomes = repo
         .fetch_signal_outcomes(from, date, &NOTIFY_INDICATORS)
         .await
@@ -126,7 +122,7 @@ fn notable(mut signals: Vec<StockTechnicalSignal>) -> Vec<StockTechnicalSignal> 
 
 /// 依股票（代號排序）分段列出訊號說明（附同一訊號的歷史表現）；沒有訊號時回 `None`。
 fn build_message(
-    date: NaiveDate,
+    date: Date,
     signals: &[StockTechnicalSignal],
     outcomes: &[SignalOutcome],
     stock_name: impl Fn(&str) -> String,

@@ -1,7 +1,9 @@
 //! `/market/forward-returns` 的資料庫語意整合測試：種未來報酬、重算大盤彙總再查詢。
 
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
@@ -19,11 +21,8 @@ const RETURNS: [(&str, &str, i64, Option<i64>); 5] = [
     ("1988-01-04", "79979FB", 6, None),
 ];
 
-fn window() -> (NaiveDate, NaiveDate) {
-    (
-        NaiveDate::from_ymd_opt(1980, 1, 1).expect("合法日期"),
-        NaiveDate::from_ymd_opt(1999, 12, 31).expect("合法日期"),
-    )
+fn window() -> (Date, Date) {
+    (date(1980, 1, 1), date(1999, 12, 31))
 }
 
 async fn cleanup(pool: &sqlx::PgPool) {
@@ -57,7 +56,11 @@ async fn seed(pool: &sqlx::PgPool) {
             "INSERT INTO daily_forward_return (date, stock_symbol, return_5d, return_20d)
              VALUES ($1, $2, $3, $4)",
         )
-        .bind(NaiveDate::parse_from_str(date, "%Y-%m-%d").expect("合法日期"))
+        .bind(
+            Date::strptime("%Y-%m-%d", date)
+                .expect("合法日期")
+                .to_sqlx(),
+        )
         .bind(symbol)
         .bind(Decimal::from(r5))
         .bind(r20.map(Decimal::from))

@@ -81,7 +81,7 @@ async fn invalid_input_is_rejected_before_any_job_is_created() {
     }
 
     // CAGR 基準日格式錯誤（留空才是合法的「採用最新交易日」）。
-    // 注意 parse_request_date 沿用 chrono 的寬鬆解析，"2026-8-7" 是合法的，
+    // 注意 parse_request_date 的解析接受未補零的月日，"2026-8-7" 是合法的，
     // 因此這裡用真正無法解析的值。
     assert_eq!(
         post("/api/manual-backfill/cagr", r#"{"date":"not-a-date"}"#).await,

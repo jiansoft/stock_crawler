@@ -23,7 +23,10 @@ fn find_new_symbols_excludes_already_notified() {
     assert!(EventDispatcher::find_new_symbols(&notified, ["2330"]).is_empty());
 }
 
-/// 已通知集合存在 Redis：第一次全部是新的、不逐檔標記；之後只標記新增代號；沒有新增就不送出。
+/// 已通知集合存在 Redis：有新增代號才送出並寫回集合；沒有新增就不送出。
+///
+/// 訊息依收件者範圍產生（7.6），測試代號不在任何人的持股裡，所以不會真的組訊息；
+/// 補發時標記哪些代號由 [`EventDispatcher::find_new_symbols`] 決定，另外驗證。
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
@@ -38,29 +41,44 @@ async fn send_if_new_holdings_tracks_notified_symbols_in_redis() {
     let key = "test:holding_review:notified:79979";
     let _ = CLIENT.delete(key).await;
 
-    let mut highlights = Vec::new();
-    let first = EventDispatcher::send_if_new_holdings(key, 60, ["79979A", "79979B"], |new| {
-        highlights.push(new.cloned());
-        "第一次".to_owned()
-    })
+    let first = EventDispatcher::send_if_new_holdings(
+        crate::core::alert::Topic::HoldingsRevenue,
+        key,
+        60,
+        &["79979A", "79979B"],
+        |symbol: &&str| *symbol,
+        |_, _| "第一次".to_owned(),
+    )
     .await;
-    let repeated = EventDispatcher::send_if_new_holdings(key, 60, ["79979B", "79979A"], |new| {
-        highlights.push(new.cloned());
-        "重複".to_owned()
-    })
+    let repeated = EventDispatcher::send_if_new_holdings(
+        crate::core::alert::Topic::HoldingsRevenue,
+        key,
+        60,
+        &["79979B", "79979A"],
+        |symbol: &&str| *symbol,
+        |_, _| "重複".to_owned(),
+    )
     .await;
-    let added = EventDispatcher::send_if_new_holdings(key, 60, ["79979A", "79979C"], |new| {
-        highlights.push(new.cloned());
-        "補發".to_owned()
-    })
+    let added = EventDispatcher::send_if_new_holdings(
+        crate::core::alert::Topic::HoldingsRevenue,
+        key,
+        60,
+        &["79979A", "79979C"],
+        |symbol: &&str| *symbol,
+        |_, _| "補發".to_owned(),
+    )
     .await;
     let stored = EventDispatcher::load_notified_symbols(key).await;
     let _ = CLIENT.delete(key).await;
 
     assert!(first && !repeated && added);
     assert_eq!(
-        highlights,
-        [None, Some(BTreeSet::from(["79979C".to_owned()]))]
+        EventDispatcher::find_new_symbols(
+            &BTreeSet::from(["79979A".to_owned(), "79979B".to_owned()]),
+            ["79979A", "79979C"],
+        ),
+        BTreeSet::from(["79979C".to_owned()]),
+        "補發只標記新增的代號"
     );
     assert_eq!(
         stored,

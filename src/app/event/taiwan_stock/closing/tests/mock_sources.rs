@@ -1,6 +1,10 @@
 //! 以本機 mock server 取代交易所（G15）：休市判斷與收盤匯總的「當天沒有行情」分支。
 
-use chrono::TimeZone;
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::{today, ymd};
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -12,14 +16,11 @@ const TPEX: &str = "https://www.tpex.org.tw";
 const HOLIDAY_PATH: &str = "/rwd/zh/holidaySchedule/holidaySchedule";
 
 /// 台北時間 2026 年某月某日中午。
-fn noon(month: u32, day: u32) -> DateTime<Local> {
-    let naive = NaiveDate::from_ymd_opt(2026, month, day)
-        .and_then(|date| date.and_hms_opt(12, 0, 0))
+fn noon(month: u32, day: u32) -> TaipeiDateTime {
+    let naive = ymd(2026, month, day)
+        .map(|date| date.at(12, 0, 0, 0))
         .expect("有效日期");
-    Local
-        .from_local_datetime(&naive)
-        .single()
-        .expect("本地時間沒有歧義")
+    TaipeiDateTime::from_datetime(naive).expect("合法時間")
 }
 
 /// 只有 2026-10-09（五）一天休市的休市日清單。
@@ -102,7 +103,7 @@ async fn aggregate_skips_when_both_markets_have_no_quotes() {
         .mount(&server)
         .await;
 
-    let date = NaiveDate::from_ymd_opt(2026, 10, 9).expect("有效日期");
+    let date = date(2026, 10, 9);
     let result = with_origins(
         &[(TWSE, &server.uri()), (TPEX, &server.uri())],
         aggregate(date),
@@ -152,7 +153,7 @@ fn otc_quotes() -> serde_json::Value {
 }
 
 /// 清掉收盤匯總在測試日寫入的所有資料；`last-closing-day` 還原成測試前的值。
-async fn cleanup_aggregate(date: NaiveDate, last_closing_day: Option<&str>) {
+async fn cleanup_aggregate(date: Date, last_closing_day: Option<&str>) {
     let pool = crate::infra::database::get_connection();
     for sql in [
         r#"DELETE FROM "DailyQuotes" WHERE "Date" = $1"#,
@@ -169,7 +170,7 @@ async fn cleanup_aggregate(date: NaiveDate, last_closing_day: Option<&str>) {
         "DELETE FROM daily_stock_price_stats WHERE date = $1",
     ] {
         sqlx::query(sql)
-            .bind(date)
+            .bind(date.to_sqlx())
             .execute(pool)
             .await
             .unwrap_or_else(|why| panic!("{sql}: {why}"));
@@ -205,7 +206,7 @@ async fn aggregate_writes_both_markets_and_runs_calculations() {
     }
     let pool = crate::infra::database::get_connection();
     let (year, month, day) = AGGREGATE_DATE;
-    let date = NaiveDate::from_ymd_opt(year, month, day).expect("有效日期");
+    let date = ymd(year, month, day).expect("有效日期");
     let last_closing_day: Option<String> =
         sqlx::query_scalar("SELECT val FROM config WHERE key = 'last-closing-day'")
             .fetch_optional(pool)
@@ -242,7 +243,7 @@ async fn aggregate_writes_both_markets_and_runs_calculations() {
         r#"SELECT stock_symbol, "ClosingPrice" FROM "DailyQuotes"
            WHERE "Date" = $1 AND stock_symbol = ANY($2) ORDER BY stock_symbol"#,
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .bind([LISTED, OTC])
     .fetch_all(pool)
     .await
@@ -297,14 +298,14 @@ async fn run_and_ensure_complete_skip_closed_days() {
 /// 兩個排程入口以現在時間執行：把今天設為休市日，不論哪天跑都只查休市日清單就結束。
 #[tokio::test]
 async fn entries_use_current_time() {
-    let today = Local::now().date_naive();
+    let today = today();
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(HOLIDAY_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "stat": "OK",
             "date": format!("{}0101", today.year()),
-            "data": [[today.format("%Y-%m-%d").to_string(), "測試休市", ""]],
+            "data": [[today.strftime("%Y-%m-%d").to_string(), "測試休市", ""]],
             "queryYear": today.year(),
             "total": 1
         })))

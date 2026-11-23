@@ -11,13 +11,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{error_response, repository_error};
+use super::{error_response, household_param, repository_error};
 use crate::domain::portfolio::costs::{FEE_RATE, STOCK_TAX_RATE};
 use crate::domain::portfolio::rebalance::{
     CurrentPosition, DatedEtfComponent, EtfLookThroughComponent, PortfolioPositionQuery,
     PortfolioRebalanceResult, RebalanceParams, calculate_rebalance,
 };
-use crate::domain::portfolio::target::{PortfolioTargetRepository, TargetDimension};
+use crate::domain::portfolio::target::{PortfolioTargetRepository, TargetDimension, TargetOwner};
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database::repository::portfolio_target::PgPortfolioTargetRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, EtfLookThroughRebalanceItemDto, IndustryRebalanceItemDto,
@@ -28,6 +29,7 @@ use crate::interfaces::web::data_api::dto::{
 /// 驗證過的查詢參數。
 struct Validated {
     member_id: i64,
+    household_id: i64,
     dimension: TargetDimension,
     params: RebalanceParams,
 }
@@ -38,6 +40,7 @@ fn validate(params: &PortfolioRebalanceQueryParams) -> Result<Validated, &'stati
     if member_id < 0 {
         return Err("member_id 不可為負數");
     }
+    let household_id = household_param(params.household_id)?;
     let Some(dimension) = TargetDimension::parse(params.dimension.as_deref().unwrap_or("stock"))
     else {
         return Err("dimension 必須為 stock, industry, 或 etf_look_through");
@@ -60,6 +63,7 @@ fn validate(params: &PortfolioRebalanceQueryParams) -> Result<Validated, &'stati
     }
     Ok(Validated {
         member_id,
+        household_id,
         dimension,
         params: RebalanceParams {
             lot_size,
@@ -95,6 +99,7 @@ pub(crate) async fn portfolio_rebalance(
 ) -> Response {
     let Validated {
         member_id,
+        household_id,
         dimension,
         params,
     } = match validate(&params) {
@@ -104,12 +109,12 @@ pub(crate) async fn portfolio_rebalance(
 
     // 1. 載入目標設定
     let repo = PgPortfolioTargetRepository::new();
-    let member = member_id.to_string();
-    let target_records = match repo.list_targets(&member, Some(dimension)).await {
+    let owner = TargetOwner::new(household_id, member_id.to_string());
+    let target_records = match repo.list_targets(&owner, Some(dimension)).await {
         Ok(records) => records,
         Err(error) => return repository_error(error),
     };
-    let configured = match repo.has_configuration(&member, dimension).await {
+    let configured = match repo.has_configuration(&owner, dimension).await {
         Ok(value) => value,
         Err(error) => return repository_error(error),
     };
@@ -131,7 +136,13 @@ pub(crate) async fn portfolio_rebalance(
         }
         TargetDimension::Industry => Vec::new(),
     };
-    let positions = match repo.fetch_positions(member_id, &extra_symbols).await {
+    let positions = match repo
+        .fetch_positions(
+            &HoldingView::member(household_id, member_id),
+            &extra_symbols,
+        )
+        .await
+    {
         Ok(positions) => positions,
         Err(error) => return repository_error(error),
     };

@@ -1,5 +1,6 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::{domain::dividend::entity::Dividend, infra::cache::SHARE};
-use chrono::{Local, NaiveDate, TimeZone};
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -7,7 +8,7 @@ use super::*;
 /// 驗證持有日必須嚴格早於除權息日才符合股利領取資格。
 #[test]
 fn test_is_holding_eligible_for_ex_date_requires_strictly_earlier_date() {
-    let holding_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
+    let holding_date = date(2025, 6, 20);
     let mut d = Dividend {
         serial: 0,
         year: 2025,
@@ -28,8 +29,8 @@ fn test_is_holding_eligible_for_ex_date_requires_strictly_earlier_date() {
         ex_dividend_date_stock: "2025-06-21".to_string(),
         payable_date_cash: "".to_string(),
         payable_date_stock: "".to_string(),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     };
 
     assert!(d.is_eligible_for_cash(holding_date));
@@ -47,7 +48,7 @@ fn test_is_holding_eligible_for_ex_date_requires_strictly_earlier_date() {
 /// 驗證現金股利與股票股利會依各自的除息日、除權日分開判斷。
 #[test]
 fn test_calculate_eligible_dividend_amounts_checks_cash_and_stock_dates_separately() {
-    let holding_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
+    let holding_date = date(2025, 6, 20);
     let number_of_shares_held = Decimal::new(1000, 0);
     let d = Dividend {
         serial: 0,
@@ -69,8 +70,8 @@ fn test_calculate_eligible_dividend_amounts_checks_cash_and_stock_dates_separate
         ex_dividend_date_stock: "2025-06-21".to_string(),
         payable_date_cash: "".to_string(),
         payable_date_stock: "".to_string(),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     };
 
     let (cash, stock, stock_money, total) = d.calculate_payout(holding_date, number_of_shares_held);
@@ -85,7 +86,7 @@ fn test_calculate_eligible_dividend_amounts_checks_cash_and_stock_dates_separate
 /// 驗證持有日不早於除息日與除權日時，整筆股利不會產生可領金額。
 #[test]
 fn test_calculate_eligible_dividend_amounts_returns_zero_when_holding_is_not_eligible() {
-    let holding_date = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+    let holding_date = date(2025, 1, 1);
     let number_of_shares_held = Decimal::new(1000, 0);
     let d = Dividend {
         serial: 0,
@@ -107,8 +108,8 @@ fn test_calculate_eligible_dividend_amounts_returns_zero_when_holding_is_not_eli
         ex_dividend_date_stock: "2024-06-21".to_string(),
         payable_date_cash: "".to_string(),
         payable_date_stock: "".to_string(),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     };
 
     let (cash, stock, stock_money, total) = d.calculate_payout(holding_date, number_of_shares_held);
@@ -120,7 +121,7 @@ fn test_calculate_eligible_dividend_amounts_returns_zero_when_holding_is_not_eli
 
 #[test]
 fn eligible_dividend_amounts_supports_cash_only_and_stock_only_dates() {
-    let holding_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
+    let holding_date = date(2025, 6, 20);
     let number_of_shares_held = Decimal::new(1000, 0);
     let mut d = Dividend {
         serial: 0,
@@ -142,8 +143,8 @@ fn eligible_dividend_amounts_supports_cash_only_and_stock_only_dates() {
         ex_dividend_date_stock: "-".to_string(),
         payable_date_cash: "".to_string(),
         payable_date_stock: "".to_string(),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     };
 
     let (cash, _stock, stock_money, total) =
@@ -163,7 +164,7 @@ fn eligible_dividend_amounts_supports_cash_only_and_stock_only_dates() {
 
 #[test]
 fn eligible_dividend_amounts_treats_invalid_or_unpublished_dates_as_ineligible() {
-    let holding_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
+    let holding_date = date(2025, 6, 20);
     let number_of_shares_held = Decimal::new(1000, 0);
     let d = Dividend {
         serial: 0,
@@ -185,8 +186,8 @@ fn eligible_dividend_amounts_treats_invalid_or_unpublished_dates_as_ineligible()
         ex_dividend_date_stock: "2025/06/21".to_string(),
         payable_date_cash: "".to_string(),
         payable_date_stock: "".to_string(),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     };
 
     let (cash, stock, stock_money, total) = d.calculate_payout(holding_date, number_of_shares_held);
@@ -198,7 +199,7 @@ fn eligible_dividend_amounts_treats_invalid_or_unpublished_dates_as_ineligible()
 
 #[test]
 fn eligible_dividend_amounts_returns_zero_for_zero_shares() {
-    let holding_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
+    let holding_date = date(2025, 6, 20);
     let d = Dividend {
         serial: 0,
         year: 2025,
@@ -219,8 +220,8 @@ fn eligible_dividend_amounts_returns_zero_for_zero_shares() {
         ex_dividend_date_stock: "2025-06-21".to_string(),
         payable_date_cash: "".to_string(),
         payable_date_stock: "".to_string(),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     };
 
     let (cash, stock, stock_money, total) = d.calculate_payout(holding_date, Decimal::ZERO);
@@ -283,7 +284,8 @@ async fn test_calculate_dividend() {
         Decimal::ZERO,
         Decimal::ZERO,
         Decimal::ZERO,
-        Local.with_ymd_and_hms(2023, 4, 9, 0, 0, 0).unwrap(),
+        TaipeiDateTime::from_datetime(jiff::civil::date(2023, 4, 9).at(0, 0, 0, 0))
+            .expect("合法時間"),
     );
 
     match calculate_dividend(&portfolio_repo, &dividend_repo, sod, 2023).await {

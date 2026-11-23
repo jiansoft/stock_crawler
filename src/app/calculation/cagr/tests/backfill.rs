@@ -2,6 +2,8 @@
 
 use super::fakes::*;
 use super::*;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 #[tokio::test]
 async fn backfill_period_only_calculates_the_requested_period() {
@@ -83,7 +85,7 @@ async fn backfill_period_is_a_no_op_when_nothing_is_missing() {
 fn collect_reinvest_pairs_keeps_only_in_range_cash_dividends() {
     let from = date(2024, 1, 1);
     let to = date(2024, 12, 31);
-    let event = |day: NaiveDate, cash: Decimal| DividendEvent {
+    let event = |day: Date, cash: Decimal| DividendEvent {
         stock_symbol: "2330".to_string(),
         ex_dividend_date_cash: Some(day),
         ex_dividend_date_stock: None,

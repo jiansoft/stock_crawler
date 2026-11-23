@@ -3,6 +3,7 @@
 use super::super::state::MAX_CONCURRENT_JOBS;
 use super::*;
 use axum::http::StatusCode;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 /// 取出解析失敗時回傳的 HTTP 狀態碼。
@@ -18,7 +19,7 @@ fn status_of<T>(result: Result<T, axum::response::Response>) -> StatusCode {
 fn request_date_accepts_iso_dates_and_rejects_the_rest() {
     assert_eq!(
         parse_request_date(" 2026-04-30 ").expect("合法日期"),
-        NaiveDate::from_ymd_opt(2026, 4, 30).expect("測試日期應合法")
+        date(2026, 4, 30)
     );
     for raw in ["", "2026-04", "2026/04/30", "not-a-date", "2026-02-30"] {
         assert_eq!(status_of(parse_request_date(raw)), StatusCode::BAD_REQUEST);
@@ -30,7 +31,7 @@ fn request_date_accepts_iso_dates_and_rejects_the_rest() {
 fn request_month_resolves_to_the_first_day() {
     assert_eq!(
         parse_request_month(" 2015-01 ").expect("合法月份"),
-        NaiveDate::from_ymd_opt(2015, 1, 1).expect("測試日期應合法")
+        date(2015, 1, 1)
     );
     for raw in ["", "2015", "2015-13", "2015-01-01"] {
         assert_eq!(status_of(parse_request_month(raw)), StatusCode::BAD_REQUEST);

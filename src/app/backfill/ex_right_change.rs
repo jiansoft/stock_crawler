@@ -10,10 +10,11 @@
 //!
 //! 兩個市場分別抓取；單一市場失敗只記錄、不影響另一個市場與收盤流程的其他步驟。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::{future::Future, time::Duration};
 
 use anyhow::{Result, bail};
-use chrono::{Datelike, NaiveDate};
 
 use crate::{
     domain::quote::ex_right::{ExRightChangeRepository, ExRightReference},
@@ -62,7 +63,7 @@ pub struct Summary {
 /// # Errors
 ///
 /// 寫入失敗，或兩個市場都抓取失敗時回傳錯誤。
-pub async fn execute(date: NaiveDate) -> Result<Summary> {
+pub async fn execute(date: Date) -> Result<Summary> {
     run(
         &PgQuoteRepository::new(),
         &[(date, date)],
@@ -79,7 +80,7 @@ pub async fn execute(date: NaiveDate) -> Result<Summary> {
 /// # Errors
 ///
 /// 寫入失敗，或有發請求卻全部失敗時回傳錯誤。
-pub async fn backfill_range(from: NaiveDate, to: NaiveDate) -> Result<Summary> {
+pub async fn backfill_range(from: Date, to: Date) -> Result<Summary> {
     run(
         &PgQuoteRepository::new(),
         &yearly_windows(from, to),
@@ -91,14 +92,14 @@ pub async fn backfill_range(from: NaiveDate, to: NaiveDate) -> Result<Summary> {
 }
 
 /// 把 `from`～`to` 切成不跨年的區間（交易所一次查詢以一年為宜）。
-fn yearly_windows(from: NaiveDate, to: NaiveDate) -> Vec<(NaiveDate, NaiveDate)> {
+fn yearly_windows(from: Date, to: Date) -> Vec<(Date, Date)> {
     let mut windows = Vec::new();
     let mut start = from;
     while start <= to {
-        let year_end = NaiveDate::from_ymd_opt(start.year(), 12, 31).unwrap_or(to);
+        let year_end = ymd(i32::from(start.year()), 12, 31).unwrap_or(to);
         let end = year_end.min(to);
         windows.push((start, end));
-        let Some(next) = end.succ_opt() else {
+        let Some(next) = end.tomorrow().ok() else {
             break;
         };
         start = next;
@@ -107,7 +108,7 @@ fn yearly_windows(from: NaiveDate, to: NaiveDate) -> Vec<(NaiveDate, NaiveDate)>
 }
 
 /// 依市場呼叫對應的爬蟲。
-async fn fetch(market: Market, from: NaiveDate, to: NaiveDate) -> Result<Vec<ExRightReference>> {
+async fn fetch(market: Market, from: Date, to: Date) -> Result<Vec<ExRightReference>> {
     match market {
         Market::Listed => twse::ex_right_result::visit_references(from, to).await,
         Market::Otc => tpex::ex_right_result::visit_references(from, to).await,
@@ -117,13 +118,13 @@ async fn fetch(market: Market, from: NaiveDate, to: NaiveDate) -> Result<Vec<ExR
 /// 修正流程本體；`fetch` 與 `pause` 可注入，測試時換成假資料與不等待。
 async fn run<F, FF, P, PF>(
     repo: &impl ExRightChangeRepository,
-    windows: &[(NaiveDate, NaiveDate)],
+    windows: &[(Date, Date)],
     with_stats: bool,
     fetch: F,
     pause: P,
 ) -> Result<Summary>
 where
-    F: Fn(Market, NaiveDate, NaiveDate) -> FF,
+    F: Fn(Market, Date, Date) -> FF,
     FF: Future<Output = Result<Vec<ExRightReference>>>,
     P: Fn() -> PF,
     PF: Future<Output = ()>,

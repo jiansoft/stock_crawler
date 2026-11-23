@@ -10,31 +10,33 @@
 //! 2019 年起約七成的突破在 10 個交易日內跌回突破價（第 19 輪 T12）。
 //!
 //! 排在 19:15 持股訊號通知之後。沒有任何訊號（含休市日）時不發送。只供參考，不構成投資建議。
+//!
+//! 「持股」標記依收件者範圍（會員系統計畫 7.6）：每個範圍各自產生一份，只標範圍內的持股。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use chrono::{Days, Local, NaiveDate};
 
 use super::technical_alert::MIN_OUTCOME_SAMPLES;
 use crate::{
-    core::{alert, util::text},
-    domain::{
-        portfolio::repository::PortfolioRepository,
-        quote::technical::{
-            BreakoutFollowUp, BreakoutFollowUpQuery, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR,
-            RankedSignal, RankedSignalQuery, SignalKind, SignalOutcome, TechnicalSignalQuery,
-        },
+    app::{event::taiwan_stock::holdings, notify},
+    core::{notify_topic::Topic, util::text},
+    domain::quote::technical::{
+        BreakoutFollowUp, BreakoutFollowUpQuery, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR,
+        RankedSignal, RankedSignalQuery, SignalKind, SignalOutcome, TechnicalSignalQuery,
     },
-    infra::database::repository::{portfolio::PgPortfolioRepository, quote::PgQuoteRepository},
+    infra::database::repository::quote::PgQuoteRepository,
 };
 
 /// 最多列出幾檔。
 const LISTED: i64 = 15;
 
 /// 歷史表現統計的回看天數（日曆天）。
-const OUTCOME_LOOKBACK_DAYS: u64 = 364;
+const OUTCOME_LOOKBACK_DAYS: i64 = 364;
 
 /// 突破後續看前幾個交易日的突破。
 const FOLLOW_UP_DAYS: i64 = 5;
@@ -43,30 +45,26 @@ const FOLLOW_UP_DAYS: i64 = 5;
 ///
 /// # Errors
 ///
-/// 查詢訊號失敗時回傳錯誤；持股或歷史表現讀取失敗只記錄警告，照常通知。
+/// 查詢訊號失敗只記錄（不發）；持股或歷史表現讀取失敗只記錄警告，照常通知。
 pub async fn execute() -> Result<()> {
-    let holdings: BTreeSet<String> = match PgPortfolioRepository::new()
-        .fetch_active_holdings(None)
-        .await
-    {
-        Ok(holdings) => holdings
-            .into_iter()
-            .map(|holding| holding.security_code)
-            .collect(),
-        Err(why) => {
-            tracing::warn!("區間突破通知：讀取持股失敗，不標持股: {why:#}");
-            BTreeSet::new()
-        }
-    };
-    let date = Local::now().date_naive();
-    if let Some(message) = run(&PgQuoteRepository::new(), date, &holdings).await? {
-        alert::send_message(&message).await;
-    }
+    let date = today();
+    let dedup_key = format!("{}:{date}", Topic::HoldingsBreakout.code());
+    notify::notify_holdings(Topic::HoldingsBreakout, &dedup_key, |view| async move {
+        let held: BTreeSet<String> = match holdings::active_holding_symbols(&view).await {
+            Ok(held) => held,
+            Err(why) => {
+                tracing::warn!("區間突破通知：讀取持股失敗，不標持股: {why:#}");
+                BTreeSet::new()
+            }
+        };
+        run(&PgQuoteRepository::new(), date, &held).await
+    })
+    .await;
     Ok(())
 }
 
 /// 讀取當天的區間突破與歷史表現並組出通知；沒有訊號時回 `None`。
-async fn run<R>(repo: &R, date: NaiveDate, holdings: &BTreeSet<String>) -> Result<Option<String>>
+async fn run<R>(repo: &R, date: Date, holdings: &BTreeSet<String>) -> Result<Option<String>>
 where
     R: RankedSignalQuery + TechnicalSignalQuery + BreakoutFollowUpQuery,
 {
@@ -78,7 +76,7 @@ where
     if signals.is_empty() {
         return Ok(None);
     }
-    let from = date - Days::new(OUTCOME_LOOKBACK_DAYS);
+    let from = date - OUTCOME_LOOKBACK_DAYS.days();
     let outcome = repo
         .fetch_signal_outcomes(from, date, &[RANGE_BREAKOUT_INDICATOR])
         .await
@@ -143,7 +141,7 @@ fn follow_up_lines(follow_ups: &[BreakoutFollowUp], holdings: &BTreeSet<String>)
 
 /// 組出通知內容（MarkdownV2 已跳脫）。
 fn build_message(
-    date: NaiveDate,
+    date: Date,
     signals: &[RankedSignal],
     total: i64,
     outcome: Option<&SignalOutcome>,

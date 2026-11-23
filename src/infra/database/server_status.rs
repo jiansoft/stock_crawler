@@ -3,10 +3,10 @@
 //! 停機監控不能用共用連線池：資料庫掛掉時取連線要等 acquire timeout，還會占住排程要用的連線。
 //! 這裡每次開一條獨立連線、查完就關，整段受呼叫端給的逾時限制。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local};
 use sqlx::{Connection, PgConnection, postgres::PgConnectOptions};
 
 /// 伺服器啟動時間。
@@ -18,9 +18,9 @@ const STATS_RESET_SQL: &str = "SELECT stats_reset FROM pg_stat_statements_info";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ServerStatus {
     /// `pg_postmaster_start_time()`。
-    pub started_at: DateTime<Local>,
+    pub started_at: TaipeiDateTime,
     /// `pg_stat_statements_info.stats_reset`；沒有安裝擴充或沒有權限時為 `None`。
-    pub stats_reset: Option<DateTime<Local>>,
+    pub stats_reset: Option<TaipeiDateTime>,
 }
 
 /// 統計重置時間與啟動時間相差在這個範圍內，視為啟動時重置（2026-10-29 實測差 20 ms）。
@@ -31,7 +31,7 @@ impl ServerStatus {
     /// immediate stop。讀不到統計時為 `None`。
     pub fn stats_reset_at_start(&self) -> Option<bool> {
         self.stats_reset.map(|reset| {
-            (reset - self.started_at).num_seconds().abs() <= RESET_AT_START_TOLERANCE_SECONDS
+            (reset - self.started_at).as_secs().abs() <= RESET_AT_START_TOLERANCE_SECONDS
         })
     }
 }
@@ -63,11 +63,11 @@ async fn read_status(options: &PgConnectOptions) -> Result<ServerStatus> {
     let mut conn = PgConnection::connect_with(options)
         .await
         .context("連線失敗")?;
-    let started_at: DateTime<Local> = sqlx::query_scalar(STARTED_AT_SQL)
+    let started_at: TaipeiDateTime = sqlx::query_scalar(STARTED_AT_SQL)
         .fetch_one(&mut conn)
         .await
         .context("讀取伺服器啟動時間失敗")?;
-    let stats_reset: Option<DateTime<Local>> = sqlx::query_scalar(STATS_RESET_SQL)
+    let stats_reset: Option<TaipeiDateTime> = sqlx::query_scalar(STATS_RESET_SQL)
         .fetch_optional(&mut conn)
         .await
         .ok()

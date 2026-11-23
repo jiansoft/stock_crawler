@@ -9,6 +9,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use self::rows::{HistoricalQuoteRow, LatestQuoteRow, ProfileRow, StockRow};
@@ -90,7 +91,7 @@ pub(crate) async fn price_history(
         Err(error) => return database_error(error),
         Ok(Some(_)) => {}
     }
-    let rows: Result<Vec<HistoricalQuoteRow>, _> = sqlx::query_as(r#"SELECT "Date" AS date, "OpeningPrice" AS opening_price, "HighestPrice" AS highest_price, "LowestPrice" AS lowest_price, "ClosingPrice" AS closing_price, "Change" AS change, "ChangeRange" AS change_range, "TradingVolume" AS trading_volume, "Transaction" AS transaction, "TradeValue" AS trade_value, "MovingAverage5" AS moving_average_5, "MovingAverage10" AS moving_average_10, "MovingAverage20" AS moving_average_20, "MovingAverage60" AS moving_average_60, "PriceEarningRatio" AS price_earning_ratio, "price-to-book_ratio" AS price_to_book_ratio, "RecordTime" AS record_time FROM "DailyQuotes" WHERE stock_symbol = $1 AND ($2::date IS NULL OR "Date" >= $2::date) AND ($3::date IS NULL OR "Date" <= $3::date) ORDER BY "Date" DESC LIMIT $4"#).bind(&symbol).bind(from).bind(to).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
+    let rows: Result<Vec<HistoricalQuoteRow>, _> = sqlx::query_as(r#"SELECT "Date" AS date, "OpeningPrice" AS opening_price, "HighestPrice" AS highest_price, "LowestPrice" AS lowest_price, "ClosingPrice" AS closing_price, "Change" AS change, "ChangeRange" AS change_range, "TradingVolume" AS trading_volume, "Transaction" AS transaction, "TradeValue" AS trade_value, "MovingAverage5" AS moving_average_5, "MovingAverage10" AS moving_average_10, "MovingAverage20" AS moving_average_20, "MovingAverage60" AS moving_average_60, "PriceEarningRatio" AS price_earning_ratio, "price-to-book_ratio" AS price_to_book_ratio, "RecordTime" AS record_time FROM "DailyQuotes" WHERE stock_symbol = $1 AND ($2::date IS NULL OR "Date" >= $2::date) AND ($3::date IS NULL OR "Date" <= $3::date) ORDER BY "Date" DESC LIMIT $4"#).bind(&symbol).bind(from.map(ToSqlx::to_sqlx)).bind(to.map(ToSqlx::to_sqlx)).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
     let rows = match rows {
         Ok(rows) => rows,
         Err(error) => return database_error(error),
@@ -206,7 +207,7 @@ pub(crate) async fn realtime_snapshot(Path(symbol): Path<String>) -> Response {
         last_close: convert(snapshot.last_close),
         volume_lots: convert(snapshot.volume),
         source_site: snapshot.source_site,
-        updated_at: snapshot.updated_at.to_rfc3339(),
+        updated_at: crate::core::util::datetime::rfc3339_utc::to_rfc3339(snapshot.updated_at),
     })
     .into_response()
 }

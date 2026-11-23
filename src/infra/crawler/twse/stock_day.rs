@@ -6,8 +6,10 @@
 //!
 //! 證交所說明此資料自 2010-01-04 起提供。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::ymd;
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -47,13 +49,13 @@ const MIN_COLUMNS: usize = COL_TRANSACTION + 1;
 ///
 /// `month` 只取其年月，日期部分由 API 忽略。查無資料（例如該股當月尚未上市）
 /// 時回傳空陣列而非錯誤 —— 回補整段區間時，中間有幾個月沒有資料是常態。
-pub async fn visit(stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+pub async fn visit(stock_symbol: &str, month: Date) -> Result<Vec<DailyQuoteDto>> {
     let url = format!(
         "https://www.{}/exchangeReport/STOCK_DAY?response=json&date={}&stockNo={}&_={}",
         twse::HOST,
-        month.format("%Y%m01"),
+        month.strftime("%Y%m01"),
         stock_symbol,
-        Local::now().timestamp_millis()
+        TaipeiDateTime::now().timestamp().as_millisecond()
     );
 
     let response = http::get_json::<StockDayResponse>(&url)
@@ -61,7 +63,7 @@ pub async fn visit(stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuot
         .with_context(|| {
             format!(
                 "Failed to fetch STOCK_DAY for {stock_symbol} at {}",
-                month.format("%Y-%m")
+                month.strftime("%Y-%m")
             )
         })?;
 
@@ -130,7 +132,7 @@ pub struct TwseMonthlyQuoteFetcher;
 
 #[async_trait::async_trait]
 impl crate::app::backfill::port::MonthlyQuoteFetcher for TwseMonthlyQuoteFetcher {
-    async fn fetch(&self, stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+    async fn fetch(&self, stock_symbol: &str, month: Date) -> Result<Vec<DailyQuoteDto>> {
         visit(stock_symbol, month).await
     }
 }
@@ -139,7 +141,7 @@ impl crate::app::backfill::port::MonthlyQuoteFetcher for TwseMonthlyQuoteFetcher
 ///
 /// 年份限定在合理的民國紀年範圍內：若來源哪天改回西元（`2021/08/02`），
 /// 不設限會安靜地算出民國 2021 年＝西元 3932 年這種荒謬日期並寫進資料庫。
-fn parse_roc_date(raw: &str) -> Option<NaiveDate> {
+fn parse_roc_date(raw: &str) -> Option<Date> {
     /// 民國紀年的合理上界；本專案的報價資料不可能超出這個範圍。
     const MAX_ROC_YEAR: i32 = 200;
 
@@ -150,7 +152,7 @@ fn parse_roc_date(raw: &str) -> Option<NaiveDate> {
     }
     let month = parts.next()?.trim().parse::<u32>().ok()?;
     let day = parts.next()?.trim().parse::<u32>().ok()?;
-    NaiveDate::from_ymd_opt(roc_year_to_gregorian_year(roc_year), month, day)
+    ymd(roc_year_to_gregorian_year(roc_year), month, day)
 }
 
 /// 解析帶千分位逗號、正負號的數字；`--`、空字串等視為解析失敗。

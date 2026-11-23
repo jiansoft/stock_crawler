@@ -1,21 +1,30 @@
-use chrono::{NaiveDate, TimeZone};
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::{today, ymd};
+use jiff::civil;
 
 use super::*;
 
-fn at(hour: u32, minute: u32) -> NaiveDateTime {
-    NaiveDate::from_ymd_opt(2026, 10, 29)
-        .and_then(|date| date.and_hms_opt(hour, minute, 0))
+fn at(hour: u32, minute: u32) -> civil::DateTime {
+    ymd(2026, 10, 29)
+        .and_then(|date| {
+            crate::core::util::datetime::hms(hour, minute, 0).map(|time| date.to_datetime(time))
+        })
         .expect("固定日期")
 }
 
-fn local(hour: u32, minute: u32, second: u32) -> DateTime<Local> {
-    Local
-        .with_ymd_and_hms(2026, 10, 29, hour, minute, second)
-        .single()
-        .expect("台北時間沒有夏令時間，時間唯一")
+fn local(hour: u32, minute: u32, second: u32) -> TaipeiDateTime {
+    TaipeiDateTime::from_datetime(
+        crate::core::util::datetime::ymd(2026, 10, 29)
+            .and_then(|day| {
+                crate::core::util::datetime::hms(hour, minute, second)
+                    .map(|time| day.to_datetime(time))
+            })
+            .expect("合法時間"),
+    )
+    .expect("合法時間")
 }
 
-fn up(started: DateTime<Local>, reset: Option<DateTime<Local>>) -> Result<ServerStatus, String> {
+fn up(started: TaipeiDateTime, reset: Option<TaipeiDateTime>) -> Result<ServerStatus, String> {
     Ok(ServerStatus {
         started_at: started,
         stats_reset: reset,
@@ -174,8 +183,8 @@ fn summary_counts_today_and_resets_next_day() {
         Some("資料庫：連不上 2 次（最長約 13 分鐘）、重啟 1 次、啟動於 10-29 22:55")
     );
 
-    let tomorrow = today.succ_opt().expect("隔天");
-    let next_morning = tomorrow.and_hms_opt(0, 5, 0).expect("時間");
+    let tomorrow = today.tomorrow().expect("隔天");
+    let next_morning = tomorrow.at(0, 5, 0, 0);
     watch.observe(up(local(22, 55, 32), None), next_morning);
     assert_eq!(
         watch.summary(tomorrow).as_deref(),
@@ -203,5 +212,5 @@ async fn execute_never_fails() {
 
     execute().await.expect("探測失敗只告警，不回錯誤");
 
-    assert!(daily_summary(Local::now().date_naive()).is_some());
+    assert!(daily_summary(today()).is_some());
 }

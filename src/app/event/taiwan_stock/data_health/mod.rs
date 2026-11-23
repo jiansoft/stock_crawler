@@ -36,10 +36,13 @@
 //! 最後的「本週附註」區塊是參考資訊（不算檢查項目）：慢查詢、異常價格、主機健康、HTTP 異常、取連線過慢
 //! （以上讀檔案日誌）、資料庫啟動時間與資料庫端耗時（`pg_stat_statements`）。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::Weekday;
 use std::fmt::Write;
 
 use anyhow::Result;
-use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 
 use super::closing;
 use crate::{
@@ -76,17 +79,17 @@ use self::rules::*;
 use self::slow_acquire::{slow_acquire_line, weekly_slow_acquires};
 use self::slow_queries::{LOG_DIR, slow_query_line, weekly_slow_queries};
 /// 檢查最近幾個日曆日（含今天）。
-const CHECK_DAYS: u64 = 7;
+const CHECK_DAYS: i64 = 7;
 
 /// 成交檔數的比較基準再往前看幾個日曆日。
-const BASELINE_DAYS: u64 = 21;
+const BASELINE_DAYS: i64 = 21;
 
 /// 月營收在每月這一天之後應已有上個月的資料（法定申報期限為 10 日）。
-const REVENUE_DUE_DAY: u32 = 15;
+const REVENUE_DUE_DAY: i8 = 15;
 
 /// 千張大戶週摘要最多可以幾天沒更新：週六 10:40 抓上週五的資料，週五休市時資料日更早，
 /// 寬限到 9 天才算漏了一週。
-const HOLDER_MAX_AGE_DAYS: u64 = 9;
+const HOLDER_MAX_AGE_DAYS: i64 = 9;
 
 /// 集保全部持股分級最新一週至少要有幾列：每檔 17 列，上市櫃與興櫃約 4,100 檔、69,700 列，
 /// 少了一成多代表只寫進一部分。
@@ -94,11 +97,11 @@ const HOLDER_LEVEL_MIN_ROWS: i64 = 60_000;
 
 /// 董監持股的最新月份不能早於這麼多天前那個月：每月 10～28 日抓上個月的資料，月中前還沒公布
 /// 時最新只到前兩個月，55 天涵蓋這段空窗。
-const INSIDER_MAX_AGE_DAYS: u64 = 55;
+const INSIDER_MAX_AGE_DAYS: i64 = 55;
 
 /// ETF 基本資料最多可以幾天沒更新：週六 12:10 更新，健康週報排在同一天 11:00，
 /// 正常時剛好差 7 天，寬限到 9 天才算漏了一週。
-const ETF_PROFILE_MAX_AGE_DAYS: u64 = 9;
+const ETF_PROFILE_MAX_AGE_DAYS: i64 = 9;
 
 /// 某天的 ETF 淨值列數少於近期最多列數的這個百分比就算漏抓。
 const ETF_NAV_MIN_PERCENT: i64 = 90;
@@ -165,8 +168,8 @@ impl Check {
 
 /// 排程入口：量測近 7 天的資料狀況並發送週報。
 pub async fn execute() -> Result<()> {
-    let (message, statements) = build(Local::now().date_naive()).await?;
-    alert::send_message(&message).await;
+    let (message, statements) = build(today()).await?;
+    alert::notify_system_text(alert::Topic::SystemDataHealth, &message).await;
     // 發送後才存資料庫端累計值，下週的「資料庫端耗時」從這裡算差額。
     if let Some(statements) = statements {
         db_statements::save(db_statements::SNAPSHOT_KEY, &statements).await;
@@ -175,20 +178,26 @@ pub async fn execute() -> Result<()> {
 }
 
 /// 量測截至 `today` 的近 7 天資料狀況，回傳週報內容（不發送，也不更新資料庫端耗時的起點）。
-pub async fn build_report(today: NaiveDate) -> Result<String> {
+pub async fn build_report(today: Date) -> Result<String> {
     build(today).await.map(|(message, _)| message)
 }
 
 /// 週報內容與這次讀到的資料庫端累計值。
-async fn build(today: NaiveDate) -> Result<(String, Option<StatementStats>)> {
+async fn build(today: Date) -> Result<(String, Option<StatementStats>)> {
     let repo = PgDataHealthRepository::new();
-    let from = today - Days::new(CHECK_DAYS - 1);
-    let baseline_from = from - Days::new(BASELINE_DAYS);
+    let from = today - (CHECK_DAYS - 1).days();
+    let baseline_from = from - BASELINE_DAYS.days();
 
     let holidays = fetch_holidays(from, today).await;
-    let profile_due = today - Days::new(ETF_PROFILE_MAX_AGE_DAYS);
+    let profile_due = today - ETF_PROFILE_MAX_AGE_DAYS.days();
     let snapshot = repo
-        .fetch_snapshot(baseline_from, from, today, today.year(), profile_due)
+        .fetch_snapshot(
+            baseline_from,
+            from,
+            today,
+            i32::from(today.year()),
+            profile_due,
+        )
         .await?;
 
     let mut checks = evaluate(&snapshot, from, today, holidays.as_deref());
@@ -236,10 +245,10 @@ fn notes_section(notes: &[String]) -> String {
 
 /// 取得期間內的休市日（證交所讀不到時用 Redis 備份）；任一年度都取不到時回傳 `None`，
 /// 交易日完整性改為只看成交檔數。
-async fn fetch_holidays(from: NaiveDate, to: NaiveDate) -> Option<Vec<NaiveDate>> {
+async fn fetch_holidays(from: Date, to: Date) -> Option<Vec<Date>> {
     let mut holidays = Vec::new();
     for year in from.year()..=to.year() {
-        match twse::holiday_schedule::visit_or_backup(year).await {
+        match twse::holiday_schedule::visit_or_backup(i32::from(year)).await {
             Ok(schedule) => holidays.extend(schedule.into_iter().map(|holiday| holiday.date)),
             Err(why) => {
                 tracing::warn!("取得 {year} 年休市日失敗，略過缺漏交易日檢查: {why:?}");
@@ -253,9 +262,9 @@ async fn fetch_holidays(from: NaiveDate, to: NaiveDate) -> Option<Vec<NaiveDate>
 /// 依量測值判斷每個項目是否正常。`today` 當天還沒收盤，不列入應有交易日。
 fn evaluate(
     snapshot: &DataHealthSnapshot,
-    from: NaiveDate,
-    today: NaiveDate,
-    holidays: Option<&[NaiveDate]>,
+    from: Date,
+    today: Date,
+    holidays: Option<&[Date]>,
 ) -> Vec<Check> {
     let trading_days = trading_days_desc(snapshot);
     vec![
@@ -302,7 +311,7 @@ fn evaluate(
     ]
 }
 
-fn report(from: NaiveDate, to: NaiveDate, checks: &[Check]) -> String {
+fn report(from: Date, to: Date, checks: &[Check]) -> String {
     let problems = checks
         .iter()
         .filter(|check| !check.problems.is_empty())

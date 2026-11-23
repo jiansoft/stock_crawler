@@ -10,6 +10,7 @@ use crate::app::{
     },
     ports::{self, StrategyGateway, StrategyHolding, StrategyRebalance, StrategySettlement},
 };
+use crate::core::util::datetime::today;
 
 /// 所有策略的持股段落與最近一次優勢檢查；個別失敗不影響其餘段落。
 #[derive(Debug, Clone, PartialEq)]
@@ -35,7 +36,7 @@ pub(super) async fn strategy_section() -> Option<StrategySection> {
         std::env::var(QUERY_ENV).ok(),
         std::env::var(NAME_ENV).ok(),
         strategy_edge::load_latest().await,
-        chrono::Local::now().date_naive(),
+        today(),
     )
     .await
 }
@@ -47,7 +48,7 @@ async fn load_section(
     env_query: Option<String>,
     env_name: Option<String>,
     edges: Vec<EdgeRecord>,
-    today: chrono::NaiveDate,
+    today: jiff::civil::Date,
 ) -> Option<StrategySection> {
     let presets = repository.list().await.unwrap_or_else(|error| {
         tracing::warn!("每週市場摘要：讀取具名策略失敗：{error:#}");
@@ -72,7 +73,7 @@ async fn load_section(
 async fn load_positions(
     gateway: &dyn StrategyGateway,
     strategies: &[AlertStrategy],
-    today: chrono::NaiveDate,
+    today: jiff::civil::Date,
 ) -> Vec<StrategyPosition> {
     let mut positions = Vec::new();
     for strategy in strategies {
@@ -92,7 +93,7 @@ async fn load_positions(
             &strategy.name
         };
         let settlement = match gateway
-            .settlement(record_name, today.succ_opt().unwrap_or(today))
+            .settlement(record_name, today.tomorrow().ok().unwrap_or(today))
             .await
         {
             Ok(settlement) => settlement,

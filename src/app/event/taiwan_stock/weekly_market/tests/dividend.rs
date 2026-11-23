@@ -1,5 +1,6 @@
 //! 持股填息一段：讀取時單檔失敗略過、本週填息與未填息缺口排序、run 整合。
 
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -68,7 +69,7 @@ struct FakeFills;
 
 #[async_trait]
 impl DividendFillQuery for FakeFills {
-    async fn fetch_latest_quote_date(&self, _symbol: &str) -> Result<Option<NaiveDate>> {
+    async fn fetch_latest_quote_date(&self, _symbol: &str) -> Result<Option<Date>> {
         unreachable!("週摘要不需要最新收盤日")
     }
 
@@ -84,11 +85,7 @@ impl DividendFillQuery for FakeFills {
         }
     }
 
-    async fn fetch_daily_closes(
-        &self,
-        _symbol: &str,
-        _since: NaiveDate,
-    ) -> Result<Vec<DailyClose>> {
+    async fn fetch_daily_closes(&self, _symbol: &str, _since: Date) -> Result<Vec<DailyClose>> {
         Ok([(9, dec!(100)), (12, dec!(95)), (13, dec!(100))]
             .map(|(d, close)| DailyClose {
                 date: day(d),

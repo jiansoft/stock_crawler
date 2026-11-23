@@ -5,9 +5,6 @@
 use std::{error::Error, time::Instant};
 
 use tokio::task::JoinHandle;
-// tokio-cron-scheduler 是基於 Tokio 的非同步 cron 排程器，支援標準 cron 語法。
-// 每個 job 在到期時以非同步 task 形式在 Tokio 執行緒池中執行，不阻塞主執行緒。
-use tokio_cron_scheduler::JobScheduler;
 
 use stock_crawler::{app, core, infra, interfaces};
 
@@ -16,7 +13,7 @@ pub(crate) struct Running {
     /// 收到關機訊號後通知 HTTP／gRPC 停止接受新連線。
     pub(crate) shutdown_tx: tokio::sync::watch::Sender<bool>,
     /// 已啟動的排程器。
-    pub(crate) sched: JobScheduler,
+    pub(crate) sched: core::cron::CronScheduler,
     /// gRPC 伺服器 task；`grpc_use_port` 為 0 時沒有。
     pub(crate) rpc_server: Option<JoinHandle<anyhow::Result<()>>>,
     /// Web 伺服器 task。
@@ -70,7 +67,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
     if let Err(e) = infra::database::ping().await {
         let err_msg = format!("Failed to connect to database: {:?}", e);
         tracing::error!("{}", &err_msg);
-        interfaces::bot::telegram::send_alert("資料庫連線失敗（主機啟動異常）", &err_msg).await;
+        core::alert::notify_system(
+            core::alert::Topic::SystemCritical,
+            "資料庫連線失敗（主機啟動異常）",
+            &err_msg,
+        )
+        .await;
         return Err(err_msg.into());
     }
     tracing::info!("startup database check: database is online");
@@ -110,28 +112,39 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         Err(why) => {
             let err_msg = format!("Failed to load required caches: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("核心快取載入失敗（主機啟動異常）", &err_msg)
-                .await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "核心快取載入失敗（主機啟動異常）",
+                &err_msg,
+            )
+            .await;
             return Err(err_msg.into());
         }
     }
 
+    // ── 8.5 通知項目目錄寫入 notify_topic（會員系統計畫 7.3）──────────────
+    // 設定頁依這張表產生開關；寫入失敗只記錄，不影響爬蟲與通知（N1 仍送設定檔的聊天室）。
+    match infra::database::repository::notify_topic::upsert_catalog(
+        infra::database::get_connection(),
+    )
+    .await
+    {
+        Ok(rows) => tracing::info!("startup notify_topic upsert done: rows={rows}"),
+        Err(why) => tracing::warn!("startup notify_topic upsert failed: {why:#}"),
+    }
+
+    // 送達對帳與系統路由刷新不依賴每日排程；資料庫暫時故障只記錄，沿用最後快照。
+    app::notify_delivery::spawn_reconciliation();
+    app::notify_common::spawn_refresh();
+
     // ── 9. 排程器建立 ───────────────────────────────────────────────────────
-    // `JobScheduler::new()` 建立 tokio-cron-scheduler 實例，但尚未啟動任何 job。
-    // 內部會建立 Tokio channel 與背景輪詢 task，因此需要 .await。
-    // `?` 操作子：若建立失敗（極罕見，通常是 Tokio runtime 問題）直接向上回傳錯誤。
-    tracing::info!("startup phase begin: JobScheduler::new");
-    let scheduler_new_timer = Instant::now();
-    let sched = JobScheduler::new().await?;
-    tracing::info!(
-        "startup phase done: JobScheduler::new elapsed={:?}",
-        scheduler_new_timer.elapsed()
-    );
+    // `CronScheduler::new()` 只建立空的任務清單，start 之前不會啟動任何背景迴圈。
+    let sched = core::cron::CronScheduler::new();
 
     // ── 10. 排程任務註冊與啟動 ──────────────────────────────────────────────
     // `app::scheduler::start(&sched)` 把所有 cron job 加進 `sched`，並呼叫
-    // `sched.start()` 讓排程器的背景執行緒開始輪詢到期任務。
-    // 所有 cron 表達式皆為 UTC 時區（台灣 UTC+8 自行換算，例如 09:00 TWN = 01:00 UTC）。
+    // `sched.start()` 為每個任務啟動等待下次觸發的背景迴圈。
+    // 所有 cron 表達式皆為台北時間（UTC+8），由 core::cron 固定以 +8 解讀。
     // 若其中一個 job 註冊失敗，整體回傳 Err 並中止啟動，避免部分任務靜默遺失。
     tracing::info!("startup phase begin: scheduler::start");
     let scheduler_start_timer = Instant::now();
@@ -154,7 +167,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         Err(why) => {
             let err_msg = format!("gRPC server failed to start: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("gRPC 伺服器啟動失敗", &err_msg).await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "gRPC 伺服器啟動失敗",
+                &err_msg,
+            )
+            .await;
             return Err(why.into());
         }
     };
@@ -174,7 +192,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         Err(why) => {
             let err_msg = format!("Web server failed to start: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("Web 伺服器啟動失敗", &err_msg).await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "Web 伺服器啟動失敗",
+                &err_msg,
+            )
+            .await;
             return Err(why.into());
         }
     };
@@ -198,7 +221,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         if let Err(why) = interfaces::rpc::client::test_client::run_test().await {
             let err_msg = format!("gRPC 自我測試失敗: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("gRPC 自我測試失敗", &err_msg).await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "gRPC 自我測試失敗",
+                &err_msg,
+            )
+            .await;
         }
     });
 
@@ -216,7 +244,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         Err(why) => {
             let err_msg = format!("Redis ping failed at startup: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("Redis 快取連線失敗", &err_msg).await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "Redis 快取連線失敗",
+                &err_msg,
+            )
+            .await;
         }
     }
 

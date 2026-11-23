@@ -9,31 +9,31 @@
 //! 以及最新月營收、最近一季三率與基本面警示（規則在 [`crate::domain::portfolio::health`]）：
 //! 月營收超過 2 個月沒更新、財報落後超過 2 季視為過期。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::Query,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::institutional_flow::{StreakRow, load_streaks};
 use super::relative_strength::{ScoredStock, load_scores};
-use super::{
-    analytical_decimal_to_f64, database_error, error_response, format_month, repository_error,
-};
+use super::{analytical_decimal_to_f64, database_error, format_month, repository_error};
 use crate::domain::portfolio::health::{HoldingFundamentals, HoldingFundamentalsQuery};
 use crate::domain::portfolio::summary::{self, Position};
+use crate::domain::portfolio::view::HoldingView;
+use crate::infra::database::repository::holding_view;
 use crate::infra::database::{self, repository::portfolio::PgPortfolioRepository};
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, PortfolioHolding, PortfolioSummaryParams, PortfolioSummaryResponse,
     margin_trend_code, warning_code,
 };
 
-/// 依代號合併的持有部位與各項指標；`$1 = 0` 時為全部會員。
+/// 依代號合併的持有部位與各項指標；`$1` 為範圍內的會員編號。
 const POSITIONS_SQL: &str = r#"
 WITH held AS (
     SELECT security_code AS stock_symbol,
@@ -41,7 +41,7 @@ WITH held AS (
         -SUM(holding_cost) AS cost,
         SUM(COALESCE(cumulate_dividends_total, 0)) AS dividends_received
     FROM stock_ownership_details
-    WHERE NOT is_sold AND ($1::bigint = 0 OR member_id = $1)
+    WHERE NOT is_sold AND member_id = ANY($1)
     GROUP BY security_code
 )
 SELECT held.stock_symbol, held.shares, held.cost, held.dividends_received,
@@ -79,7 +79,8 @@ struct PositionRow {
     name: String,
     industry_id: Option<i32>,
     industry_name: String,
-    quote_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    quote_date: Option<Date>,
     closing_price: Option<Decimal>,
     dividend_yield_percent: Option<Decimal>,
     f_score: Option<i16>,
@@ -124,15 +125,20 @@ fn apply_fundamentals(fundamentals: HoldingFundamentals, holding: &mut Portfolio
 /// `member_id` 為負數回 422、驗證失敗回 401；資料庫查詢失敗時記錄內部錯誤並回不含
 /// SQL 細節的 500。沒有持股的會員回 200 與空清單。
 #[utoipa::path(get, path = "/api/v1/portfolio/summary", tag = "data-api", params(PortfolioSummaryParams), responses((status = 200, body = PortfolioSummaryResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn portfolio_summary(Query(params): Query<PortfolioSummaryParams>) -> Response {
-    let member_id = params.member_id.unwrap_or(0);
-    if member_id < 0 {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
-    }
-    let today = Local::now().date_naive();
+pub(crate) async fn portfolio_summary(
+    Extension(view): Extension<HoldingView>,
+    Query(_params): Query<PortfolioSummaryParams>,
+) -> Response {
+    // 範圍由 scope middleware 驗證後放進 extension（家庭全體或單一成員，7.6 N2）。
+    let member_id = view.member_id_or_total();
+    let members = match holding_view::member_ids(&view).await {
+        Ok(members) => members,
+        Err(error) => return repository_error(error),
+    };
+    let today = today();
     let (rows, scores, streaks) = tokio::join!(
         sqlx::query_as::<_, PositionRow>(POSITIONS_SQL)
-            .bind(member_id)
+            .bind(&members)
             .fetch_all(database::get_connection()),
         load_scores(today),
         load_streaks(today),
@@ -165,8 +171,8 @@ pub(crate) async fn portfolio_summary(Query(params): Query<PortfolioSummaryParam
 /// 依代號把相對強度分數與連續買賣超天數附到各持股，並填入兩者的資料日。
 fn attach_indicators(
     response: &mut PortfolioSummaryResponse,
-    scores: Option<(NaiveDate, Vec<ScoredStock>)>,
-    streaks: Option<(NaiveDate, Vec<StreakRow>)>,
+    scores: Option<(Date, Vec<ScoredStock>)>,
+    streaks: Option<(Date, Vec<StreakRow>)>,
 ) {
     let mut rs_scores = HashMap::new();
     if let Some((date, scored)) = scores {

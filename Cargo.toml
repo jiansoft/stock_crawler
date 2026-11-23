@@ -44,8 +44,9 @@ linker_messages = "allow"
 anyhow = "1.0"
 async-trait = "0.1"
 axum = "0.8"
-chrono = { version = "0.4", features = ["serde"] }
 concat-string = "1.0.1"
+# cron 表達式解析（排程器見 core::cron）；關掉預設的 chrono 支援，改用 jiff。
+croner = { version = "5", default-features = false, features = ["std", "jiff"] }
 #crossbeam = "0.8"
 #crossbeam-channel = "0.5"
 deadpool-redis = "0.23"
@@ -54,6 +55,9 @@ dotenvy = "0.15"
 encoding_rs = "0.8"
 futures ="0.3"
 hashbrown = "0.17"
+# 日期時間：chrono 已停止維護（RUSTSEC-2026-0543），改用 jiff；jiff-sqlx 提供 PostgreSQL 型別對應。
+jiff = { version = "1.0", features = ["serde"] }
+jiff-sqlx = { version = "1.0", features = ["postgres"] }
 #hex = "0.4"
 #lazy_static = "1.5"
 # 只用 LevelFilter 設定 sqlx 慢查詢門檻（sqlx 的 log_slow_statements 參數型別）。
@@ -79,14 +83,13 @@ scraper = "0.29"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 #sha2 = { version = "0.11", features = [] }
-# type feature 僅保留實際使用的 chrono/rust_decimal（bigdecimal/time 未使用）；
+# type feature 僅保留實際使用的 rust_decimal（日期時間由 jiff-sqlx 處理；bigdecimal/time/chrono 未使用）；
 # 專案只用 FromRow/Type 這類 derive，未使用 query! 巨集，因此以 "derive" 取代 "macros"。
-sqlx = { version = "0.9", features = [ "runtime-tokio", "postgres", "chrono", "derive", "rust_decimal"] }
+sqlx = { version = "0.9", features = [ "runtime-tokio", "postgres", "derive", "rust_decimal"] }
 strum = { version = "0.28", features = ["derive"]}
 # 收斂 "full"：僅列出本 crate 直接用到的功能（rt/巨集/訊號/同步原語/計時器/net）。
 # sqlx、tonic、axum 等相依會自行帶入各自需要的 tokio feature，Cargo 會取聯集。
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "process"] }
-tokio-cron-scheduler = "0.15"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 #tokio-test = "0.4"
@@ -99,7 +102,7 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 subtle = "2.6"
-utoipa = { version = "6", features = ["axum_extras", "chrono"] }
+utoipa = { version = "6", features = ["axum_extras"] }
 #utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "10", features = ["axum"] }
 x509-parser = "0.18"

@@ -18,6 +18,8 @@
 //! 異常時發 Telegram，同一類異常 [`ALERT_COOLDOWN_HOURS`] 小時內只發一次；每天 23:30 記一行當日彙總
 //! （[`summarize`]），供日後比對。只讀取與告警，不調整系統設定。檔案不存在（本機開發、CI）的項目略過。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::today;
 use std::{
     collections::HashMap,
     io::Write,
@@ -30,7 +32,6 @@ use std::{
 };
 
 use anyhow::Result;
-use chrono::{Local, NaiveDate, NaiveDateTime};
 use once_cell::sync::Lazy;
 
 use crate::core::{alert, logging};
@@ -280,7 +281,7 @@ static PROBING: Lazy<Arc<AtomicBool>> = Lazy::new(|| Arc::new(AtomicBool::new(fa
 /// 不會回傳錯誤：讀不到的項目略過，告警失敗由告警管道自行記錄。
 pub async fn execute() -> Result<()> {
     let sample = collect(&Paths::default(), &PROBING, PROBE_TIMEOUT).await;
-    let now = Local::now().naive_local();
+    let now = TaipeiDateTime::now().datetime();
     let alerts = match (GATE.lock(), STATS.lock()) {
         (Ok(mut gate), Ok(mut stats)) => plan_alerts(&sample, now, &mut gate, &mut stats),
         _ => {
@@ -289,7 +290,7 @@ pub async fn execute() -> Result<()> {
         }
     };
     for message in alerts {
-        alert::send_alert("pi 主機健康異常", &message).await;
+        alert::notify_system(alert::Topic::SystemHostHealth, "pi 主機健康異常", &message).await;
     }
     Ok(())
 }
@@ -302,7 +303,7 @@ pub async fn execute() -> Result<()> {
 ///
 /// 不會回傳錯誤。
 pub async fn summarize() -> Result<()> {
-    let today = Local::now().date_naive();
+    let today = today();
     let summary = STATS.lock().ok().and_then(|stats| stats.summary(today));
     let slow = logging::slow_query::daily_summary(today);
     let slow = match super::db_health::daily_summary(today) {

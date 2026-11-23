@@ -1,7 +1,9 @@
 //! `DailyQuote` 的均線與年內統計：依日期回填、整段重算與批次更新（含 PBR）。
 
 use anyhow::{Context, Result, anyhow};
-use chrono::{NaiveDate, TimeDelta};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use sqlx::{Row, postgres::PgQueryResult};
 
 use crate::infra::database;
@@ -19,7 +21,7 @@ impl DailyQuote {
     pub async fn fill_moving_average(&mut self) -> Result<()> {
         // 往回抓 400 個「日曆日」作為查詢下限——扣除週末與假日後，
         // 足以涵蓋 240 個「交易日」的樣本需求。
-        let year_ago = self.date - TimeDelta::try_days(400).unwrap();
+        let year_ago = self.date - 400.days();
         let sql = r#"
 WITH
 cte AS (
@@ -44,8 +46,8 @@ SELECT
         "#;
         sqlx::query(sql)
             .bind(&self.stock_symbol)
-            .bind(self.date)
-            .bind(year_ago)
+            .bind(self.date.to_sqlx())
+            .bind(year_ago.to_sqlx())
             .try_map(|row: sqlx::postgres::PgRow| {
                 self.moving_average_5 = row.get("MovingAverage5");
                 self.moving_average_10 = row.get("MovingAverage10");
@@ -54,9 +56,11 @@ SELECT
                 self.moving_average_120 = row.get("MovingAverage120");
                 self.moving_average_240 = row.get("MovingAverage240");
                 self.maximum_price_in_year = row.get("maximum_price_in_year");
-                self.maximum_price_in_year_date_on = row.get("maximum_price_in_year_date_on");
+                self.maximum_price_in_year_date_on =
+                    crate::infra::database::jiff_types::get(&row, "maximum_price_in_year_date_on");
                 self.minimum_price_in_year = row.get("minimum_price_in_year");
-                self.minimum_price_in_year_date_on = row.get("minimum_price_in_year_date_on");
+                self.minimum_price_in_year_date_on =
+                    crate::infra::database::jiff_types::get(&row, "minimum_price_in_year_date_on");
                 self.average_price_in_year = row.get("average_price_in_year");
 
                 Ok(())
@@ -79,10 +83,7 @@ SELECT
     ///
     /// 只更新數值有變的列（`IS DISTINCT FROM`），重跑不會產生多餘寫入；
     /// 股價淨值比與日報價本身不動。回傳實際更新的列數。
-    pub async fn recalculate_moving_averages(
-        stock_symbols: &[String],
-        from: NaiveDate,
-    ) -> Result<u64> {
+    pub async fn recalculate_moving_averages(stock_symbols: &[String], from: Date) -> Result<u64> {
         if stock_symbols.is_empty() {
             return Ok(0);
         }
@@ -155,7 +156,7 @@ WHERE dq."Serial" = k."Serial"
 
         let result = sqlx::query(sql)
             .bind(stock_symbols)
-            .bind(from)
+            .bind(from.to_sqlx())
             .execute(database::get_connection())
             .await
             .with_context(|| {
@@ -240,8 +241,18 @@ WHERE dq."Serial" = k."Serial"
             .bind(&max_p)
             .bind(&min_p)
             .bind(&avg_p)
-            .bind(&max_d)
-            .bind(&min_d)
+            .bind(
+                max_d
+                    .iter()
+                    .map(|value| value.to_sqlx())
+                    .collect::<Vec<_>>(),
+            )
+            .bind(
+                min_d
+                    .iter()
+                    .map(|value| value.to_sqlx())
+                    .collect::<Vec<_>>(),
+            )
             .bind(&pbr)
             .execute(database::get_connection())
             .await

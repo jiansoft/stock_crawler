@@ -1,5 +1,6 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
+use jiff::ToSpan;
 use rust_decimal::Decimal;
 use sqlx::{
     Row,
@@ -38,7 +39,7 @@ pub struct Revenue {
     /// 那個月份的營收
     pub date: i64,
     /// 建立時間。
-    pub create_time: DateTime<Local>,
+    pub create_time: TaipeiDateTime,
 }
 
 impl Revenue {
@@ -58,7 +59,7 @@ impl Revenue {
             lowest_price: Default::default(),
             highest_price: Default::default(),
             date: 0,
-            create_time: Local::now(),
+            create_time: TaipeiDateTime::now(),
         }
     }
 
@@ -136,31 +137,20 @@ impl Default for Revenue {
 /// # Errors
 /// 當查詢失敗時回傳錯誤。
 pub async fn fetch_last_two_month() -> Result<Vec<Revenue>> {
-    fetch_last_two_months_before(Local::now()).await
+    fetch_last_two_months_before(TaipeiDateTime::now()).await
 }
 
 /// [`fetch_last_two_month`] 的本體：`now` 所在月份的前兩個月（`yyyyMM`）。
 ///
 /// # Errors
 /// 當查詢失敗時回傳錯誤。
-pub(crate) async fn fetch_last_two_months_before(now: DateTime<Local>) -> Result<Vec<Revenue>> {
-    let now_first_day = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap();
-    let last_month = now_first_day - TimeDelta::try_minutes(1).unwrap();
-    let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-    let last_month_timezone = timezone.from_local_datetime(&last_month).unwrap();
-    let two_month_ago_first_day = NaiveDate::from_ymd_opt(last_month.year(), last_month.month(), 1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap();
-    let two_month_ago = two_month_ago_first_day - TimeDelta::try_minutes(1).unwrap();
-    let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-    let two_month_ago_timezone = timezone.from_local_datetime(&two_month_ago).unwrap();
-    let last_month_int = (last_month_timezone.year() * 100) + last_month_timezone.month() as i32;
+pub(crate) async fn fetch_last_two_months_before(now: TaipeiDateTime) -> Result<Vec<Revenue>> {
+    // 本月 1 日的前一天落在上個月，上個月 1 日的前一天落在前兩個月
+    let last_month = now.date().first_of_month() - 1.day();
+    let two_month_ago = last_month.first_of_month() - 1.day();
+    let last_month_int = i32::from(last_month.year()) * 100 + i32::from(last_month.month());
     let two_month_ago_int =
-        (two_month_ago_timezone.year() * 100) + two_month_ago_timezone.month() as i32;
+        i32::from(two_month_ago.year()) * 100 + i32::from(two_month_ago.month());
     let revenue = sqlx::query(
         r#"
 select

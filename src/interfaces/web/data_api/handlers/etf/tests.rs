@@ -3,6 +3,7 @@
 use super::compare::*;
 use super::*;
 use crate::domain::etf::query::EtfNavDay;
+use jiff::civil::date;
 
 #[test]
 fn list_filter_validates_and_defaults() {
@@ -95,7 +96,7 @@ fn compare_symbols_normalize_and_validate() {
 
 #[test]
 fn compare_response_lists_items_and_pairwise_overlap() {
-    let day = NaiveDate::from_ymd_opt(2026, 10, 1).expect("日期合法");
+    let day = date(2026, 10, 1);
     let holding = |symbol: &str, label: &str, weight: f64| EtfWeightRow {
         kind: "holding".to_owned(),
         as_of: day,
@@ -169,7 +170,7 @@ fn symbol_must_be_short_alphanumeric() {
 
 #[test]
 fn detail_response_splits_blocks_and_rounds() {
-    let day = NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期合法");
+    let day = date(2026, 10, 21);
     let weight = |kind: &str, label: &str, weight: f64| EtfWeightRow {
         kind: kind.to_owned(),
         as_of: day,

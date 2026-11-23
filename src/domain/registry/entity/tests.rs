@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal_macros::dec;
 
 #[test]
@@ -48,7 +49,7 @@ fn test_stock_register() {
 
 #[test]
 fn test_stock_reconstitute() {
-    let created_time = Local::now();
+    let created_time = TaipeiDateTime::now();
     let stock = Stock::reconstitute(
         "2330".to_string(),
         "台積電".to_string(),

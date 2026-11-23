@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
 use futures::{StreamExt, stream};
+use jiff::civil::Date;
 
 use super::portfolio::{self, PeriodCost};
 use super::{ETF_BENCHMARK, PeriodRow, round2, round4};
@@ -62,7 +62,7 @@ pub(super) fn exited(row: &PeriodRow, previous: Option<&PeriodRow>) -> Vec<(Stri
 pub(super) fn return_since(
     bars: &[PriceBar],
     adjustments: &[PriceAdjustment],
-    since: NaiveDate,
+    since: Date,
 ) -> Option<f64> {
     let adjusted = adjust_bars(bars, adjustments);
     let base = adjusted.iter().rev().find(|bar| bar.date <= since)?;
@@ -74,7 +74,7 @@ pub(super) fn return_since(
 /// 股票記 warning 後略過。
 pub(super) async fn returns_to_date(
     row: &PeriodRow,
-    until: NaiveDate,
+    until: Date,
     elapsed: i64,
 ) -> HashMap<String, f64> {
     let symbols: Vec<String> = row

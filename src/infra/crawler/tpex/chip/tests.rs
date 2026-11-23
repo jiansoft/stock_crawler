@@ -1,16 +1,14 @@
 //! 上櫃股票的三大法人買賣超與融資融券餘額的測試；連外的測試標 #[ignore]。
 
 use super::*;
+use jiff::civil::date;
 
 const INSTITUTIONAL_FIXTURE: &str = include_str!("../testdata/institutional_3itrade.json");
 const MARGIN_FIXTURE: &str = include_str!("../testdata/margin_balance.json");
 
 #[test]
 fn roc_date_formats_the_query_parameter() {
-    assert_eq!(
-        roc_date(NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()),
-        "115/10/05"
-    );
+    assert_eq!(roc_date(date(2026, 10, 5)), "115/10/05");
 }
 
 /// 5347 2026-10-05：外資合計 −2,851,652 股、投信 350,024、自營合計 −44,678，合計等於最後一欄。
@@ -55,7 +53,7 @@ fn empty_tables_yield_empty_maps() {
 #[ignore = "live test：連線真實外部網站，需要時手動執行"]
 async fn test_visit() {
     dotenvy::dotenv().ok();
-    let date = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+    let date = date(2026, 10, 5);
     let flows = visit_institutional(date).await.expect("三大法人");
     let margins = visit_margin(date).await.expect("融資融券");
     dbg!(

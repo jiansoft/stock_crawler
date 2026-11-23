@@ -1,9 +1,11 @@
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn default_date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()
+fn default_date() -> Date {
+    date(1970, 1, 1)
 }
 
 #[test]
@@ -21,7 +23,7 @@ fn new_sets_stock_symbol_and_default_key_fields() {
 #[test]
 fn key_and_key_with_prefix_use_date_and_symbol() {
     let mut quote = DailyQuote::new("2330");
-    quote.date = NaiveDate::from_ymd_opt(2025, 2, 3).unwrap();
+    quote.date = date(2025, 2, 3);
 
     assert_eq!(quote.key(), "20250203-2330");
     assert_eq!(quote.key_with_prefix(), "DailyQuote:20250203-2330");
@@ -103,9 +105,9 @@ fn from_with_exchange_tpex_maps_quote_fields() {
 #[test]
 fn to_csv_contains_expected_columns_and_trailing_newline() {
     let mut quote = DailyQuote::new("2330");
-    quote.date = NaiveDate::from_ymd_opt(2025, 2, 3).unwrap();
-    quote.maximum_price_in_year_date_on = NaiveDate::from_ymd_opt(2025, 2, 1).unwrap();
-    quote.minimum_price_in_year_date_on = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+    quote.date = date(2025, 2, 3);
+    quote.maximum_price_in_year_date_on = date(2025, 2, 1);
+    quote.minimum_price_in_year_date_on = date(2025, 1, 2);
     quote.closing_price = dec!(955.5);
     quote.change = dec!(-12.5);
     quote.year = 2025;

@@ -1,7 +1,8 @@
 //! `financial_statement` 的測試：模型與各來源轉換（純單元測試），
 //! 以及寫入／查詢的整合測試（需要 PostgreSQL）。
 
-use chrono::{Datelike, NaiveDate};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 use std::time;
 
 use rust_decimal_macros::dec;
@@ -168,8 +169,8 @@ fn test_statement(quarter: &str, eps: Decimal) -> FinancialStatement {
     statement.quarter = quarter.to_string();
     statement.earnings_per_share = eps;
     statement.gross_profit = dec!(30.5);
-    statement.created_time = Local::now();
-    statement.updated_time = Local::now();
+    statement.created_time = TaipeiDateTime::now();
+    statement.updated_time = TaipeiDateTime::now();
     statement
 }
 
@@ -226,8 +227,8 @@ async fn mutations_round_trip() {
     eps_only.year = TEST_YEAR;
     eps_only.quarter = "Q2".to_string();
     eps_only.earnings_per_share = dec!(2.40);
-    eps_only.created_time = Local::now();
-    eps_only.updated_time = Local::now();
+    eps_only.created_time = TaipeiDateTime::now();
+    eps_only.updated_time = TaipeiDateTime::now();
     eps_only
         .upsert_earnings_per_share()
         .await
@@ -326,8 +327,8 @@ async fn test_fetch_without_annual() {
     dotenvy::dotenv().ok();
     tracing::debug!("開始 fetch_without_annual");
 
-    let current_date = NaiveDate::parse_from_str("2023-09-15", "%Y-%m-%d").unwrap();
-    let r = fetch_without_annual(current_date.year()).await;
+    let current_date = Date::strptime("%Y-%m-%d", "2023-09-15").unwrap();
+    let r = fetch_without_annual(i32::from(current_date.year())).await;
     match r {
         Ok(result) => {
             //dbg!(&result);

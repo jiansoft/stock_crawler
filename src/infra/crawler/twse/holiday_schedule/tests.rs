@@ -1,8 +1,10 @@
 //! holiday_schedule的測試；連外的測試標 #[ignore]。
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::ymd;
 use crate::infra::cache::SHARE;
-use chrono::Datelike;
+use jiff::civil::date;
 
 #[test]
 fn test_parse_holiday_data_filters_opening_day() {
@@ -26,12 +28,9 @@ fn test_parse_holiday_data_filters_opening_day() {
     ];
     let result = parse_holiday_data(&data);
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].date, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+    assert_eq!(result[0].date, date(2026, 1, 1));
     assert_eq!(result[0].why, "中華民國開國紀念日");
-    assert_eq!(
-        result[1].date,
-        NaiveDate::from_ymd_opt(2026, 2, 27).unwrap()
-    );
+    assert_eq!(result[1].date, date(2026, 2, 27));
 }
 
 #[test]
@@ -46,10 +45,7 @@ fn test_parse_holiday_data_skips_invalid_date() {
     ];
     let result = parse_holiday_data(&data);
     assert_eq!(result.len(), 1);
-    assert_eq!(
-        result[0].date,
-        NaiveDate::from_ymd_opt(2026, 12, 25).unwrap()
-    );
+    assert_eq!(result[0].date, date(2026, 12, 25));
 }
 
 #[test]
@@ -81,7 +77,7 @@ mod backup {
 
     fn holiday(year: i32) -> HolidaySchedule {
         HolidaySchedule {
-            date: NaiveDate::from_ymd_opt(year, 10, 10).expect("有效日期"),
+            date: ymd(year, 10, 10).expect("有效日期"),
             why: "國慶日".to_string(),
         }
     }
@@ -100,12 +96,12 @@ mod backup {
     /// 只備份去年以後的年度；測試程式一律不寫。
     #[test]
     fn only_recent_years_are_backed_up() {
-        let year = Local::now().year();
-        assert!(is_backed_up_year(year));
-        assert!(is_backed_up_year(year - 1));
-        assert!(!is_backed_up_year(year - 2));
+        let year = TaipeiDateTime::now().year();
+        assert!(is_backed_up_year(i32::from(year)));
+        assert!(is_backed_up_year(i32::from(year - 1)));
+        assert!(!is_backed_up_year(i32::from(year - 2)));
         assert!(
-            !should_back_up(year, &[holiday(year)]),
+            !should_back_up(i32::from(year), &[holiday(i32::from(year))]),
             "測試的 mock 休市日表不能寫進 Redis"
         );
     }
@@ -162,8 +158,8 @@ async fn test_visit() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
     tracing::debug!("開始 visit");
-    let now = Local::now();
-    match visit(now.date_naive().year()).await {
+    let now = TaipeiDateTime::now();
+    match visit(i32::from(now.date().year())).await {
         Ok(list) => {
             dbg!(&list);
             tracing::debug!("list:{:#?}", list);

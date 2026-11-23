@@ -2,8 +2,11 @@
 
 mod stock_signals;
 
+use crate::core::util::datetime::ymd;
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
@@ -30,8 +33,8 @@ const RETURNS: [(u32, &str, i64, Option<i64>); 6] = [
     (2, "79979PC", 3, None),
 ];
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1991, 10, d).expect("固定日期合法")
+fn day(d: u32) -> Date {
+    ymd(1991, 10, d).expect("固定日期合法")
 }
 
 /// 刪除種入的訊號、報酬、日報價與股票主檔。
@@ -48,8 +51,8 @@ async fn cleanup(pool: &sqlx::PgPool) {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
     }
     crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
-        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
-        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+        date(1980, 1, 1),
+        date(1999, 12, 31),
     )
     .await
     .expect("重算大盤彙總");
@@ -72,7 +75,7 @@ async fn seed(pool: &sqlx::PgPool) {
         r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "ChangeRange")
            VALUES ($1, '79979PA', 50, 1.5)"#,
     )
-    .bind(day(1))
+    .bind(day(1).to_sqlx())
     .execute(pool)
     .await
     .expect("種入日報價");
@@ -81,7 +84,7 @@ async fn seed(pool: &sqlx::PgPool) {
             "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
              VALUES ($1, $2, $3, $4, $2 || ' ' || $4)",
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(symbol)
         .bind(indicator)
         .bind(kind)
@@ -94,7 +97,7 @@ async fn seed(pool: &sqlx::PgPool) {
             "INSERT INTO daily_forward_return (date, stock_symbol, return_5d, return_20d)
              VALUES ($1, $2, $3, $4)",
         )
-        .bind(day(d))
+        .bind(day(d).to_sqlx())
         .bind(symbol)
         .bind(Decimal::from(r5))
         .bind(r20.map(Decimal::from))
@@ -105,14 +108,14 @@ async fn seed(pool: &sqlx::PgPool) {
     sqlx::query(
         "UPDATE daily_forward_return SET return_240d = 30 WHERE stock_symbol = '79979PA' AND date = $1",
     )
-    .bind(day(1))
+    .bind(day(1).to_sqlx())
     .execute(pool)
     .await
     .expect("種入 240 日報酬");
     // 大盤基準讀每日彙總表，種完未來報酬要重算。
     crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
-        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
-        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+        date(1980, 1, 1),
+        date(1999, 12, 31),
     )
     .await
     .expect("重算大盤彙總");
@@ -121,8 +124,8 @@ async fn seed(pool: &sqlx::PgPool) {
         "INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
          VALUES ($1, '79979PA', 9, 90, 1, 2), ($1, '79979PB', 4, 40, 2, 2), ($2, '79979PA', 7, 70, 1, 1)",
     )
-    .bind(day(1))
-    .bind(day(2))
+    .bind(day(1).to_sqlx())
+    .bind(day(2).to_sqlx())
     .execute(pool)
     .await
     .expect("種入相對強度");
@@ -298,8 +301,8 @@ async fn signal_performance_endpoint_db_semantics() {
     .await
     .expect("種入跨年報酬");
     crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
-        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
-        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+        date(1980, 1, 1),
+        date(1999, 12, 31),
     )
     .await
     .expect("重算大盤彙總");

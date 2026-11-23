@@ -1,6 +1,8 @@
 //! 證券主檔的財報指標：近四季 EPS／ROE 回寫，以及每股淨值為零、缺季報的清單。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
+use jiff::ToSpan;
 
 use crate::domain::registry::entity::Stock;
 use crate::infra::database;
@@ -60,9 +62,8 @@ JOIN
 WHERE
     current_row.security_code = stocks.stock_symbol;
 "#;
-    use chrono::{Datelike, Local, TimeDelta};
-    let now = Local::now();
-    let one_year_ago = now - TimeDelta::try_days(365).unwrap();
+    let now = TaipeiDateTime::now();
+    let one_year_ago = now - 365.days();
 
     sqlx::query(sql)
         .bind(now.year())

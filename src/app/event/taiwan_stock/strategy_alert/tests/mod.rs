@@ -8,18 +8,21 @@ mod message;
 mod notify;
 mod presets;
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use std::sync::Mutex;
 
 use anyhow::bail;
 use async_trait::async_trait;
 
-use super::message::build_message;
+use super::message::{build_message, overlap_message};
 use super::*;
 use crate::app::ports::{StrategyHolding, StrategySettlement};
 use crate::domain::portfolio::health::{FundamentalSignals, HoldingFundamentals};
 
-pub(super) fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("固定日期合法")
+pub(super) fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("固定日期合法")
 }
 
 pub(in crate::app::event::taiwan_stock) fn holding(
@@ -81,6 +84,22 @@ impl HoldingFundamentalsQuery for FakeFundamentals {
     }
 }
 
+/// 持股段的替身：記錄被要求產生對照的策略與換股日，不查任何持股。
+#[derive(Default)]
+pub(super) struct FakeOverlap {
+    pub(super) calls: Mutex<Vec<(String, Date)>>,
+}
+
+#[async_trait]
+impl OverlapNotifier for FakeOverlap {
+    async fn notify_overlap(&self, rebalance: &StrategyRebalance, name: &str) {
+        self.calls
+            .lock()
+            .expect("鎖未中毒")
+            .push((name.to_owned(), rebalance.date));
+    }
+}
+
 /// 記下寫入的換股紀錄。
 #[derive(Default)]
 pub(super) struct FakeRecorder {
@@ -105,7 +124,7 @@ pub(super) struct FakeGateway {
     pub(super) fail: bool,
     pub(super) settlement: Option<StrategySettlement>,
     pub(super) settlement_fail: bool,
-    pub(super) settled: Mutex<Vec<(String, NaiveDate)>>,
+    pub(super) settled: Mutex<Vec<(String, Date)>>,
     pub(super) queries: Mutex<Vec<String>>,
 }
 
@@ -125,7 +144,7 @@ impl StrategyGateway for FakeGateway {
     async fn settlement(
         &self,
         preset_name: &str,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Option<StrategySettlement>> {
         self.settled
             .lock()
@@ -151,15 +170,34 @@ pub(super) fn gateway(result: Option<StrategyRebalance>) -> FakeGateway {
 
 pub(super) fn settlement(etf_weight: u8) -> StrategySettlement {
     StrategySettlement {
-        start: NaiveDate::from_ymd_opt(2026, 9, 17).expect("固定日期合法"),
+        start: date(2026, 9, 17),
         end: day(16),
         strategy_return: Some(2.034),
         etf_return: Some(-4.21),
         portfolio_return: Some(-1.09),
         etf_weight,
-        tracked_from: NaiveDate::from_ymd_opt(2026, 8, 19).expect("固定日期合法"),
+        tracked_from: date(2026, 8, 19),
         periods: 2,
         cumulative_return: Some(5.5),
         etf_cumulative_return: Some(1.25),
     }
+}
+
+/// 正式的持股段：依收件者範圍讀持股並對照策略持股；測試環境沒有依訂閱分送與 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn routed_overlap_reads_holdings_per_view() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 routed_overlap_reads_holdings_per_view：無資料庫連接");
+        return;
+    }
+    RoutedOverlap.notify_overlap(&rebalance(), "測試策略").await;
 }

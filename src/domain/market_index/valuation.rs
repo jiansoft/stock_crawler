@@ -7,7 +7,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 上市加上櫃合計的市場編號（上市 2、上櫃 4）。
 pub const ALL_MARKETS: i32 = 0;
@@ -16,7 +17,7 @@ pub const ALL_MARKETS: i32 = 0;
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketValuationDay {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 本益比中位數；當天沒有時為 `None`。
     pub median_pe: Option<f64>,
     /// 股價淨值比中位數；當天沒有時為 `None`。
@@ -52,14 +53,14 @@ pub struct ValuationDistribution {
 #[async_trait]
 pub trait MarketValuationRepository: Send + Sync {
     /// 由日線重算 `from`～`to` 每個交易日上市、上櫃與合計的中位數並寫入（同一天同市場覆蓋），回傳寫入列數。
-    async fn refresh_market_valuation(&self, from: NaiveDate, to: NaiveDate) -> Result<u64>;
+    async fn refresh_market_valuation(&self, from: Date, to: Date) -> Result<u64>;
 
     /// 讀取 `market_id`（[`ALL_MARKETS`]、2 或 4）在 `from`～`to` 的每日中位數，由舊到新。
     async fn fetch_market_valuation(
         &self,
         market_id: i32,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<Vec<MarketValuationDay>>;
 }
 
@@ -106,7 +107,7 @@ pub const LEVEL_YEARS: u32 = 5;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValuationLevel {
     /// 最新一個有估值資料的交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 本益比中位數的分布；最新一天沒有時為 `None`。
     pub pe: Option<ValuationDistribution>,
     /// 股價淨值比中位數的分布；最新一天沒有時為 `None`。
@@ -149,12 +150,13 @@ impl ValuationLevel {
 /// 讀取每日中位數失敗時回傳錯誤。
 pub async fn level(
     repo: &impl MarketValuationRepository,
-    date: NaiveDate,
+    date: Date,
     before_days: usize,
 ) -> Result<Option<ValuationLevel>> {
     let since = date
-        .checked_sub_months(Months::new(LEVEL_YEARS * 12))
-        .unwrap_or(NaiveDate::MIN);
+        .checked_sub(i64::from(LEVEL_YEARS * 12).months())
+        .ok()
+        .unwrap_or(Date::MIN);
     let days = complete_days(
         repo.fetch_market_valuation(ALL_MARKETS, since, date)
             .await?,

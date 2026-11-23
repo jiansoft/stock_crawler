@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::{
@@ -40,7 +40,7 @@ struct TpexQfiiTable {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OtcQfiiSnapshot {
     /// 資料日期（櫃買回應的 `date`）；不帶日期查詢時是最近一個交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 各股外資持股資料；指定日期查到休市日時為空。
     pub rows: Vec<QfiiDto>,
 }
@@ -58,10 +58,10 @@ pub async fn visit() -> Result<OtcQfiiSnapshot> {
 /// 取得指定交易日的上櫃外資持股統計（回補歷史用）。
 ///
 /// 休市日櫃買仍回 `stat: ok` 但沒有資料列，此時回傳空的 `rows`，由呼叫端略過。
-pub async fn visit_on(date: NaiveDate) -> Result<OtcQfiiSnapshot> {
+pub async fn visit_on(date: Date) -> Result<OtcQfiiSnapshot> {
     let url = format!(
         "{TPEX_QFII_URL}?date={}&response=json",
-        date.format("%Y%%2F%m%%2F%d")
+        date.strftime("%Y%%2F%m%%2F%d")
     );
     let response = util::http::get_json::<TpexQfiiResponse>(&url).await?;
     parse_tpex_qfii(response)
@@ -93,7 +93,7 @@ fn parse_tpex_qfii(response: TpexQfiiResponse) -> Result<OtcQfiiSnapshot> {
     let date = response
         .date
         .as_deref()
-        .and_then(|value| NaiveDate::parse_from_str(value, "%Y%m%d").ok())
+        .and_then(|value| Date::strptime("%Y%m%d", value).ok())
         .ok_or_else(|| anyhow!("TPEx QFII response has no valid date: {:?}", response.date))?;
 
     let Some(table) = response.tables.into_iter().next() else {

@@ -13,7 +13,7 @@ mod sql;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use sqlx::{Postgres, QueryBuilder, query_builder::Separated};
 
 use self::rows::{
@@ -78,12 +78,27 @@ impl FinancialReportRepository for PgFinancialReportRepository {
         published_within_days: i32,
         min_age_days: i32,
     ) -> Result<Vec<LaggingStatement>> {
-        let rows: Vec<(String, i32, String, NaiveDate)> = sqlx::query_as(LAGGING_STATEMENTS_SQL)
-            .bind(published_within_days)
-            .bind(min_age_days)
-            .fetch_all(database::get_connection())
-            .await
-            .context("Failed to fetch stocks whose income statements lag the official reports")?;
+        let rows: Vec<(String, i32, String, Date)> = sqlx::query_as::<
+            _,
+            (String, i32, String, jiff_sqlx::Date),
+        >(LAGGING_STATEMENTS_SQL)
+        .bind(published_within_days)
+        .bind(min_age_days)
+        .fetch_all(database::get_connection())
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(c0, c1, c2, c3)| {
+                    (
+                        c0,
+                        c1,
+                        c2,
+                        crate::infra::database::jiff_types::from_wire(c3),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .context("Failed to fetch stocks whose income statements lag the official reports")?;
         Ok(rows
             .into_iter()
             .map(

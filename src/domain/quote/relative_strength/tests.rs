@@ -1,7 +1,9 @@
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
-fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn ymd(y: i32, m: u32, d: u32) -> Date {
+    crate::core::util::datetime::ymd(y, m, d).expect("合法日期")
 }
 
 /// 百分位分數：最弱 1、最強 99、只有一檔 99。
@@ -16,8 +18,8 @@ fn percentile_score_maps_to_1_99() {
 /// 資料日與 20／60／120／240 日前的基準日；交易日不足為 None。
 #[test]
 fn base_dates_counts_back_trading_days() {
-    let dates: Vec<NaiveDate> = (0..=240)
-        .map(|i| ymd(2026, 10, 13) - chrono::Days::new(i))
+    let dates: Vec<Date> = (0..=240)
+        .map(|i| ymd(2026, 10, 13) - i64::from(i).days())
         .collect();
     let bases = base_dates(&dates).expect("交易日足夠");
     assert_eq!(bases.end, ymd(2026, 10, 13));

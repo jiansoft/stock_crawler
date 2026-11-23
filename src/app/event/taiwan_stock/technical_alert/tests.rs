@@ -1,5 +1,6 @@
 //! 持股技術訊號通知的單元測試。
 
+use jiff::civil::Date;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -8,8 +9,8 @@ use async_trait::async_trait;
 use super::*;
 use crate::domain::quote::technical::{SignalKind, TechnicalSignal};
 
-fn date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 13).expect("有效日期")
+fn date() -> Date {
+    jiff::civil::date(2026, 10, 13)
 }
 
 fn signal(
@@ -34,10 +35,10 @@ fn signal(
 struct FakeQuery {
     signals: Vec<StockTechnicalSignal>,
     fail: bool,
-    got: Mutex<Option<(NaiveDate, Vec<String>)>>,
+    got: Mutex<Option<(Date, Vec<String>)>>,
     outcomes: Vec<SignalOutcome>,
     outcomes_fail: bool,
-    got_outcomes: Mutex<Option<(NaiveDate, NaiveDate, Vec<String>)>>,
+    got_outcomes: Mutex<Option<(Date, Date, Vec<String>)>>,
 }
 
 fn outcome(indicator: &str, kind: &str, samples: i64) -> SignalOutcome {
@@ -54,7 +55,7 @@ fn outcome(indicator: &str, kind: &str, samples: i64) -> SignalOutcome {
 impl TechnicalSignalQuery for FakeQuery {
     async fn fetch_signals(
         &self,
-        date: NaiveDate,
+        date: Date,
         stock_symbols: &[String],
     ) -> Result<Vec<StockTechnicalSignal>> {
         *self.got.lock().expect("測試鎖") = Some((date, stock_symbols.to_vec()));
@@ -66,8 +67,8 @@ impl TechnicalSignalQuery for FakeQuery {
 
     async fn fetch_signal_outcomes(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         indicators: &[&str],
     ) -> Result<Vec<SignalOutcome>> {
         *self.got_outcomes.lock().expect("測試鎖") = Some((
@@ -237,7 +238,7 @@ async fn run_queries_holdings_and_builds_message() {
     assert_eq!(
         repo.got_outcomes.lock().expect("測試鎖").clone(),
         Some((
-            NaiveDate::from_ymd_opt(2025, 10, 14).expect("有效日期"),
+            jiff::civil::date(2025, 10, 14),
             date(),
             NOTIFY_INDICATORS.iter().map(|s| (*s).to_owned()).collect()
         ))
@@ -276,4 +277,23 @@ async fn run_queries_holdings_and_builds_message() {
         ..Default::default()
     };
     assert!(run(&failing, date(), &symbols).await.is_err());
+}
+
+/// 排程入口：依收件者範圍讀持股與今天的訊號；測試環境沒有依訂閱分送與 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_reads_holdings_per_view() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_reads_holdings_per_view：無資料庫連接");
+        return;
+    }
+    execute().await.expect("技術訊號通知不應失敗");
 }

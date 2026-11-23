@@ -5,13 +5,16 @@
 
 mod sql;
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use self::sql::STOCK_TIMELINE_SQL;
@@ -41,7 +44,8 @@ const KINDS: [&str; 12] = [
 /// [`STOCK_TIMELINE_SQL`] 的一列。
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 pub(super) struct TimelineRow {
-    pub(super) date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub(super) date: Date,
     pub(super) kind: String,
     pub(super) period: Option<String>,
     pub(super) label: Option<String>,
@@ -69,7 +73,7 @@ pub(crate) async fn stock_timeline(
 ) -> Response {
     let unprocessable = |message: &str| error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
     let to = match parse_optional_date(params.date.as_deref()) {
-        Ok(value) => value.unwrap_or_else(|| Local::now().date_naive()),
+        Ok(value) => value.unwrap_or_else(today),
         Err(message) => return unprocessable(message),
     };
     let days = params.days.unwrap_or(90);
@@ -101,13 +105,13 @@ pub(crate) async fn stock_timeline(
         return error_response(StatusCode::NOT_FOUND, "找不到股票代號");
     };
 
-    let from = to - chrono::Duration::days(i64::from(days) - 1);
-    let upcoming_to = to + chrono::Duration::days(i64::from(upcoming_days));
+    let from = to - (i64::from(days) - 1).days();
+    let upcoming_to = to + (i64::from(upcoming_days)).days();
     let rows: Vec<TimelineRow> = match sqlx::query_as(STOCK_TIMELINE_SQL)
         .bind(&symbol)
-        .bind(from)
-        .bind(to)
-        .bind(upcoming_to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
+        .bind(upcoming_to.to_sqlx())
         .bind(kinds.as_deref())
         .bind(i64::from(limit))
         .bind(Industry::FinanceInsurance as i32)
@@ -144,9 +148,9 @@ pub(super) fn parse_kinds(value: Option<&str>) -> Result<Option<Vec<String>>, &'
 pub(super) fn build_timeline(
     symbol: String,
     name: String,
-    from: NaiveDate,
-    to: NaiveDate,
-    upcoming_to: NaiveDate,
+    from: Date,
+    to: Date,
+    upcoming_to: Date,
     mut rows: Vec<TimelineRow>,
 ) -> StockTimelineResponse {
     let total = rows.first().map_or(0, |row| row.total);

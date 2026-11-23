@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 
@@ -15,9 +15,9 @@ pub struct SimulationInput<'a> {
     /// 期初投入金額（元）。
     pub principal: Decimal,
     /// 期初交易日。
-    pub base_date: NaiveDate,
+    pub base_date: Date,
     /// 期末交易日。
-    pub end_date: NaiveDate,
+    pub end_date: Date,
     /// 期初收盤價。必須大於零。
     pub base_price: Decimal,
     /// 期末收盤價。必須大於零。
@@ -32,7 +32,7 @@ pub struct SimulationInput<'a> {
     /// 各除息日的收盤價，供「含息再投入」口徑買回股數之用。
     ///
     /// 查無該日價格時該次股利改為現金累積，不強制再投入。
-    pub reinvest_prices: &'a dyn Fn(NaiveDate) -> Option<Decimal>,
+    pub reinvest_prices: &'a dyn Fn(Date) -> Option<Decimal>,
 }
 
 /// 三種口徑的模擬結果。
@@ -71,7 +71,7 @@ enum ActionKind {
 #[derive(Debug, Clone, Copy)]
 struct DividendAction {
     /// 動作發生日。
-    date: NaiveDate,
+    date: Date,
     /// 動作種類。
     kind: ActionKind,
     /// 每股金額（現金股利元數、股票股利元數），或分割的股數變動比例。
@@ -128,8 +128,8 @@ pub fn simulate(input: &SimulationInput<'_>) -> Option<SimulationResult> {
     }
 
     // 年數一律以實際日數差 / 365 計算，避免假日對齊造成系統性偏差。
-    let years =
-        Decimal::from((input.end_date - input.base_date).num_days()) / Decimal::from(365_i64);
+    let years = Decimal::from(i64::from((input.end_date - input.base_date).get_days()))
+        / Decimal::from(365_i64);
     if years <= Decimal::ZERO {
         return None;
     }

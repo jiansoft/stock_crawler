@@ -1,13 +1,16 @@
 //! 外資持股歷史與趨勢的 PostgreSQL 倉儲實作的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
 const FAKE_SYMBOL: &str = "79979QF";
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("測試日期應合法")
 }
 
 async fn cleanup() {
@@ -22,7 +25,7 @@ async fn cleanup() {
         .await;
 }
 
-fn holding(day: NaiveDate, held: i64, pct: Decimal) -> ForeignHolding {
+fn holding(day: Date, held: i64, pct: Decimal) -> ForeignHolding {
     ForeignHolding {
         stock_symbol: FAKE_SYMBOL.to_string(),
         date: day,
@@ -51,7 +54,7 @@ async fn test_save_daily_and_rebuild_trend() {
     let start = date(1990, 1, 1);
     let mut rows = Vec::new();
     for i in 0..21_i64 {
-        let day = start + chrono::Days::new(i as u64);
+        let day = start + i.days();
         let (held, pct) = match i {
             0..=17 => (100_000, dec!(10)),
             18 => (110_000, dec!(11)),
@@ -64,7 +67,7 @@ async fn test_save_daily_and_rebuild_trend() {
     // 內容相同的重送不算變更
     assert_eq!(repo.save_daily(&rows).await.expect("save again"), 0);
 
-    let as_of = start + chrono::Days::new(20);
+    let as_of = start + 20.days();
     assert!(repo.rebuild_trends_as_of(as_of).await.expect("rebuild") >= 1);
 
     let row = sqlx::query(

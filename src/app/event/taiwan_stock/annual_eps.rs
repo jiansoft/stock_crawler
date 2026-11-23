@@ -9,8 +9,9 @@
 //! 3. 取得資料後轉為 `FinancialStatement` 並寫回資料庫。
 //! 4. 將已處理的股票寫入 Redis，避免短時間內重複抓取。
 
+use crate::core::util::datetime::today;
 use anyhow::{Result, anyhow};
-use chrono::{Datelike, Local, NaiveDate};
+use jiff::civil::Date;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -37,10 +38,10 @@ pub async fn execute() -> Result<()> {
     use crate::infra::database::repository::financial::PgFinancialRepository;
 
     let financial_repo = PgFinancialRepository::new();
-    let current_date: NaiveDate = Local::now().date_naive();
+    let current_date: Date = today();
     let last_year = current_date.year() - 1;
     let without_annuals = financial_repo
-        .fetch_without_annual_statements(last_year)
+        .fetch_without_annual_statements(i32::from(last_year))
         .await?;
     let mut stock_symbol: HashSet<String> = HashSet::new();
     for ea in without_annuals {

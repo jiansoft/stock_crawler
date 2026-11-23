@@ -1,6 +1,7 @@
 //! 手動回補 job 的共用流程：查重、併行閘門、登記狀態、背景執行與逾時，以及進度回報。
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
 
 /// 單一 manual backfill job 的最長執行時間。
 ///
@@ -124,7 +125,7 @@ where
         input,
         status: BackfillJobStatus::Running,
         message: "queued".to_string(),
-        started_at: Local::now().to_rfc3339(),
+        started_at: TaipeiDateTime::now().to_rfc3339(),
         finished_at: None,
     };
     // job_id 用於背景 task 完成時回頭更新同一筆 job。
@@ -176,7 +177,7 @@ where
         // 取得寫鎖後更新 job 狀態；鎖只包住狀態更新，避免長時間持鎖執行回補。
         let mut jobs = jobs.write().await;
         if let Some(job) = jobs.get_mut(&job_id) {
-            job.finished_at = Some(Local::now().to_rfc3339());
+            job.finished_at = Some(TaipeiDateTime::now().to_rfc3339());
 
             match result {
                 Ok(message) => {

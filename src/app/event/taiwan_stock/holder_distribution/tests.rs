@@ -1,16 +1,20 @@
 //! 持股大戶週報：週資料整理、排序、訊息格式與去重鍵。
 
+use crate::core::util::datetime::ymd;
 use async_trait::async_trait;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn day(month: u32, day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, month, day).expect("日期應合法")
+fn day(month: u32, day: u32) -> Date {
+    ymd(2026, month, day).expect("日期應合法")
 }
 
 /// 五個資料週，由新到舊：10-30、10-23、10-16、10-09、10-02。
-fn five_weeks() -> Vec<NaiveDate> {
+fn five_weeks() -> Vec<Date> {
     vec![
         day(10, 30),
         day(10, 23),
@@ -22,7 +26,7 @@ fn five_weeks() -> Vec<NaiveDate> {
 
 fn record(
     symbol: &str,
-    date: NaiveDate,
+    date: Date,
     major_holders: i64,
     major_percent: Decimal,
     total_holders: i64,
@@ -212,7 +216,7 @@ impl HolderHistoryRepository for FakeHistory {
     async fn recent_holder_weeks(
         &self,
         symbols: &[String],
-        as_of: NaiveDate,
+        as_of: Date,
         weeks: i64,
     ) -> Result<RecentHolderWeeks> {
         assert_eq!(as_of, day(10, 31));
@@ -266,7 +270,7 @@ async fn mark_reported_only_once_per_week() {
         println!("跳過 mark_reported_only_once_per_week：無 Redis 連線");
         return;
     }
-    let date = NaiveDate::from_ymd_opt(1999, 1, 8).expect("日期應合法");
+    let date = date(1999, 1, 8);
     let _ = CLIENT.delete(&reported_key(date)).await;
     assert!(mark_reported(date).await);
     assert!(!mark_reported(date).await);
@@ -304,8 +308,8 @@ mod execute_flow {
         lines.join("\n")
     }
 
-    fn week() -> NaiveDate {
-        NaiveDate::from_ymd_opt(1999, 3, 12).expect("合法日期")
+    fn week() -> Date {
+        date(1999, 3, 12)
     }
 
     async fn cleanup() {
@@ -371,7 +375,7 @@ mod execute_flow {
             r#"SELECT count(*) FROM holder_distribution WHERE stock_symbol = $1 AND "date" = $2"#,
         )
         .bind(SYMBOL)
-        .bind(week())
+        .bind(week().to_sqlx())
         .fetch_one(pool)
         .await
         .expect("讀回週摘要");

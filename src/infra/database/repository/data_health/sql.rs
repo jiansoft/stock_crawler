@@ -50,7 +50,7 @@ pub(super) const DERIVED_TABLES: [(&str, &str); 15] = [
 ];
 
 /// 大盤未來報酬彙總與明細比對往回看幾天：涵蓋最長的 240 個交易日天期（約 350 天）。
-pub(super) const MARKET_FORWARD_RETURN_DRIFT_DAYS: u64 = 400;
+pub(super) const MARKET_FORWARD_RETURN_DRIFT_DAYS: i64 = 400;
 
 /// `$1` 起每個基準日，明細（`daily_forward_return` 連到 `stocks` 的列，與彙總同口徑）各天期的筆數
 /// 和彙總表全市場那一列對不上的日期；任一邊沒有那一天也算。

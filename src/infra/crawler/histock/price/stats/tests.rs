@@ -1,12 +1,13 @@
 //! HiStock 每日背景採集統計；逐列異常留待收盤彙總，避免單筆警告洗版的測試。
 
 use super::*;
+use jiff::civil::date;
 
 /// 成功率、慢回應、p99、矛盾列與代號固定，跨日不混資料。
 #[test]
 fn summary_and_day_rollover() {
     let mut stats = DailyStats::default();
-    let date = NaiveDate::from_ymd_opt(2026, 10, 27).unwrap();
+    let date = date(2026, 10, 27);
     stats.on_day(date);
     stats.cycle(true, 500);
     stats.cycle(false, 15_000);
@@ -17,7 +18,7 @@ fn summary_and_day_rollover() {
         stats.line(),
         "HiStock 收盤統計：rounds=2, succeeded=1, success=50.0%, slow=1, p99=15000ms, inconsistent=3(高低 1、漲跌 2、別檔 0), dirty_batches=0, symbols=0050,2330"
     );
-    let at = |h, m, s| NaiveTime::from_hms_opt(h, m, s).unwrap();
+    let at = |h, m, s| crate::core::util::datetime::hms(h, m, s).unwrap();
     stats.dirty_batch(at(9, 2, 3));
     stats.dirty_batch(at(9, 11, 20));
     stats.dirty_batch(at(9, 5, 0));
@@ -27,7 +28,7 @@ fn summary_and_day_rollover() {
             "inconsistent=4(高低 1、漲跌 2、別檔 1), dirty_batches=3(09:02:03～09:11:20)"
         )
     );
-    stats.on_day(date.succ_opt().unwrap());
+    stats.on_day(date.tomorrow().ok().unwrap());
     assert_eq!(stats.rounds, 0);
     assert!(stats.symbols.is_empty());
 }

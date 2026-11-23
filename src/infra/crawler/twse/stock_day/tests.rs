@@ -1,6 +1,8 @@
 //! TWSE 個股日成交資訊（`STOCK_DAY`）的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 fn fixture() -> StockDayResponse {
@@ -17,10 +19,7 @@ fn parse_stock_day_response_maps_every_traded_day() {
 
     let first = &quotes[0];
     assert_eq!(first.symbol, "0050");
-    assert_eq!(
-        first.date,
-        NaiveDate::from_ymd_opt(2021, 8, 2).expect("測試日期應合法")
-    );
+    assert_eq!(first.date, date(2021, 8, 2));
     assert_eq!(first.opening_price, dec!(137.00));
     assert_eq!(first.highest_price, dec!(138.00));
     assert_eq!(first.lowest_price, dec!(136.05));
@@ -47,7 +46,7 @@ fn negative_change_is_parsed_with_its_sign() {
     let quotes = parse_stock_day_response(&fixture(), "0050");
     let down_day = quotes
         .iter()
-        .find(|quote| quote.date == NaiveDate::from_ymd_opt(2021, 8, 5).expect("日期"))
+        .find(|quote| quote.date == date(2021, 8, 5))
         .expect("2021-08-05 應在結果中");
 
     assert_eq!(down_day.change, dec!(-0.25));
@@ -212,14 +211,8 @@ fn number_strips_formatting_and_rejects_placeholders() {
 
 #[test]
 fn parse_roc_date_converts_from_minguo_calendar() {
-    assert_eq!(
-        parse_roc_date("110/08/02"),
-        NaiveDate::from_ymd_opt(2021, 8, 2)
-    );
-    assert_eq!(
-        parse_roc_date(" 99/01/04 "),
-        NaiveDate::from_ymd_opt(2010, 1, 4)
-    );
+    assert_eq!(parse_roc_date("110/08/02"), ymd(2021, 8, 2));
+    assert_eq!(parse_roc_date(" 99/01/04 "), ymd(2010, 1, 4));
     assert_eq!(parse_roc_date("2021/08/02"), None);
     assert_eq!(parse_roc_date("110/13/02"), None);
     assert_eq!(parse_roc_date("--"), None);

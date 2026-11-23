@@ -1,7 +1,8 @@
 //! TWSE 減資爬蟲的單元測試。
 
 use super::*;
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 /// include_str! 的路徑相對於本檔案（twse/capital_reduction/tests.rs）→ twse/testdata/。
@@ -12,8 +13,8 @@ fn parse_fixture() -> Vec<CorporateAction> {
     parse_capital_reductions(response)
 }
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("測試日期應合法")
 }
 
 fn find<'a>(actions: &'a [CorporateAction], symbol: &str) -> &'a CorporateAction {

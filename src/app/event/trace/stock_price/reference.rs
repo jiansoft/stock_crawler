@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -20,7 +20,7 @@ use crate::{
 /// 前日收盤取自 `last_daily_quotes`（開盤前仍是前一交易日的收盤；停止買賣期間
 /// 由收盤補值沿用停止前的收盤）。兩類事件互相獨立，其中一類查詢失敗只記 warn，
 /// 另一類照常載入。沒有任何事件的交易日會寫入空集合，清掉前一天的值。
-pub(super) async fn load_reference_prices(date: NaiveDate) {
+pub(super) async fn load_reference_prices(date: Date) {
     let mut prices = match corporate_action_reference_prices(date).await {
         Ok(prices) => prices,
         Err(why) => {
@@ -54,7 +54,7 @@ pub(super) async fn load_reference_prices(date: NaiveDate) {
 /// 減資恢復買賣的漲跌幅以恢復買賣參考價計算，前收卻是停止買賣前的價格：
 /// 6550 2026-09-29 減資彌補虧損，前收 9.92、參考價約 19.09，HiStock 回報的昨收
 /// 仍是 9.92，成交 18.35 整天被當成異常價格過濾（單日 2,313 次）。
-async fn corporate_action_reference_prices(date: NaiveDate) -> Result<HashMap<String, Decimal>> {
+async fn corporate_action_reference_prices(date: Date) -> Result<HashMap<String, Decimal>> {
     let actions = PgCorporateActionRepository::new()
         .fetch_by_effective_date(date)
         .await?;
@@ -81,7 +81,7 @@ async fn corporate_action_reference_prices(date: NaiveDate) -> Result<HashMap<St
 /// 同一檔同一天有多筆股利事件時合併計算。同一天也恢復買賣者（`resumption_prices`
 /// 已有該代號），除權息以恢復買賣參考價為基準，比照交易所先減資、再除權的順序。
 async fn ex_rights_reference_prices(
-    date: NaiveDate,
+    date: Date,
     resumption_prices: &HashMap<String, Decimal>,
 ) -> Result<HashMap<String, Decimal>> {
     let infos = PgDividendRepository::new()

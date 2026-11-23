@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::Local;
 use serde::Deserialize;
 
 // 匯入專案內部模組：包含共用資訊載體、交易所定義與工具函式
@@ -23,7 +23,7 @@ struct TwseEtfRaw {
 /// 調用 TWSE OpenAPI 取得上市市場最新的 ETF 資訊。
 pub async fn visit() -> Result<Vec<EtfInfo>> {
     // 週末不處理
-    if Local::now().is_weekend() {
+    if TaipeiDateTime::now().is_weekend() {
         return Ok(Vec::new());
     }
 
@@ -57,7 +57,7 @@ fn map_etf_items(data: Vec<TwseEtfRaw>) -> Vec<EtfInfo> {
         // 處理日期：API 給的是 "1150409"，我們要轉成 "2026-04-09"
         let listing_date = if !item.listing_date.is_empty() {
             util::datetime::parse_taiwan_date_short(&item.listing_date)
-                .map(|d| d.format("%Y-%m-%d").to_string())
+                .map(|d| d.strftime("%Y-%m-%d").to_string())
                 .unwrap_or(item.listing_date) // 轉失敗就用原始字串
         } else {
             item.listing_date

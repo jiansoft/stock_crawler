@@ -4,7 +4,7 @@
 //! [`crate::domain::portfolio::exposure`]）。屬個人持股資料。
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -12,6 +12,7 @@ use axum::{
 
 use super::{error_response, repository_error, round2};
 use crate::domain::portfolio::exposure::{ExposureReport, build_report};
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database::repository::portfolio::PgPortfolioRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, ExposureEtfItem, ExposureItem, ExposureSourceItem, PortfolioEtfExposureParams,
@@ -32,17 +33,15 @@ const MAX_LIMIT: u16 = 200;
 /// 500。沒有持股時回 200 與空清單。
 #[utoipa::path(get, path = "/api/v1/portfolio/etf-exposure", tag = "data-api", params(PortfolioEtfExposureParams), responses((status = 200, body = PortfolioEtfExposureResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn portfolio_etf_exposure(
+    Extension(view): Extension<HoldingView>,
     Query(params): Query<PortfolioEtfExposureParams>,
 ) -> Response {
-    let member_id = params.member_id.unwrap_or(0);
-    if member_id < 0 {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
-    }
+    // 範圍由 scope middleware 驗證後放進 extension（家庭全體或單一成員，7.6 N2）。
     let limit = params.limit.unwrap_or(DEFAULT_LIMIT);
     if !(1..=MAX_LIMIT).contains(&limit) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "limit 必須介於 1 至 200");
     }
-    match build_report(&PgPortfolioRepository::new(), member_id).await {
+    match build_report(&PgPortfolioRepository::new(), &view).await {
         Ok(report) => Json(response(report, usize::from(limit))).into_response(),
         Err(error) => repository_error(error),
     }

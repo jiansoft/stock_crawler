@@ -127,7 +127,6 @@ fn default_file_log_directives_silence_known_noise() {
     // html5ever 的雜訊是 warn 等級，只靠 info 基準擋不掉，必須逐 target 關閉。
     assert!(DEFAULT_FILE_LOG_DIRECTIVES.contains("html5ever=off"));
     assert!(DEFAULT_FILE_LOG_DIRECTIVES.contains("rustls::msgs::handshake=error"));
-    assert!(DEFAULT_FILE_LOG_DIRECTIVES.contains("tokio_cron_scheduler=warn"));
 }
 
 /// 未設定 `FILE_LOG_LEVEL` 時，過濾器應回落到預設指令。
@@ -143,7 +142,7 @@ fn file_log_env_filter_falls_back_to_the_default_directives() {
     let filter = file_log_env_filter().to_string();
     assert!(filter.contains("html5ever=off"), "實際過濾器：{filter}");
     assert!(
-        filter.contains("tokio_cron_scheduler=warn"),
+        filter.contains("rustls::msgs::handshake=error"),
         "實際過濾器：{filter}"
     );
 }

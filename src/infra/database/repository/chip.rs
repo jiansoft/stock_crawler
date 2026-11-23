@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::domain::chip::{
     BrokerFlowRecord, ChipRepository, HolderDistributionRecord, HolderHistoryRepository,
@@ -47,15 +47,15 @@ fn dedup_by_key<T, K: std::hash::Hash + Eq>(items: &[T], key: impl Fn(&T) -> K) 
 
 #[async_trait]
 impl ChipRepository for PgChipRepository {
-    async fn save_institutional(&self, date: NaiveDate, flows: &[InstitutionalNet]) -> Result<u64> {
+    async fn save_institutional(&self, date: Date, flows: &[InstitutionalNet]) -> Result<u64> {
         daily::save_institutional(date, flows).await
     }
 
-    async fn save_margin(&self, date: NaiveDate, margins: &[MarginRecord]) -> Result<u64> {
+    async fn save_margin(&self, date: Date, margins: &[MarginRecord]) -> Result<u64> {
         daily::save_margin(date, margins).await
     }
 
-    async fn refresh_streaks(&self, from: NaiveDate, to: NaiveDate) -> Result<u64> {
+    async fn refresh_streaks(&self, from: Date, to: Date) -> Result<u64> {
         daily::refresh_streaks(from, to).await
     }
 
@@ -81,7 +81,7 @@ impl HolderHistoryRepository for PgChipRepository {
     async fn recent_holder_weeks(
         &self,
         symbols: &[String],
-        as_of: NaiveDate,
+        as_of: Date,
         weeks: i64,
     ) -> Result<RecentHolderWeeks> {
         ownership::recent_holder_weeks(symbols, as_of, weeks).await
@@ -91,8 +91,8 @@ impl HolderHistoryRepository for PgChipRepository {
 /// 測試種入籌碼後重算全部日期的連續天數（測試庫資料量小，整段重算即可）。
 #[cfg(test)]
 pub(crate) async fn refresh_streaks_for_tests() {
-    let from = NaiveDate::from_ymd_opt(1980, 1, 1).expect("固定日期合法");
-    let to = NaiveDate::from_ymd_opt(2100, 12, 31).expect("固定日期合法");
+    let from = jiff::civil::date(1980, 1, 1);
+    let to = jiff::civil::date(2100, 12, 31);
     PgChipRepository::new()
         .refresh_streaks(from, to)
         .await

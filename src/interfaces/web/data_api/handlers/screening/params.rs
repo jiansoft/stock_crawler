@@ -1,7 +1,7 @@
 //! 條件選股的參數驗證與排序白名單。
 
 #[cfg(test)]
-use chrono::{Datelike, NaiveDate};
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
@@ -532,7 +532,7 @@ fn decimal_in_range(
 
 /// 測試 SQL 月份新鮮度公式的純 Rust 對照實作。
 #[cfg(test)]
-pub(super) fn revenue_month_is_fresh(query_date: NaiveDate, revenue_month: i64) -> bool {
+pub(super) fn revenue_month_is_fresh(query_date: Date, revenue_month: i64) -> bool {
     let query_ordinal = i64::from(query_date.year()) * 12 + i64::from(query_date.month());
     let revenue_ordinal = (revenue_month / 100) * 12 + revenue_month % 100;
     (0..=3).contains(&(query_ordinal - revenue_ordinal))
@@ -540,26 +540,27 @@ pub(super) fn revenue_month_is_fresh(query_date: NaiveDate, revenue_month: i64) 
 
 /// 測試 SQL 季度新鮮度公式的純 Rust 對照實作。
 #[cfg(test)]
-pub(super) fn financial_period_is_fresh(query_date: NaiveDate, year: i64, quarter: &str) -> bool {
+pub(super) fn financial_period_is_fresh(query_date: Date, year: i64, quarter: &str) -> bool {
     let Some(quarter) = quarter
         .strip_prefix('Q')
         .and_then(|raw| raw.parse::<i64>().ok())
     else {
         return false;
     };
-    let query_ordinal = i64::from(query_date.year()) * 4 + i64::from(query_date.month0() / 3 + 1);
+    let query_ordinal =
+        i64::from(query_date.year()) * 4 + i64::from((query_date.month() - 1) / 3 + 1);
     let financial_ordinal = year * 4 + quarter;
     (0..=2).contains(&(query_ordinal - financial_ordinal))
 }
 
 /// 測試 SQL F 分數評分年度新鮮度公式的純 Rust 對照實作：落後查詢年 1–2 年。
 #[cfg(test)]
-pub(super) fn f_score_year_is_fresh(query_date: NaiveDate, f_score_year: i32) -> bool {
-    (1..=2).contains(&(query_date.year() - f_score_year))
+pub(super) fn f_score_year_is_fresh(query_date: Date, f_score_year: i32) -> bool {
+    (1..=2).contains(&(i32::from(query_date.year()) - f_score_year))
 }
 
 /// 測試 SQL 31 個日曆日視窗的純 Rust 對照實作。
 #[cfg(test)]
-pub(super) fn analytical_date_is_fresh(query_date: NaiveDate, source_date: NaiveDate) -> bool {
-    source_date <= query_date && source_date >= query_date - chrono::Days::new(30)
+pub(super) fn analytical_date_is_fresh(query_date: Date, source_date: Date) -> bool {
+    source_date <= query_date && source_date >= query_date - jiff::ToSpan::days(30)
 }

@@ -1,8 +1,8 @@
 //! ETF 比較與持股穿透共用的短期查詢快取；個人持股與市值每次重新讀取。
 
+use crate::core::util::datetime::today;
 use crate::domain::{etf::query::EtfDetail, portfolio::exposure::EtfConstituent};
 use anyhow::Result;
-use chrono::Local;
 use moka::future::Cache;
 use once_cell::sync::Lazy;
 use std::{
@@ -14,8 +14,8 @@ use std::{
     time::Duration,
 };
 
-type DetailKey = (chrono::NaiveDate, u64, String, i64);
-type HoldingKey = (chrono::NaiveDate, u64, Vec<String>);
+type DetailKey = (jiff::civil::Date, u64, String, i64);
+type HoldingKey = (jiff::civil::Date, u64, Vec<String>);
 
 /// 有容量與五分鐘 TTL 的共用 ETF 資料快取；同鍵未命中只執行一次查詢。
 pub struct EtfAnalysisCache {
@@ -60,7 +60,7 @@ impl EtfAnalysisCache {
         load: impl Future<Output = Result<Option<EtfDetail>>>,
     ) -> Result<Option<EtfDetail>> {
         let key = (
-            Local::now().date_naive(),
+            today(),
             self.generation.load(Ordering::SeqCst),
             symbol.to_owned(),
             nav_days,
@@ -87,11 +87,7 @@ impl EtfAnalysisCache {
         let mut symbols = symbols.to_vec();
         symbols.sort();
         symbols.dedup();
-        let key = (
-            Local::now().date_naive(),
-            self.generation.load(Ordering::SeqCst),
-            symbols,
-        );
+        let key = (today(), self.generation.load(Ordering::SeqCst), symbols);
         self.holdings
             .try_get_with(key, load)
             .await

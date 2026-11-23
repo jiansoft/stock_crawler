@@ -9,7 +9,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 除權息當天的開盤競價基準。
@@ -18,7 +18,7 @@ pub struct ExRightReference {
     /// 股票代號。
     pub stock_symbol: String,
     /// 除權息交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 開盤競價基準（上市「開盤競價基準」、上櫃「開始交易基準價」）。
     pub reference_price: Decimal,
 }

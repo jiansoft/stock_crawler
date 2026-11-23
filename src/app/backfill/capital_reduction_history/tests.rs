@@ -1,10 +1,13 @@
 //! 上櫃減資待辦清單的測試：計數、文字輸出，與連資料庫的掃描（只留上櫃、附單日變動率）。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("測試日期應合法")
 }
 
 fn sample_report() -> PendingReport {
@@ -140,7 +143,7 @@ async fn scan_keeps_only_otc_jumps_with_change_percent() {
                 r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
                    VALUES ($1, $2, $3, 1000)"#,
             )
-            .bind(date(1989, 1, d))
+            .bind(date(1989, 1, d).to_sqlx())
             .bind(symbol)
             .bind(close)
             .execute(pool)

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 殖利率排行領域的倉儲合約 (Repository Trait)。
 ///
@@ -11,5 +11,5 @@ pub trait YieldRankRepository: Send + Sync {
     ///
     /// # 參數
     /// * `date` - 重建的目標交易日期。
-    async fn rebuild_by_date(&self, date: NaiveDate) -> Result<()>;
+    async fn rebuild_by_date(&self, date: Date) -> Result<()>;
 }

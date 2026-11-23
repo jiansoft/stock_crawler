@@ -2,8 +2,10 @@
 //!
 //! 排程與手動入口見上層 [`super`] 的表格。
 
+use crate::core::util::datetime::today;
 use anyhow::{Context, Result, bail};
-use chrono::{Local, Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use super::{request_interval, too_many_failures};
 use crate::{
@@ -22,8 +24,7 @@ const GAP_FILL_DAYS: i64 = 30;
 ///
 /// 資料庫操作失敗，或超過一半的 ETF 抓取失敗時回傳錯誤。
 pub async fn backfill_nav_history(years: u32) -> Result<()> {
-    let (from, to) =
-        nav_history_range(Local::now().date_naive(), years).context("回補起日超出範圍")?;
+    let (from, to) = nav_history_range(today(), years).context("回補起日超出範圍")?;
     backfill_nav_range(from, to).await
 }
 
@@ -32,10 +33,10 @@ pub async fn backfill_nav_history(years: u32) -> Result<()> {
 /// # Errors
 ///
 /// 起日不早於今天、資料庫操作失敗，或超過一半的 ETF 抓取失敗時回傳錯誤。
-pub async fn backfill_nav_history_since(from: NaiveDate) -> Result<()> {
+pub async fn backfill_nav_history_since(from: Date) -> Result<()> {
     backfill_nav_since_with(
         &PgEtfRepository::new(),
-        Local::now().date_naive(),
+        today(),
         from,
         |from, to| move |symbol| async move { moneydj::etf_nav::visit(&symbol, from, to).await },
         request_interval,
@@ -47,15 +48,15 @@ pub async fn backfill_nav_history_since(from: NaiveDate) -> Result<()> {
 /// [`backfill_nav_history_since`] 的可注入版本：先算 `from` 到昨天的區間，再交給 `make_fetch` 產生逐檔抓取。
 async fn backfill_nav_since_with<R, Make, Fetch, FetchFut, Pause, PauseFut, Stop>(
     repo: &R,
-    today: NaiveDate,
-    from: NaiveDate,
+    today: Date,
+    from: Date,
     make_fetch: Make,
     pause: Pause,
     stop: Stop,
 ) -> Result<()>
 where
     R: EtfRepository,
-    Make: FnOnce(NaiveDate, NaiveDate) -> Fetch,
+    Make: FnOnce(Date, Date) -> Fetch,
     Fetch: FnMut(String) -> FetchFut,
     FetchFut: Future<Output = Result<Vec<EtfNavHistoryPoint>>>,
     Pause: FnMut() -> PauseFut,
@@ -72,11 +73,11 @@ where
 ///
 /// 資料庫操作失敗，或超過一半的 ETF 抓取失敗時回傳錯誤。
 pub async fn fill_recent_nav_gaps() -> Result<()> {
-    let (from, to) = recent_range(Local::now().date_naive()).context("補缺日區間超出範圍")?;
+    let (from, to) = recent_range(today()).context("補缺日區間超出範圍")?;
     backfill_nav_range(from, to).await
 }
 
-async fn backfill_nav_range(from: NaiveDate, to: NaiveDate) -> Result<()> {
+async fn backfill_nav_range(from: Date, to: Date) -> Result<()> {
     backfill_nav_range_with(
         &PgEtfRepository::new(),
         from,
@@ -93,8 +94,8 @@ async fn backfill_nav_range(from: NaiveDate, to: NaiveDate) -> Result<()> {
 /// `stop` 回傳 `true` 時停在兩檔之間，已抓的照樣重建快照；失敗比例只以實際抓過的檔數計算。
 async fn backfill_nav_range_with<R, Fetch, FetchFut, Pause, PauseFut, Stop>(
     repo: &R,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     fetch: Fetch,
     pause: Pause,
     stop: Stop,
@@ -190,22 +191,24 @@ where
 }
 
 /// 補缺日區間：[`GAP_FILL_DAYS`] 天前到昨天。
-fn recent_range(today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
+fn recent_range(today: Date) -> Option<(Date, Date)> {
     Some((
-        today.checked_sub_signed(chrono::Duration::days(GAP_FILL_DAYS))?,
-        today.pred_opt()?,
+        today.checked_sub((GAP_FILL_DAYS).days()).ok()?,
+        today.yesterday().ok()?,
     ))
 }
 
 /// 回補區間：`years` 年前的今天到昨天。
-fn nav_history_range(today: NaiveDate, years: u32) -> Option<(NaiveDate, NaiveDate)> {
-    let from = today.checked_sub_months(Months::new(years.checked_mul(12)?))?;
-    Some((from, today.pred_opt()?))
+fn nav_history_range(today: Date, years: u32) -> Option<(Date, Date)> {
+    let from = today
+        .checked_sub(i64::from(years.checked_mul(12)?).months())
+        .ok()?;
+    Some((from, today.yesterday().ok()?))
 }
 
 /// 回補區間：`from` 到昨天；`from` 不早於今天時沒有區間，回傳錯誤。
-fn nav_history_since_range(today: NaiveDate, from: NaiveDate) -> Result<(NaiveDate, NaiveDate)> {
-    let to = today.pred_opt().context("今天沒有前一天")?;
+fn nav_history_since_range(today: Date, from: Date) -> Result<(Date, Date)> {
+    let to = today.yesterday().ok().context("今天沒有前一天")?;
     if from > to {
         bail!("回補起日 {from} 必須早於今天 {today}");
     }

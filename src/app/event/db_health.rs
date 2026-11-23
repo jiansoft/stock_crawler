@@ -11,10 +11,13 @@
 //!
 //! 探測用獨立的短連線（[`server_status`]），不經連線池。狀態只存在行程記憶體。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::SignedDuration;
+use jiff::civil;
+use jiff::civil::Date;
 use std::{sync::Mutex, time::Duration as StdDuration};
 
 use anyhow::Result;
-use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime};
 use once_cell::sync::Lazy;
 
 use crate::{
@@ -39,13 +42,13 @@ pub(crate) struct Notice {
 #[derive(Debug, Default)]
 pub(crate) struct Watch {
     /// 上次看到的伺服器啟動時間；服務剛啟動、還沒連上過時為 `None`。
-    started_at: Option<DateTime<Local>>,
+    started_at: Option<TaipeiDateTime>,
     /// 目前連續失敗次數。
     failures: u32,
     /// 這一段連不上的第一次失敗時間。
-    down_since: Option<NaiveDateTime>,
+    down_since: Option<civil::DateTime>,
     /// 這一段連不上最後一次發告警的時間；沒告警過為 `None`。
-    last_down_alert: Option<NaiveDateTime>,
+    last_down_alert: Option<civil::DateTime>,
     /// 當日彙總。
     daily: Daily,
 }
@@ -53,7 +56,7 @@ pub(crate) struct Watch {
 /// 當日彙總（23:30 記一行）。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Daily {
-    date: Option<NaiveDate>,
+    date: Option<Date>,
     failures: u32,
     longest_down_minutes: i64,
     restarts: u32,
@@ -64,7 +67,7 @@ impl Watch {
     pub(crate) fn observe(
         &mut self,
         probe: std::result::Result<ServerStatus, String>,
-        now: NaiveDateTime,
+        now: civil::DateTime,
     ) -> Option<Notice> {
         if self.daily.date != Some(now.date()) {
             self.daily = Daily {
@@ -78,16 +81,16 @@ impl Watch {
         }
     }
 
-    fn on_failure(&mut self, why: &str, now: NaiveDateTime) -> Option<Notice> {
+    fn on_failure(&mut self, why: &str, now: civil::DateTime) -> Option<Notice> {
         self.failures += 1;
         self.daily.failures += 1;
         let since = *self.down_since.get_or_insert(now);
         if self.failures < DOWN_ALERT_AFTER {
             return None;
         }
-        let cooled = self
-            .last_down_alert
-            .is_none_or(|last| now - last >= Duration::minutes(DOWN_ALERT_COOLDOWN_MINUTES));
+        let cooled = self.last_down_alert.is_none_or(|last| {
+            now.duration_since(last) >= SignedDuration::from_mins(DOWN_ALERT_COOLDOWN_MINUTES)
+        });
         if !cooled {
             return None;
         }
@@ -96,13 +99,13 @@ impl Watch {
             title: "資料庫連不上",
             message: format!(
                 "自 {} 起連續 {} 次連不上（每 5 分鐘探測一次）：{why}；pi 上所有排程與 API 都會失敗，請檢查資料庫主機",
-                since.format("%m-%d %H:%M"),
+                since.strftime("%m-%d %H:%M"),
                 self.failures
             ),
         })
     }
 
-    fn on_success(&mut self, status: ServerStatus, now: NaiveDateTime) -> Option<Notice> {
+    fn on_success(&mut self, status: ServerStatus, now: civil::DateTime) -> Option<Notice> {
         let recovered = self.recover(now);
         let restarted = match self.started_at.replace(status.started_at) {
             Some(previous) if previous != status.started_at => {
@@ -128,26 +131,26 @@ impl Watch {
     }
 
     /// 結束一段連不上；告警過才回傳恢復訊息。
-    fn recover(&mut self, now: NaiveDateTime) -> Option<String> {
+    fn recover(&mut self, now: civil::DateTime) -> Option<String> {
         self.failures = 0;
         let since = self.down_since.take()?;
-        let minutes = (now - since).num_minutes();
+        let minutes = now.duration_since(since).as_mins();
         self.daily.longest_down_minutes = self.daily.longest_down_minutes.max(minutes);
         self.last_down_alert.take()?;
         Some(format!(
             "已恢復連線；第一次探測失敗在 {}，約 {minutes} 分鐘連不上",
-            since.format("%m-%d %H:%M")
+            since.strftime("%m-%d %H:%M")
         ))
     }
 
     /// 當日彙總；`today` 沒有任何探測紀錄時為 `None`。
-    pub(crate) fn summary(&self, today: NaiveDate) -> Option<String> {
+    pub(crate) fn summary(&self, today: Date) -> Option<String> {
         if self.daily.date != Some(today) {
             return None;
         }
         let started = self.started_at.map_or_else(
             || "啟動時間未知".to_string(),
-            |at| format!("啟動於 {}", at.format("%m-%d %H:%M")),
+            |at| format!("啟動於 {}", at.strftime("%m-%d %H:%M")),
         );
         Some(format!(
             "資料庫：連不上 {} 次（最長約 {} 分鐘）、重啟 {} 次、{started}",
@@ -157,7 +160,7 @@ impl Watch {
 }
 
 /// 重啟通知內容：新舊啟動時間與統計是否在啟動時重置。
-fn restart_message(previous: DateTime<Local>, status: &ServerStatus) -> String {
+fn restart_message(previous: TaipeiDateTime, status: &ServerStatus) -> String {
     let stats = match status.stats_reset_at_start() {
         Some(true) => {
             "pg_stat_statements 統計在啟動時重置，上次多半是非正常關機（當機或 immediate stop）；慢查詢彙總與週報的資料庫端耗時從這次啟動起算"
@@ -167,8 +170,8 @@ fn restart_message(previous: DateTime<Local>, status: &ServerStatus) -> String {
     };
     format!(
         "資料庫在 {} 重新啟動（上次啟動 {}）；{stats}",
-        status.started_at.format("%m-%d %H:%M:%S"),
-        previous.format("%m-%d %H:%M")
+        status.started_at.strftime("%m-%d %H:%M:%S"),
+        previous.strftime("%m-%d %H:%M")
     )
 }
 
@@ -187,7 +190,7 @@ pub async fn execute() -> Result<()> {
     if let Err(why) = &probe {
         tracing::warn!("資料庫健康檢查：連不上：{why}");
     }
-    let now = Local::now().naive_local();
+    let now = TaipeiDateTime::now().datetime();
     let notice = match WATCH.lock() {
         Ok(mut watch) => watch.observe(probe, now),
         Err(_) => {
@@ -197,13 +200,13 @@ pub async fn execute() -> Result<()> {
     };
     if let Some(notice) = notice {
         tracing::warn!("{}：{}", notice.title, notice.message);
-        alert::send_alert(notice.title, &notice.message).await;
+        alert::notify_system(alert::Topic::SystemDbHealth, notice.title, &notice.message).await;
     }
     Ok(())
 }
 
 /// 當日資料庫可用性彙總，附在 23:30 主機健康彙總後面；當天沒有探測紀錄時為 `None`。
-pub fn daily_summary(today: NaiveDate) -> Option<String> {
+pub fn daily_summary(today: Date) -> Option<String> {
     WATCH.lock().ok().and_then(|watch| watch.summary(today))
 }
 

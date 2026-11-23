@@ -13,6 +13,10 @@ use crate::domain::portfolio::performance::{MonthReturn, Performance};
 pub(crate) struct PortfolioHistoryParams {
     /// 會員編號；0（預設）為全部會員合計。
     #[param(minimum = 0, default = 0)]
+    #[allow(
+        dead_code,
+        reason = "由 scope middleware 讀取並驗證後轉成 HoldingView；這裡保留給 OpenAPI 文件"
+    )]
     pub(crate) member_id: Option<i64>,
     /// 回看幾個月（以最新一筆市值往回推），預設 12，範圍 1–120。
     #[param(minimum = 1, maximum = 120, default = 12)]

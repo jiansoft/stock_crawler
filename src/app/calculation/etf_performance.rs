@@ -6,10 +6,12 @@
 //! 同一批也以 `etf_daily_nav` 的正式淨值計算淨值含息報酬（`nav_ret_*`）：淨值只以現金配息還原，
 //! 不套用分割、股票股利——MoneyDJ 回補的歷史淨值已依分割調整，再套一次會重複。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use anyhow::Result;
-use chrono::{Days, Local, NaiveDate};
 
 use crate::{
     domain::{
@@ -24,15 +26,15 @@ pub const BENCHMARK: &str = "0050";
 /// 每批讀取的 ETF 檔數。
 const CHUNK: usize = 40;
 /// 最長期間 10 年，多抓幾天讓期初能落在目標日或之前。
-const HISTORY_DAYS: u64 = 10 * 366 + 10;
+const HISTORY_DAYS: i64 = 10 * 366 + 10;
 
 /// 重算全部 ETF 的績效並寫入，回傳寫入列數。
 pub async fn execute() -> Result<u64> {
-    run(Local::now().date_naive()).await
+    run(today()).await
 }
 
 /// [`execute`] 的本體：以 `today` 為期末，讀近 10 年還原日線計算績效。
-async fn run(today: NaiveDate) -> Result<u64> {
+async fn run(today: Date) -> Result<u64> {
     let repo = PgEtfRepository::new();
     let symbols: Vec<String> = repo
         .listed_etfs()
@@ -40,7 +42,7 @@ async fn run(today: NaiveDate) -> Result<u64> {
         .into_iter()
         .map(|(symbol, _)| symbol)
         .collect();
-    let from = today - Days::new(HISTORY_DAYS);
+    let from = today - HISTORY_DAYS.days();
     let quotes = PgQuoteRepository::new();
 
     let benchmark = quotes

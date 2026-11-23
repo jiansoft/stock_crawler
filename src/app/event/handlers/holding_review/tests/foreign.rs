@@ -1,13 +1,14 @@
 //! 持股外資持股變化通知的訊息與去重鍵測試。
 
 use super::*;
+use jiff::civil::date;
 
 #[test]
 fn foreign_holding_message_groups_by_direction_and_sorts_by_magnitude() {
     let big_up = foreign_alert("6488", "環球晶", Some(dec!(5.2)), 4);
     let small_up = foreign_alert("3105", "穩懋", Some(dec!(3.1)), 1);
     let down = foreign_alert("8069", "元太", Some(dec!(-3.5)), -3);
-    let date = NaiveDate::from_ymd_opt(2026, 9, 30).unwrap();
+    let date = date(2026, 9, 30);
 
     let msg = EventDispatcher::build_foreign_holding_message(date, &[&small_up, &big_up], &[&down]);
 
@@ -27,11 +28,7 @@ fn foreign_holding_message_groups_by_direction_and_sorts_by_magnitude() {
 #[test]
 fn foreign_holding_message_omits_empty_group() {
     let down = foreign_alert("8069", "元太", Some(dec!(-3.5)), -1);
-    let msg = EventDispatcher::build_foreign_holding_message(
-        NaiveDate::from_ymd_opt(2026, 9, 30).unwrap(),
-        &[],
-        &[&down],
-    );
+    let msg = EventDispatcher::build_foreign_holding_message(date(2026, 9, 30), &[], &[&down]);
 
     assert!(!msg.contains("外資增持"));
     assert!(msg.contains("外資減持"));

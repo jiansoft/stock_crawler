@@ -1,5 +1,6 @@
 //! unannounced_ex_dividend_date的測試；連外的測試標 #[ignore]。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -51,8 +52,8 @@ fn sample_entity(
         ex_dividend_date_stock: "2025-07-02".to_string(),
         payable_date_cash: "2025-08-01".to_string(),
         payable_date_stock: "2025-08-02".to_string(),
-        created_time: chrono::Local::now(),
-        updated_time: chrono::Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     }
 }
 

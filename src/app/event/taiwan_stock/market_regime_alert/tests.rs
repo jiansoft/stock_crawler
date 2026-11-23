@@ -1,12 +1,15 @@
 //! 大盤趨勢變化通知的測試：穿越、排列改變、市場廣度跨過門檻、沒有變化、不是今天與查詢失敗。
 
+use crate::core::util::datetime::ymd;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use super::*;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("合法日期")
 }
 
 fn esc(line: &str) -> String {
@@ -14,17 +17,17 @@ fn esc(line: &str) -> String {
 }
 
 /// 由新到舊的收盤，最新一天為 2026-10-16。
-fn series(closes: &[f64]) -> Vec<(NaiveDate, f64)> {
+fn series(closes: &[f64]) -> Vec<(Date, f64)> {
     closes
         .iter()
         .enumerate()
-        .map(|(offset, close)| (day(16) - chrono::Days::new(offset as u64), *close))
+        .map(|(offset, close)| (day(16) - (offset as i64).days(), *close))
         .collect()
 }
 
 /// 最新一天跌到 100、前一天 400，再之前往前每天高 1：當天跌破 20／60 日均線；
 /// 只有 102 天，240 日均線資料不足、排列兩天都是糾結。
-fn breakdown() -> Vec<(NaiveDate, f64)> {
+fn breakdown() -> Vec<(Date, f64)> {
     let mut closes = vec![100.0, 400.0];
     closes.extend((2..102u32).map(|offset| 200.0 + f64::from(offset)));
     series(&closes)
@@ -32,7 +35,7 @@ fn breakdown() -> Vec<(NaiveDate, f64)> {
 
 /// 最新一天漲到 1000、前一天 250（跌破 20 日均線，排列糾結），再之前一路上漲：
 /// 當天站上 60 日均線，排列轉為多頭。
-fn breakout() -> Vec<(NaiveDate, f64)> {
+fn breakout() -> Vec<(Date, f64)> {
     let mut closes = vec![1000.0, 250.0];
     closes.extend((2..300u32).map(|offset| 300.0 - f64::from(offset)));
     series(&closes)
@@ -78,7 +81,7 @@ fn build_message_skips_without_change() {
 }
 
 /// 一路上漲、沒有穿越也沒有排列改變的收盤。
-fn steady() -> Vec<(NaiveDate, f64)> {
+fn steady() -> Vec<(Date, f64)> {
     let closes: Vec<f64> = (0..300).map(|offset| 300.0 - f64::from(offset)).collect();
     series(&closes)
 }
@@ -142,14 +145,14 @@ fn cross_line_needs_moving_average() {
 
 /// 回傳固定收盤與市場廣度的假倉儲；`fail` 時收盤查詢失敗、`breadth_fail` 時廣度查詢失敗。
 struct FakeIndex {
-    points: Vec<(NaiveDate, f64)>,
+    points: Vec<(Date, f64)>,
     fail: bool,
     breadth: Vec<BreadthDay>,
     breadth_fail: bool,
 }
 
 impl FakeIndex {
-    fn new(points: Vec<(NaiveDate, f64)>) -> Self {
+    fn new(points: Vec<(Date, f64)>) -> Self {
         Self {
             points,
             fail: false,
@@ -161,11 +164,7 @@ impl FakeIndex {
 
 #[async_trait]
 impl BreadthQuery for FakeIndex {
-    async fn fetch_breadth(
-        &self,
-        until: Option<NaiveDate>,
-        limit: usize,
-    ) -> Result<Vec<BreadthDay>> {
+    async fn fetch_breadth(&self, until: Option<Date>, limit: usize) -> Result<Vec<BreadthDay>> {
         if self.breadth_fail {
             return Err(anyhow!("stats down"));
         }
@@ -184,9 +183,9 @@ impl IndexCloseQuery for FakeIndex {
     async fn fetch_index_closes(
         &self,
         category: &str,
-        until: Option<NaiveDate>,
+        until: Option<Date>,
         _limit: usize,
-    ) -> Result<Vec<(NaiveDate, f64)>> {
+    ) -> Result<Vec<(Date, f64)>> {
         assert_eq!(category, regime::TAIEX);
         if self.fail {
             return Err(anyhow!("index down"));
@@ -278,15 +277,15 @@ struct FakeValuation {
 
 #[async_trait]
 impl MarketValuationRepository for FakeValuation {
-    async fn refresh_market_valuation(&self, _from: NaiveDate, _to: NaiveDate) -> Result<u64> {
+    async fn refresh_market_valuation(&self, _from: Date, _to: Date) -> Result<u64> {
         Ok(0)
     }
 
     async fn fetch_market_valuation(
         &self,
         market_id: i32,
-        _from: NaiveDate,
-        to: NaiveDate,
+        _from: Date,
+        to: Date,
     ) -> Result<Vec<valuation::MarketValuationDay>> {
         assert_eq!(market_id, valuation::ALL_MARKETS);
         if self.fail {
@@ -340,4 +339,23 @@ async fn run_appends_valuation_level() {
         .await
         .expect("估值失敗不影響通知");
     assert!(message.is_some_and(|message| !message.contains("估值水位")));
+}
+
+/// 排程入口：以今天讀大盤多空；測試環境沒有 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_reads_today_regime() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_reads_today_regime：無資料庫連接");
+        return;
+    }
+    execute().await.expect("大盤多空通知不應失敗");
 }

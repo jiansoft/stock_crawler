@@ -1,9 +1,11 @@
 //! 拆出的既有回歸測試，保持原有案例與斷言。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
-fn day(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2024, m, d).expect("有效日期")
+fn day(m: u32, d: u32) -> Date {
+    ymd(2024, m, d).expect("有效日期")
 }
 
 fn bar(m: u32, d: u32, close: f64) -> PriceBar {

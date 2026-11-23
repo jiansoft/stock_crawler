@@ -4,7 +4,7 @@
 //! 不包含抓取、更新或快取生命週期控制邏輯。
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
@@ -74,7 +74,7 @@ pub struct RealtimeSnapshot {
     /// 成交量 (單位：張)
     pub volume: Decimal,
     /// 快照最後寫入快取的 UTC 時間，供外部 API 判斷資料新鮮度。
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
     /// 當日漲跌幅限制；只有 Yahoo 類股報價會提供。
     pub price_limit: PriceLimit,
 }
@@ -102,7 +102,7 @@ impl RealtimeSnapshot {
             low: Decimal::ZERO,
             last_close: Decimal::ZERO,
             volume: Decimal::ZERO,
-            updated_at: Utc::now(),
+            updated_at: Timestamp::now(),
             price_limit: PriceLimit::Unknown,
         }
     }

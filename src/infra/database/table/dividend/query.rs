@@ -3,8 +3,8 @@
 //! 包含依日期彙總股利、年度/股票代號查詢、未公布日期查詢、多次配息查詢等，
 //! 以及共用的資料列轉換 helper 與欄位常數。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{Row, postgres::PgRow};
 
@@ -39,7 +39,7 @@ impl Dividend {
     /// 按照年份和除權息日取得股利總和的數據
     pub async fn fetch_yearly_dividends_sum_by_date(
         &self,
-        stock_purchase_date: DateTime<Local>,
+        stock_purchase_date: TaipeiDateTime,
     ) -> Result<(Decimal, Decimal, Decimal)> {
         let entities = Self::fetch_dividends_summary_by_date(
             &self.security_code,
@@ -69,7 +69,7 @@ impl Dividend {
     pub async fn fetch_dividends_summary_by_date(
         security_code: &str,
         year: i32,
-        stock_purchase_date: DateTime<Local>,
+        stock_purchase_date: TaipeiDateTime,
     ) -> Result<Vec<Dividend>> {
         let sql = format!(
             r#"
@@ -96,8 +96,16 @@ where security_code = $1
         sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(security_code)
             .bind(year)
-            .bind(Local::now().format("%Y-%m-%d %H:%M:%S").to_string())
-            .bind(stock_purchase_date.format("%Y-%m-%d %H:%M:%S").to_string())
+            .bind(
+                TaipeiDateTime::now()
+                    .strftime("%Y-%m-%d %H:%M:%S")
+                    .to_string(),
+            )
+            .bind(
+                stock_purchase_date
+                    .strftime("%Y-%m-%d %H:%M:%S")
+                    .to_string(),
+            )
             .try_map(Self::row_to_entity)
             .fetch_all(database::get_connection())
             .await

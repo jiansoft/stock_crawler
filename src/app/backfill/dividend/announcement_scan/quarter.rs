@@ -16,7 +16,6 @@
 
 use std::collections::HashMap;
 
-use chrono::Datelike;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -171,7 +170,7 @@ pub(super) fn resolve_paid_year(
         return year;
     }
 
-    announcement.ex_date.year()
+    i32::from(announcement.ex_date.year())
 }
 
 /// 從 `YYYY-MM-DD` 取出年份。
@@ -221,7 +220,8 @@ pub(super) fn match_allotment<'a>(
 
     // 股利所屬年度不是除權息當年（季配、半年配），就是前一年（年配隔年發放）。
     let mut matched = candidates.iter().filter(|allotment| {
-        (allotment.year_of_dividend == year || allotment.year_of_dividend == year - 1)
+        (allotment.year_of_dividend == i32::from(year)
+            || allotment.year_of_dividend == i32::from(year - 1))
             && amount_matches(announcement, allotment)
     });
 

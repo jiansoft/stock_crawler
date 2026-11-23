@@ -90,7 +90,7 @@ pub(crate) async fn wait_and_stop(running: Running) -> Result<(), Box<dyn Error>
     // 直接 await 訊號 future，不再以 AtomicBool 每 100ms 輪詢，收到訊號後立即進入流程。
     let Running {
         shutdown_tx,
-        mut sched,
+        sched,
         rpc_server,
         web_server,
         grpc_self_test,
@@ -106,9 +106,7 @@ pub(crate) async fn wait_and_stop(running: Running) -> Result<(), Box<dyn Error>
 
     // 第 2 道閘門：只停止「未來的排程觸發」。已開始的 cron future 不會被 scheduler
     // 強制 abort，而是由下方 BACKGROUND_OPERATIONS 負責等待，避免資料只寫一半。
-    if let Err(why) = sched.shutdown().await {
-        tracing::error!(error = %why, "scheduler shutdown failed");
-    }
+    sched.shutdown();
 
     // 自我測試不是必要的資料操作；若關機時仍未完成，主動取消以免延長服務停止時間。
     if !grpc_self_test.is_finished() {

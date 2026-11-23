@@ -1,6 +1,7 @@
 //! 漲跌幅／成交量排行 endpoint 的資料庫語意整合測試與假資料。
 
 use super::*;
+use jiff::civil::date;
 
 /// 漲跌幅／成交量排行的真實資料庫語意整合測試（movers 計畫 §4）。
 ///
@@ -30,7 +31,7 @@ async fn movers_endpoint_db_semantics() {
     // CI 的測試庫沒有日報價，以固定歷史日期與假代號種入資料，讓收盤路徑真的跑到
     // 排序與過濾。資料庫已有更新的交易日時排行以那一天為準，種入的資料只用於下方
     // 「data_as_of 是種入日期」時的精確斷言。
-    let seed_date = chrono::NaiveDate::from_ymd_opt(2026, 4, 30).expect("固定日期合法");
+    let seed_date = date(2026, 4, 30);
     movers_seed::cleanup(seed_date).await;
     movers_seed::seed(seed_date).await;
     let key = std::env::var("DATA_API_KEY").unwrap_or_else(|_| {
@@ -181,7 +182,8 @@ async fn movers_endpoint_db_semantics() {
 
 /// movers 整合測試的假資料：固定歷史日期、假代號，測試前後都會清除。
 mod movers_seed {
-    use chrono::NaiveDate;
+    use jiff::civil::Date;
+    use jiff_sqlx::ToSqlx;
     use rust_decimal::Decimal;
 
     /// `(代號, 市場, 暫停上市, 漲跌幅 %, 成交股數)`；昨收固定 100 元。
@@ -193,7 +195,7 @@ mod movers_seed {
     ];
 
     /// 寫入股票主檔與指定日期的日報價。
-    pub(super) async fn seed(date: NaiveDate) {
+    pub(super) async fn seed(date: Date) {
         let pool = crate::infra::database::get_connection();
         for (symbol, market_id, suspend_listing, change, volume) in ROWS {
             sqlx::query(
@@ -217,7 +219,7 @@ mod movers_seed {
                                               "Transaction")
                    VALUES ($1, $2, 100 + $3, $3, $3, 100, 100 + $3, 100, $4, $4 * 100, 10)"#,
             )
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(symbol)
             .bind(change)
             .bind(volume)
@@ -228,11 +230,11 @@ mod movers_seed {
     }
 
     /// 刪除種入的日報價與股票主檔。
-    pub(super) async fn cleanup(date: NaiveDate) {
+    pub(super) async fn cleanup(date: Date) {
         let pool = crate::infra::database::get_connection();
         let symbols: Vec<&str> = ROWS.iter().map(|row| row.0).collect();
         sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE "Date" = $1 AND stock_symbol = ANY($2)"#)
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(&symbols)
             .execute(pool)
             .await

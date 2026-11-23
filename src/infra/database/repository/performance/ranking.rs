@@ -1,7 +1,8 @@
 //! CAGR 倉儲的排行榜查詢：單一口徑排行與含篩選、名次、分頁的排行頁。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::{SELECT_COLUMNS, cagr_column, lookup, rows_to_domain};
 use crate::domain::performance::entity::{CagrMetric, CagrPeriod, StockCagr as DomainStockCagr};
@@ -92,7 +93,7 @@ fn keyword_pattern(keyword: &str) -> String {
 /// 長期間不提供純價格口徑（見 [`CagrPeriod::supports_price_metric`]），
 /// 若不過濾，依 `price_cagr_pct` 排序的結果會混入一批空值列。
 pub(super) async fn fetch_ranking(
-    date: NaiveDate,
+    date: Date,
     period: CagrPeriod,
     metric: CagrMetric,
     limit: i64,
@@ -115,7 +116,7 @@ LIMIT $3 OFFSET $4
     );
 
     let rows = sqlx::query_as::<_, TableStockCagr>(sqlx::AssertSqlSafe(sql.as_str()))
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(period.code())
         .bind(limit)
         .bind(offset)
@@ -152,7 +153,7 @@ pub(super) async fn fetch_ranking_page(query: &CagrRankingQuery) -> Result<CagrR
 
     let count_sql = format!("SELECT COUNT(*) {RANKING_FROM_WHERE}\n{incomplete_filter}\n");
     let total: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(count_sql.as_str()))
-        .bind(query.date)
+        .bind(query.date.to_sqlx())
         .bind(query.period.code())
         .bind(query.market_id)
         .bind(query.industry_id)
@@ -200,7 +201,7 @@ LIMIT $7 OFFSET $8
     );
 
     let rows = sqlx::query_as::<_, RankingRow>(sqlx::AssertSqlSafe(sql.as_str()))
-        .bind(query.date)
+        .bind(query.date.to_sqlx())
         .bind(query.period.code())
         .bind(query.market_id)
         .bind(query.industry_id)

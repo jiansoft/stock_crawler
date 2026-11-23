@@ -1,12 +1,14 @@
 //! 日線衍生計算的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 use crate::domain::quote::test_double::CountingQuoteRepository;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 fn quote(date: u32, high: Decimal, low: Decimal, pbr: Decimal) -> DomainDailyQuote {
     DomainDailyQuote {
-        date: NaiveDate::from_ymd_opt(2026, 5, date).expect("日期應合法"),
+        date: ymd(2026, 5, date).expect("日期應合法"),
         highest_price: high,
         lowest_price: low,
         price_to_book_ratio: pbr,
@@ -52,7 +54,7 @@ async fn recalculate_moving_averages_splits_symbols_into_batches() {
     let symbols: Vec<String> = (0..RECALCULATE_BATCH + 1)
         .map(|i| format!("{:04}", 1000 + i))
         .collect();
-    let from = NaiveDate::from_ymd_opt(2019, 7, 1).expect("日期應合法");
+    let from = date(2019, 7, 1);
 
     let updated = recalculate_moving_averages(&repository, &symbols, from)
         .await
@@ -72,7 +74,7 @@ async fn recalculate_moving_averages_splits_symbols_into_batches() {
 #[tokio::test]
 async fn recalculate_moving_averages_skips_an_empty_list() {
     let repository = CountingQuoteRepository::default();
-    let from = NaiveDate::from_ymd_opt(2019, 7, 1).expect("日期應合法");
+    let from = date(2019, 7, 1);
 
     let updated = recalculate_moving_averages(&repository, &[], from)
         .await
@@ -91,7 +93,7 @@ async fn test_calculate_moving_average() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
     tracing::debug!("開始 calculate_moving_average");
-    let date = NaiveDate::from_ymd_opt(2026, 2, 26);
+    let date = ymd(2026, 2, 26);
     match calculate_moving_average(date.unwrap()).await {
         Ok(_) => {
             tracing::debug!("calculate_moving_average() 完成");

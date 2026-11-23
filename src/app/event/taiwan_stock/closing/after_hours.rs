@@ -6,8 +6,9 @@
 //! [`COVERAGE_MIN_PERCENT`]% 就重跑對應的排程並告警。官方本益比只會補日線為 0 的欄位、重跑安全，
 //! 筆數也看不出有沒有漏補，所以直接重跑，有補到才告警。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::civil::Date;
 
 use super::{COVERAGE_MIN_PERCENT, is_market_closed};
 use crate::{
@@ -69,22 +70,22 @@ pub(crate) const LATE_EVENING: [AfterHours; 3] = [
 ///
 /// 查詢交易日或筆數失敗時回傳錯誤；重跑失敗只告警，不回傳錯誤。
 pub async fn ensure_after_hours() -> Result<()> {
-    ensure_after_hours_on(Local::now()).await
+    ensure_after_hours_on(TaipeiDateTime::now()).await
 }
 
 /// [`ensure_after_hours`] 的本體：`now` 決定檢查的日期與是否休市。
-async fn ensure_after_hours_on(now: DateTime<Local>) -> Result<()> {
+async fn ensure_after_hours_on(now: TaipeiDateTime) -> Result<()> {
     if is_market_closed(now).await {
         return Ok(());
     }
-    let date = now.date_naive();
+    let date = now.date();
     ensure(date, &LATE_EVENING).await?;
     ensure_official_ratios(date).await;
     Ok(())
 }
 
 /// 檢查 `items` 並在缺漏時重跑對應的排程、發告警。
-pub(crate) async fn ensure(date: NaiveDate, items: &[AfterHours]) -> Result<()> {
+pub(crate) async fn ensure(date: Date, items: &[AfterHours]) -> Result<()> {
     let report = check_after_hours(&PgQuoteRepository::new(), date, items, |item| async move {
         match item {
             AfterHours::Index => taiwan_stock_index::execute_for_date(date).await.map(|_| ()),
@@ -97,7 +98,7 @@ pub(crate) async fn ensure(date: NaiveDate, items: &[AfterHours]) -> Result<()> 
     })
     .await?;
     if let Some((title, body)) = report {
-        alert::send_alert(title, &body).await;
+        alert::notify_system(alert::Topic::SystemAfterHours, title, &body).await;
     }
     Ok(())
 }
@@ -106,7 +107,7 @@ pub(crate) async fn ensure(date: NaiveDate, items: &[AfterHours]) -> Result<()> 
 /// 回 `None`。當天沒有日線（休市、收盤尚未寫入）時不檢查。倉儲與重跑可替換以便測試。
 pub(crate) async fn check_after_hours<R, F, Fut>(
     repo: &R,
-    date: NaiveDate,
+    date: Date,
     items: &[AfterHours],
     recompute: F,
 ) -> Result<Option<(&'static str, String)>>
@@ -165,12 +166,7 @@ pub(crate) fn missing_after_hours(
 }
 
 /// 告警內容：缺哪些、重跑失敗的原因、重跑後的狀況。
-fn report(
-    date: NaiveDate,
-    before: &[AfterHours],
-    errors: &[String],
-    after: &[AfterHours],
-) -> String {
+fn report(date: Date, before: &[AfterHours], errors: &[String], after: &[AfterHours]) -> String {
     let names = |items: &[AfterHours]| {
         items
             .iter()
@@ -196,11 +192,12 @@ fn report(
 }
 
 /// 重跑當天的官方本益比與股價淨值比補寫；有補到資料（代表 17:30／20:30 的排程漏補）才告警。
-async fn ensure_official_ratios(date: NaiveDate) {
+async fn ensure_official_ratios(date: Date) {
     match official_ratio::backfill_range(date, date).await {
         Ok(summary) => {
             if let Some(body) = official_ratio_report(date, &summary) {
-                alert::send_alert("官方本益比已補寫", &body).await;
+                alert::notify_system(alert::Topic::SystemAfterHours, "官方本益比已補寫", &body)
+                    .await;
             } else {
                 tracing::info!("{date} 官方本益比不需補寫: {summary:?}");
             }
@@ -211,7 +208,7 @@ async fn ensure_official_ratios(date: NaiveDate) {
 
 /// 有補到日線時的告警內容；沒有補到回 `None`。
 pub(crate) fn official_ratio_report(
-    date: NaiveDate,
+    date: Date,
     summary: &official_ratio::Summary,
 ) -> Option<String> {
     (summary.updated_rows > 0).then(|| {

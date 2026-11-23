@@ -1,6 +1,7 @@
 //! ETF holding 主題的倉儲驗證。
 
 use super::*;
+use jiff::civil::date;
 
 #[tokio::test]
 #[cfg_attr(
@@ -93,7 +94,7 @@ async fn holding_history_keeps_every_period() {
         ..Default::default()
     };
     let symbols = [FAKE.to_string()];
-    let since = NaiveDate::from_ymd_opt(2000, 1, 1).expect("日期應合法");
+    let since = date(2000, 1, 1);
 
     repo.replace_portfolio(&portfolio(day(1), vec![holding(1, "2330", dec!(50))]))
         .await
@@ -123,7 +124,7 @@ async fn holding_history_keeps_every_period() {
     assert_eq!(p.previous.holdings[0].weight, dec!(51.0000));
     assert_eq!(p.current.holdings.len(), 2);
     // 最新一期在 since 之前收到的不列。
-    let future = NaiveDate::from_ymd_opt(2099, 1, 1).expect("日期應合法");
+    let future = date(2099, 1, 1);
     assert!(
         repo.holding_periods(&symbols, future)
             .await

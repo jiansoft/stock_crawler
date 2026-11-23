@@ -1,4 +1,5 @@
-use chrono::{DateTime, Local, NaiveDate};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 代表市場指數（例如：TAIEX 台灣加權股價指數）的領域實體。
@@ -9,7 +10,7 @@ pub struct MarketIndex {
     /// 指數分類代碼，例如 "TAIEX"
     pub category: String,
     /// 指數的交易日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 收盤指數數值
     pub index: Decimal,
     /// 相較於前一交易日的漲跌點數
@@ -21,9 +22,9 @@ pub struct MarketIndex {
     /// 成交股數
     pub trading_volume: Decimal,
     /// 建立時間
-    pub create_time: DateTime<Local>,
+    pub create_time: TaipeiDateTime,
     /// 最後更新時間
-    pub update_time: DateTime<Local>,
+    pub update_time: TaipeiDateTime,
 }
 
 impl MarketIndex {
@@ -39,14 +40,14 @@ impl MarketIndex {
     /// * `trading_volume` - 成交股數
     pub fn new(
         category: String,
-        date: NaiveDate,
+        date: Date,
         index: Decimal,
         change: Decimal,
         trade_value: Decimal,
         transaction: Decimal,
         trading_volume: Decimal,
     ) -> Self {
-        let now = Local::now();
+        let now = TaipeiDateTime::now();
         Self {
             category,
             date,
@@ -66,14 +67,14 @@ impl MarketIndex {
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
         category: String,
-        date: NaiveDate,
+        date: Date,
         index: Decimal,
         change: Decimal,
         trade_value: Decimal,
         transaction: Decimal,
         trading_volume: Decimal,
-        create_time: DateTime<Local>,
-        update_time: DateTime<Local>,
+        create_time: TaipeiDateTime,
+        update_time: TaipeiDateTime,
     ) -> Self {
         Self {
             category,

@@ -4,7 +4,8 @@
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use axum::{extract::Query, http::Uri, response::Response};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::offsets::{distribution, simulate_offsets};
 use super::track::{settlement, track_records};
@@ -29,6 +30,10 @@ pub struct BacktestStrategyGateway;
 #[async_trait]
 impl StrategyGateway for BacktestStrategyGateway {
     async fn latest_rebalance(&self, query: &str) -> Result<Option<StrategyRebalance>> {
+        // 與外部回測請求共用全域重運算名額；內部排程一律等候、不被拒絕
+        let _slot = crate::interfaces::web::data_api::analysis_gate::GATE
+            .acquire_internal()
+            .await?;
         let params = parse_query(query)?;
         let backtest = match Backtest::prepare(&params).await {
             Ok(backtest) => backtest.period_end_only(),
@@ -117,7 +122,7 @@ impl StrategyGateway for BacktestStrategyGateway {
     async fn settlement(
         &self,
         preset_name: &str,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Option<StrategySettlement>> {
         let mut records = PgStrategyRebalanceRepository::new()
             .list(preset_name)
@@ -135,6 +140,10 @@ impl StrategyGateway for BacktestStrategyGateway {
     }
 
     async fn offset_edge(&self, query: &str) -> Result<StrategyOffsetEdge> {
+        // 與外部回測請求共用全域重運算名額；內部排程一律等候、不被拒絕
+        let _slot = crate::interfaces::web::data_api::analysis_gate::GATE
+            .acquire_internal()
+            .await?;
         let params = parse_query(query)?;
         let backtest = match Backtest::prepare(&params).await {
             Ok(backtest) => backtest.period_end_only(),
@@ -174,9 +183,9 @@ fn parse_query(query: &str) -> Result<ScreenBacktestParams> {
 }
 
 /// `date` 的籌碼是否已入庫。
-async fn chip_ready(date: NaiveDate) -> Result<bool> {
+async fn chip_ready(date: Date) -> Result<bool> {
     sqlx::query_scalar(CHIP_READY_SQL)
-        .bind(date)
+        .bind(date.to_sqlx())
         .fetch_one(database::get_connection())
         .await
         .context("檢查籌碼資料失敗")

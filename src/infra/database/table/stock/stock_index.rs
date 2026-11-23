@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Local};
 use sqlx::{Postgres, Transaction, postgres::PgQueryResult};
 
 use crate::infra::database;
@@ -12,9 +12,9 @@ pub struct StockIndex {
     /// 股票代號。
     pub security_code: String,
     /// 建立時間。
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
 }
 
 impl StockIndex {
@@ -23,8 +23,8 @@ impl StockIndex {
         StockIndex {
             word_id: Default::default(),
             security_code,
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 

@@ -1,6 +1,7 @@
 //! 以本機 mock server 取代 Yahoo 與 nstock（G15）：季報補值排程以固定歷史日期跑完整流程。
 
-use chrono::{NaiveDate, TimeZone};
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::ymd;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -16,15 +17,12 @@ const SYMBOL: &str = "79979RF";
 const PROFILE_PAGE: &str =
     include_str!("../../../../../infra/crawler/yahoo/testdata/profile_page.html");
 
-fn now() -> DateTime<Local> {
+fn now() -> TaipeiDateTime {
     let (year, month, day) = NOW;
-    let naive = NaiveDate::from_ymd_opt(year, month, day)
-        .and_then(|date| date.and_hms_opt(12, 0, 0))
+    let naive = ymd(year, month, day)
+        .map(|date| date.at(12, 0, 0, 0))
         .expect("有效日期");
-    Local
-        .from_local_datetime(&naive)
-        .single()
-        .expect("本地時間沒有歧義")
+    TaipeiDateTime::from_datetime(naive).expect("合法時間")
 }
 
 /// 1991-Q1 ROE、ROA 都是 0 的財報。

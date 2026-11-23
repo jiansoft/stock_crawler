@@ -1,16 +1,18 @@
 //! 大盤趨勢狀態回應的轉換測試；計算本身的測試在 `domain::market_index::regime`。
 
-use chrono::NaiveDate;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 use super::*;
 
 /// 由新到舊的收盤序列；日期從 2026-10-15 往前每天一筆。
-fn series(closes: &[f64]) -> Vec<(NaiveDate, f64)> {
-    let latest = NaiveDate::from_ymd_opt(2026, 10, 15).expect("固定日期合法");
+fn series(closes: &[f64]) -> Vec<(Date, f64)> {
+    let latest = date(2026, 10, 15);
     closes
         .iter()
         .enumerate()
-        .map(|(index, close)| (latest - chrono::Days::new(index as u64), *close))
+        .map(|(index, close)| (latest - (index as i64).days(), *close))
         .collect()
 }
 

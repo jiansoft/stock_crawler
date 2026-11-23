@@ -19,7 +19,7 @@
 //! - 實測 10-21 的淨值、市價與證交所回填的正式淨值、收盤價逐檔一致。
 
 use anyhow::{Result, bail};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::{core::util, domain::etf::EtfNavHistoryPoint, infra::crawler::moneydj};
@@ -29,22 +29,18 @@ use crate::{core::util, domain::etf::EtfNavHistoryPoint, infra::crawler::moneydj
 /// # Errors
 ///
 /// HTTP 請求失敗，或回應格式不符（三段長度不同）時回傳錯誤。
-pub async fn visit(
-    symbol: &str,
-    from: NaiveDate,
-    to: NaiveDate,
-) -> Result<Vec<EtfNavHistoryPoint>> {
+pub async fn visit(symbol: &str, from: Date, to: Date) -> Result<Vec<EtfNavHistoryPoint>> {
     let text = util::http::get(&url(symbol, from, to), None).await?;
     parse(&text)
 }
 
 /// 走勢圖資料網址；上市、上櫃一律加 `.TW`。
-fn url(symbol: &str, from: NaiveDate, to: NaiveDate) -> String {
+fn url(symbol: &str, from: Date, to: Date) -> String {
     format!(
         "https://www.{host}/ETF/X/xdjbcd/Basic0003BCD.xdjbcd?etfid={symbol}.TW&b={from}&c={to}",
         host = moneydj::WEB_HOST,
-        from = from.format("%Y%m%d"),
-        to = to.format("%Y%m%d"),
+        from = from.strftime("%Y%m%d"),
+        to = to.strftime("%Y%m%d"),
     )
 }
 
@@ -79,7 +75,7 @@ pub(crate) fn parse(text: &str) -> Result<Vec<EtfNavHistoryPoint>> {
         .zip(prices)
         .filter_map(|((date, nav), price)| {
             Some(EtfNavHistoryPoint {
-                date: NaiveDate::parse_from_str(date.trim(), "%Y%m%d").ok()?,
+                date: Date::strptime("%Y%m%d", date.trim()).ok()?,
                 nav: positive(nav)?,
                 market_price: positive(price),
             })

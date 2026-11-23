@@ -1,6 +1,7 @@
 //! 共用快取查詢的測試。
 
 use crate::infra::database::table::revenue;
+use jiff::civil::date;
 
 use super::super::share::Share;
 
@@ -43,11 +44,11 @@ fn current_ip_round_trips_without_loading_external_sources() {
 #[tokio::test]
 async fn test_set_and_get_stock_index_round_trips() {
     use crate::domain::market_index::MarketIndex;
-    use chrono::NaiveDate;
+
     use rust_decimal::Decimal;
 
     let share = Share::new();
-    let date = NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
+    let date = date(2025, 6, 1);
     let index = MarketIndex::new(
         "TAIEX".to_string(),
         date,

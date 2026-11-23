@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::domain::performance::entity::{
     CagrCoverage, CagrMetric, CagrPeriod, CorporateAction, StockCagr,
@@ -28,7 +28,7 @@ pub trait CagrRepository: Send + Sync {
     /// 但該口徑為 NULL 的列。
     async fn fetch_ranking(
         &self,
-        date: NaiveDate,
+        date: Date,
         period: CagrPeriod,
         metric: CagrMetric,
         limit: i64,
@@ -51,7 +51,7 @@ pub trait CagrRepository: Send + Sync {
     ///
     /// 結果必須依**期間長度**（[`CagrPeriod::months`]）由短至長排序。注意不能
     /// 用資料庫端的 `period` 字串排序 —— 字典序會把 `Y10` 排在 `Y1H` 之前。
-    async fn fetch_by_symbol(&self, date: NaiveDate, stock_symbol: &str) -> Result<Vec<StockCagr>>;
+    async fn fetch_by_symbol(&self, date: Date, stock_symbol: &str) -> Result<Vec<StockCagr>>;
 
     /// 取得指定基準日與期間的樣本涵蓋統計。
     ///
@@ -61,23 +61,23 @@ pub trait CagrRepository: Send + Sync {
     /// 而涵蓋率正是 Y5／Y10 揭露存活者偏誤的依據，高估等於掩蓋問題。
     async fn fetch_coverage(
         &self,
-        date: NaiveDate,
+        date: Date,
         period: CagrPeriod,
         metric: CagrMetric,
     ) -> Result<CagrCoverage>;
 
     /// 取得最新一個已完成計算的基準日。尚無資料時回傳 `None`。
-    async fn fetch_latest_date(&self) -> Result<Option<NaiveDate>>;
+    async fn fetch_latest_date(&self) -> Result<Option<Date>>;
 
     /// 取得「已有計算結果、但缺少指定期間」的基準日，由早至晚排序。
     ///
     /// 用於新增統計期間後回填歷史：既有基準日不會自動長出新期間的資料，
     /// 但也不該把從未計算過的日期一併算進來 —— 那是另一回事（歷史初始化），
     /// 範圍與成本都完全不同。
-    async fn fetch_dates_missing_period(&self, period: CagrPeriod) -> Result<Vec<NaiveDate>>;
+    async fn fetch_dates_missing_period(&self, period: CagrPeriod) -> Result<Vec<Date>>;
 
     /// 刪除早於指定日期的歷史資料，回傳刪除筆數。
-    async fn delete_before(&self, date: NaiveDate) -> Result<u64>;
+    async fn delete_before(&self, date: Date) -> Result<u64>;
 }
 
 /// 公司行動（分割／減資）之倉儲介面。
@@ -95,5 +95,5 @@ pub trait CorporateActionRepository: Send + Sync {
     async fn fetch_by_symbol(&self, stock_symbol: &str) -> Result<Vec<CorporateAction>>;
 
     /// 列出在指定日期生效（恢復買賣）的所有公司行動，依股票代號排序。
-    async fn fetch_by_effective_date(&self, date: NaiveDate) -> Result<Vec<CorporateAction>>;
+    async fn fetch_by_effective_date(&self, date: Date) -> Result<Vec<CorporateAction>>;
 }

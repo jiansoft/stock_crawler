@@ -1,4 +1,4 @@
-use chrono::{Local, NaiveTime};
+use crate::core::util::datetime::TaipeiDateTime;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
@@ -102,9 +102,9 @@ impl StockExchange {
     /// 目前的時間是否為開盤時間
     pub fn is_open(&self) -> bool {
         // 獲取當前時間
-        let now = Local::now().time();
-        let start_time = NaiveTime::from_hms_opt(9, 0, 0).expect("Invalid start time");
-        let end_time = NaiveTime::from_hms_opt(13, 30, 0).expect("Invalid end time");
+        let now = TaipeiDateTime::now().time();
+        let start_time = crate::core::util::datetime::hms(9, 0, 0).expect("Invalid start time");
+        let end_time = crate::core::util::datetime::hms(13, 30, 0).expect("Invalid end time");
 
         // 判斷當前時間是否在範圍內
         now >= start_time && now <= end_time

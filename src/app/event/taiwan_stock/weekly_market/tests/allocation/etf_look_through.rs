@@ -1,6 +1,10 @@
 //! 持股配置偏離提醒的 ETF 穿透：成分股曝險、過期成分股與失敗降級。
 
 use super::*;
+use crate::core::util::datetime::today;
+use crate::domain::portfolio::view::HoldingView;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 持股與 ETF 成分股都由測試指定的假查詢。
 struct FakeEtfPositions {
@@ -11,7 +15,7 @@ struct FakeEtfPositions {
 
 #[async_trait]
 impl PortfolioPositionQuery for FakeEtfPositions {
-    async fn fetch_positions(&self, _: i64, _: &[String]) -> Result<Vec<CurrentPosition>> {
+    async fn fetch_positions(&self, _: &HoldingView, _: &[String]) -> Result<Vec<CurrentPosition>> {
         Ok(self.positions.clone())
     }
 
@@ -24,7 +28,7 @@ impl PortfolioPositionQuery for FakeEtfPositions {
     }
 }
 
-fn component(stock: &str, weight: f64, as_of: NaiveDate) -> DatedEtfComponent {
+fn component(stock: &str, weight: f64, as_of: Date) -> DatedEtfComponent {
     DatedEtfComponent {
         component: EtfLookThroughComponent {
             stock_symbol: stock.to_owned(),
@@ -38,7 +42,7 @@ fn component(stock: &str, weight: f64, as_of: NaiveDate) -> DatedEtfComponent {
 }
 
 /// 0050 占 50%（成分台積電 50%、鴻海 10%）、直接持有台積電 20%、鴻海 30%。
-fn etf_positions(as_of: NaiveDate, fail_components: bool) -> FakeEtfPositions {
+fn etf_positions(as_of: Date, fail_components: bool) -> FakeEtfPositions {
     FakeEtfPositions {
         positions: vec![
             CurrentPosition {
@@ -67,7 +71,13 @@ fn etf_targets() -> FakeTargets {
 #[tokio::test]
 async fn etf_look_through_reports_exposure_including_etf_components() {
     let positions = etf_positions(today(), false);
-    let sections = allocation_sections(&etf_targets(), &positions, today()).await;
+    let sections = allocation_sections(
+        &etf_targets(),
+        &positions,
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert_eq!(
         sections,
         vec![AllocationSection {
@@ -116,8 +126,14 @@ async fn etf_look_through_reports_exposure_including_etf_components() {
 /// 成分資料超過 45 天：0050 不計入，台積電只剩直接持有 20%（低配 10%），並註明未計入。
 #[tokio::test]
 async fn etf_look_through_skips_stale_components_and_notes_them() {
-    let stale = today() - chrono::Duration::days(46);
-    let sections = allocation_sections(&etf_targets(), &etf_positions(stale, false), today()).await;
+    let stale = today() - 46.days();
+    let sections = allocation_sections(
+        &etf_targets(),
+        &etf_positions(stale, false),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert_eq!(sections.len(), 1);
     assert_eq!(sections[0].uncovered_etfs, vec!["0050".to_owned()]);
     assert_eq!(sections[0].drifts[0].deviation_percent, -10.0);
@@ -132,8 +148,14 @@ async fn etf_look_through_skips_stale_components_and_notes_them() {
     );
 
     // 第 45 天仍算新鮮。
-    let edge = today() - chrono::Duration::days(45);
-    let sections = allocation_sections(&etf_targets(), &etf_positions(edge, false), today()).await;
+    let edge = today() - 45.days();
+    let sections = allocation_sections(
+        &etf_targets(),
+        &etf_positions(edge, false),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert!(sections[0].uncovered_etfs.is_empty());
 }
 
@@ -147,7 +169,13 @@ async fn etf_look_through_degrades_on_failure_and_stays_silent_within_tolerance(
         ],
         fail: false,
     };
-    let sections = allocation_sections(&targets, &etf_positions(today(), true), today()).await;
+    let sections = allocation_sections(
+        &targets,
+        &etf_positions(today(), true),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert_eq!(sections.len(), 1);
     assert_eq!(sections[0].dimension, TargetDimension::Stock);
 
@@ -156,9 +184,14 @@ async fn etf_look_through_degrades_on_failure_and_stays_silent_within_tolerance(
         fail: false,
     };
     assert!(
-        allocation_sections(&within, &etf_positions(today(), false), today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &within,
+            &etf_positions(today(), false),
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
 }
 

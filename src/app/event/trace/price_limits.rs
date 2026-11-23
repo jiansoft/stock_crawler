@@ -13,8 +13,9 @@
 //!
 //! Yahoo 類股報價之後每輪仍會覆蓋同一檔的限制，兩者並存時以盤中較新的 Yahoo 為準。
 
+use crate::core::util::datetime::today;
 use anyhow::{Result, anyhow};
-use chrono::{Local, NaiveDate};
+use jiff::civil::Date;
 
 use crate::infra::{
     cache::{PriceLimit, SHARE},
@@ -57,11 +58,7 @@ fn usable_limits(
 }
 
 /// 把一個市場的資料寫入今天的漲跌停快取，回傳資料日期與寫入筆數。
-fn apply(
-    data: ExchangePriceLimits,
-    today: NaiveDate,
-    ranges_apply_today: bool,
-) -> (NaiveDate, Applied) {
+fn apply(data: ExchangePriceLimits, today: Date, ranges_apply_today: bool) -> (Date, Applied) {
     let date = data.date;
     let (limits, applied) = usable_limits(data, ranges_apply_today);
     SHARE.set_price_limits(today, limits);
@@ -74,11 +71,11 @@ fn apply(
 ///
 /// 兩個市場都失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    execute_on(Local::now().date_naive()).await
+    execute_on(today()).await
 }
 
 /// [`execute`] 的實作，`today` 由呼叫端指定以便測試。
-async fn execute_on(today: NaiveDate) -> Result<()> {
+async fn execute_on(today: Date) -> Result<()> {
     let (listed, otc) = tokio::join!(twse::price_limit::visit(), tpex::price_limit::visit());
 
     let listed = listed.map(|data| {

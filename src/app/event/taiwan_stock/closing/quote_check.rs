@@ -1,6 +1,8 @@
 //! 收盤行情完整性：上市或上櫃有成交的檔數偏少就重跑收盤匯總並告警，臨時停市不告警。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 收盤資料完整性檢查回看的天數，涵蓋春節等長假，確保至少有前幾個交易日可比較。
 pub(super) const COVERAGE_LOOKBACK_DAYS: i64 = 14;
@@ -34,16 +36,13 @@ pub(crate) enum QuoteCheck {
 }
 
 /// 上市或上櫃有成交的檔數偏少就以 `rerun`（正式為 [`aggregate`]）重跑收盤匯總並告警。
-pub(super) async fn ensure_quotes<Rerun, RerunFut>(
-    date: NaiveDate,
-    rerun: Rerun,
-) -> Result<QuoteCheck>
+pub(super) async fn ensure_quotes<Rerun, RerunFut>(date: Date, rerun: Rerun) -> Result<QuoteCheck>
 where
     Rerun: FnOnce() -> RerunFut,
     RerunFut: std::future::Future<Output = Result<()>>,
 {
     let repo = PgQuoteRepository::new();
-    let from = date - chrono::Duration::days(COVERAGE_LOOKBACK_DAYS);
+    let from = date - (COVERAGE_LOOKBACK_DAYS).days();
     let check = check_quotes(
         date,
         || repo.fetch_market_traded_counts(from, date),
@@ -55,7 +54,7 @@ where
     )
     .await?;
     if let QuoteCheck::Rerun(title, body) = &check {
-        alert::send_alert(title, body).await;
+        alert::notify_system(alert::Topic::SystemClosingCheck, title, body).await;
     }
     Ok(check)
 }
@@ -64,7 +63,7 @@ where
 /// 匯總，重跑後兩個市場都沒有資料且 `index_count`（當天加權指數筆數）為 0 時判定臨時停市。
 /// 查詢與重跑可替換以便測試。
 pub(crate) async fn check_quotes<Counts, CountsFut, Rerun, RerunFut, Index, IndexFut>(
-    date: NaiveDate,
+    date: Date,
     traded_counts: Counts,
     rerun: Rerun,
     index_count: Index,
@@ -123,7 +122,7 @@ pub(crate) fn is_unscheduled_closure(after: &[Shortfall], index_count: i64) -> b
 }
 
 /// 比較當天與近期交易日各市場有成交的檔數，列出不完整的市場。
-pub(crate) fn shortfalls(date: NaiveDate, counts: &[MarketTradedCount]) -> Vec<Shortfall> {
+pub(crate) fn shortfalls(date: Date, counts: &[MarketTradedCount]) -> Vec<Shortfall> {
     [(2, "上市"), (4, "上櫃")]
         .into_iter()
         .filter_map(|(market_id, market)| {
@@ -150,7 +149,7 @@ pub(crate) fn shortfalls(date: NaiveDate, counts: &[MarketTradedCount]) -> Vec<S
 
 /// 告警內容：檢查時缺哪些市場、重跑是否成功、重跑後的狀況。
 pub(super) fn report(
-    date: NaiveDate,
+    date: Date,
     before: &[Shortfall],
     rerun_error: Option<&str>,
     after: &[Shortfall],

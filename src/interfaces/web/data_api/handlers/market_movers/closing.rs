@@ -1,6 +1,8 @@
 //! 收盤後排行：以 `"DailyQuotes"` 最新交易日計算（非交易時段路徑）。
 
 use super::*;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 /// 以 `"DailyQuotes"` 最新一個交易日計算排行（非交易時段路徑）。
 ///
@@ -13,10 +15,12 @@ pub(super) async fn closing_movers(
     market_id: i32,
     limit: u8,
 ) -> Response {
-    let latest: Result<Option<NaiveDate>, _> =
-        sqlx::query_scalar(r#"SELECT MAX("Date") FROM "DailyQuotes""#)
-            .fetch_one(database::get_connection())
-            .await;
+    let latest: Result<Option<Date>, _> = sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(
+        r#"SELECT MAX("Date") FROM "DailyQuotes""#,
+    )
+    .fetch_one(database::get_connection())
+    .await
+    .map(crate::infra::database::jiff_types::from_wire);
     let latest_date = match latest {
         Ok(Some(date)) => date,
         // 整張日線表都沒有資料才算「查無排行」；這是部署異常等級的狀況。
@@ -34,14 +38,14 @@ pub(super) async fn closing_movers(
         rank_by.closing_order_by()
     );
     let rows: Result<Vec<ClosingMoverRow>, _> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
-        .bind(latest_date)
+        .bind(latest_date.to_sqlx())
         .bind(market_id)
         .bind(i64::from(limit))
         .fetch_all(database::get_connection())
         .await;
     match rows {
         Ok(rows) => Json(MarketMoversResponse {
-            data_as_of: latest_date.format("%Y-%m-%d").to_string(),
+            data_as_of: latest_date.strftime("%Y-%m-%d").to_string(),
             source: "closing".to_owned(),
             is_realtime: false,
             rank_by: rank_by.as_str().to_owned(),

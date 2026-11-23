@@ -1,5 +1,6 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result, anyhow};
-use chrono::{DateTime, Datelike, Local, TimeDelta};
+use jiff::ToSpan;
 use rust_decimal::Decimal;
 use sqlx::{Row, postgres::PgQueryResult, postgres::PgRow};
 
@@ -30,7 +31,7 @@ pub struct StockDbRow {
     /// 股東權益報酬率（ROE）。
     pub return_on_equity: Decimal,
     /// 建立時間。
-    pub create_time: DateTime<Local>,
+    pub create_time: TaipeiDateTime,
     /// 交易所的市場編號參考 StockExchangeMarket
     pub stock_exchange_market_id: i32,
     /// 股票的產業分類編號 stock_industry
@@ -53,7 +54,7 @@ impl StockDbRow {
             net_asset_value_per_share: Default::default(),
             weight: Default::default(),
             return_on_equity: Default::default(),
-            create_time: Local::now(),
+            create_time: TaipeiDateTime::now(),
             stock_exchange_market_id: 0,
             stock_industry_id: 0,
             issued_share: 0,
@@ -116,8 +117,8 @@ JOIN
 WHERE
     current_row.security_code = stocks.stock_symbol;
 "#;
-        let now = Local::now();
-        let one_year_ago = now - TimeDelta::try_days(365).unwrap();
+        let now = TaipeiDateTime::now();
+        let one_year_ago = now - 365.days();
 
         sqlx::query(sql)
             .bind(now.year())

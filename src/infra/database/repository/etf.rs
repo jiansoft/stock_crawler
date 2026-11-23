@@ -11,11 +11,12 @@ mod profile;
 mod snapshot;
 pub(crate) mod tracking;
 
+use jiff_sqlx::ToSqlx;
 use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::{
     domain::etf::{
@@ -36,13 +37,9 @@ impl PgEtfRepository {
     }
 
     /// 加權指數已留存的市場交易日，由新到舊，供連續折溢價判定。
-    pub(crate) async fn recent_trading_dates(
-        &self,
-        until: NaiveDate,
-        limit: i64,
-    ) -> Result<Vec<NaiveDate>> {
-        Ok(sqlx::query_scalar("SELECT date FROM \"index\" WHERE category = 'TAIEX' AND date <= $1 ORDER BY date DESC LIMIT $2")
-            .bind(until).bind(limit).fetch_all(crate::infra::database::get_connection()).await?)
+    pub(crate) async fn recent_trading_dates(&self, until: Date, limit: i64) -> Result<Vec<Date>> {
+        Ok(sqlx::query_scalar::<_, jiff_sqlx::Date>("SELECT date FROM \"index\" WHERE category = 'TAIEX' AND date <= $1 ORDER BY date DESC LIMIT $2")
+            .bind(until.to_sqlx()).bind(limit).fetch_all(crate::infra::database::get_connection()).await.map(|rows| rows.into_iter().map(crate::infra::database::jiff_types::from_wire).collect::<Vec<_>>())?)
     }
 }
 
@@ -99,7 +96,7 @@ impl EtfRepository for PgEtfRepository {
     async fn nav_series(
         &self,
         stock_symbols: &[String],
-        from: NaiveDate,
+        from: Date,
     ) -> Result<HashMap<String, Vec<PriceBar>>> {
         nav::nav_series(stock_symbols, from).await
     }
@@ -115,7 +112,7 @@ impl EtfRepository for PgEtfRepository {
     async fn holding_periods(
         &self,
         stock_symbols: &[String],
-        recorded_since: NaiveDate,
+        recorded_since: Date,
     ) -> Result<Vec<EtfHoldingPeriods>> {
         holding::holding_periods(stock_symbols, recorded_since).await
     }

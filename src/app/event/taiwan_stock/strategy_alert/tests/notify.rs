@@ -61,6 +61,7 @@ async fn notify_continues_after_failures() {
         &idle,
         &recorder,
         &FakeFundamentals::default(),
+        &FakeOverlap::default(),
         &[strategy("甲"), strategy("乙")],
         day(16),
     )
@@ -76,6 +77,7 @@ async fn notify_continues_after_failures() {
         &failing,
         &recorder,
         &FakeFundamentals::default(),
+        &FakeOverlap::default(),
         &[strategy("甲"), strategy("乙")],
         day(16),
     )
@@ -88,9 +90,16 @@ async fn notify_continues_after_failures() {
     );
     assert_eq!(failing.queries.lock().expect("鎖未中毒").len(), 2);
 
-    notify(&idle, &recorder, &FakeFundamentals::default(), &[], day(16))
-        .await
-        .expect("沒有策略");
+    notify(
+        &idle,
+        &recorder,
+        &FakeFundamentals::default(),
+        &FakeOverlap::default(),
+        &[],
+        day(16),
+    )
+    .await
+    .expect("沒有策略");
     // 都不是換股日（或失敗），不寫換股紀錄。
     assert!(recorder.saved.lock().expect("鎖未中毒").is_empty());
 }
@@ -129,18 +138,15 @@ async fn run_only_alerts_on_rebalance_day() {
 }
 
 /// 換股日：寫入紀錄、依策略名稱結算上一期後發通知；結算失敗只略過結算，不影響通知與其他策略。
+/// 持股對照只經持股段（替身）產生，市場段不讀實際持股，因此不需要資料庫（7.3 防漏）。
 #[tokio::test]
-#[cfg_attr(
-    not(feature = "integration-tests"),
-    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
-)]
 async fn notify_settles_previous_period_on_rebalance_day() {
-    dotenvy::dotenv().ok();
     let strategy = AlertStrategy {
         name: "甲".to_owned(),
         query: "from=2019-01-02".to_owned(),
     };
     let recorder = FakeRecorder::default();
+    let overlap = FakeOverlap::default();
     let settled = FakeGateway {
         settlement: Some(settlement(50)),
         ..gateway(Some(rebalance()))
@@ -149,6 +155,7 @@ async fn notify_settles_previous_period_on_rebalance_day() {
         &settled,
         &recorder,
         &FakeFundamentals::default(),
+        &overlap,
         std::slice::from_ref(&strategy),
         day(16),
     )
@@ -156,6 +163,11 @@ async fn notify_settles_previous_period_on_rebalance_day() {
     .expect("換股通知成功");
     assert_eq!(
         settled.settled.lock().expect("鎖未中毒").as_slice(),
+        [("甲".to_owned(), day(16))]
+    );
+    // 每次換股恰好交給持股段一次（帶策略名稱）；持股查詢只在持股段的 build 內。
+    assert_eq!(
+        overlap.calls.lock().expect("鎖未中毒").as_slice(),
         [("甲".to_owned(), day(16))]
     );
 
@@ -167,6 +179,7 @@ async fn notify_settles_previous_period_on_rebalance_day() {
         &failing,
         &recorder,
         &FakeFundamentals::failing(),
+        &FakeOverlap::default(),
         &[strategy],
         day(16),
     )
@@ -174,4 +187,24 @@ async fn notify_settles_previous_period_on_rebalance_day() {
     .expect("結算失敗不影響通知");
     assert_eq!(failing.settled.lock().expect("鎖未中毒").len(), 1);
     assert_eq!(recorder.saved.lock().expect("鎖未中毒").len(), 2);
+}
+
+/// 不是換股日時不產生持股段。
+#[tokio::test]
+async fn overlap_only_on_rebalance_day() {
+    let overlap = FakeOverlap::default();
+    notify(
+        &gateway(None),
+        &FakeRecorder::default(),
+        &FakeFundamentals::default(),
+        &overlap,
+        &[AlertStrategy {
+            name: "甲".to_owned(),
+            query: "from=2019-01-02".to_owned(),
+        }],
+        day(16),
+    )
+    .await
+    .expect("不換股");
+    assert!(overlap.calls.lock().expect("鎖未中毒").is_empty());
 }

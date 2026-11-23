@@ -2,7 +2,8 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use sqlx::{Row, postgres::PgRow};
 
@@ -42,7 +43,7 @@ impl CorporateActionRepository for PgCorporateActionRepository {
 
         let result = sqlx::query(sql)
             .bind(&action.stock_symbol)
-            .bind(action.effective_date)
+            .bind(action.effective_date.to_sqlx())
             .bind(action_type)
             .bind(action.share_ratio)
             .bind(&action.note)
@@ -70,7 +71,7 @@ impl CorporateActionRepository for PgCorporateActionRepository {
         rows.iter().map(corporate_action_from_row).collect()
     }
 
-    async fn fetch_by_effective_date(&self, date: NaiveDate) -> Result<Vec<CorporateAction>> {
+    async fn fetch_by_effective_date(&self, date: Date) -> Result<Vec<CorporateAction>> {
         let sql = r#"
             SELECT stock_symbol, effective_date, action_type, share_ratio, note
             FROM corporate_action
@@ -79,7 +80,7 @@ impl CorporateActionRepository for PgCorporateActionRepository {
         "#;
 
         let rows = sqlx::query(sql)
-            .bind(date)
+            .bind(date.to_sqlx())
             .fetch_all(database::get_connection())
             .await
             .with_context(|| format!("Failed to fetch corporate actions effective on {date}"))?;
@@ -98,7 +99,10 @@ fn corporate_action_from_row(row: &PgRow) -> Result<CorporateAction> {
 
     Ok(CorporateAction {
         stock_symbol: row.try_get::<String, _>("stock_symbol")?,
-        effective_date: row.try_get::<NaiveDate, _>("effective_date")?,
+        effective_date: crate::infra::database::jiff_types::try_get::<Date, _>(
+            row,
+            "effective_date",
+        )?,
         action_type,
         share_ratio,
         note: row.try_get::<String, _>("note")?,

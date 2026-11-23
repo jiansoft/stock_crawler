@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{Datelike, NaiveDate};
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use sqlx::FromRow;
 
@@ -45,9 +45,7 @@ pub struct StockDividendInfo {
 ///
 /// `dividend.year` 是發放年度，除權息日可能在前一年（12 月除息、隔年發放），所以年度條件涵蓋
 /// 除權息日當年與下一年；實際比對以除權息日字串為準。
-pub async fn fetch_stocks_with_dividends_on_date(
-    date: NaiveDate,
-) -> Result<Vec<StockDividendInfo>> {
+pub async fn fetch_stocks_with_dividends_on_date(date: Date) -> Result<Vec<StockDividendInfo>> {
     let sql = r#"
 SELECT
        s.stock_symbol,
@@ -82,7 +80,7 @@ WHERE
 
     sqlx::query_as::<_, StockDividendInfo>(sql)
         .bind(date.year())
-        .bind(date.format("%Y-%m-%d").to_string())
+        .bind(date.strftime("%Y-%m-%d").to_string())
         .fetch_all(database::get_connection())
         .await
         .context(format!(

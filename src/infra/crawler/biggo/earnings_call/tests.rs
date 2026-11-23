@@ -1,5 +1,7 @@
 //! BigGo 法說會的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 use serde::de::DeserializeOwned;
 
 use super::*;
@@ -19,7 +21,7 @@ fn parse_list_reads_calls_newest_first() {
     .unwrap();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[0].call_id, "TW_2330.TW_2026-07-16");
-    assert_eq!(calls[0].date, NaiveDate::from_ymd_opt(2026, 7, 16).unwrap());
+    assert_eq!(calls[0].date, date(2026, 7, 16));
     assert!(calls[0].has_transcript);
     assert!(calls[0].title.contains("法說會"));
     assert!(calls[0].date > calls[1].date);
@@ -41,7 +43,7 @@ fn parse_detail_reads_ai_sections() {
     let raw: RawDetail = data(include_str!("../testdata/earnings_call_detail_2330.json")).unwrap();
     let detail = parse_detail(raw);
     assert_eq!(detail.call_id, "TW_2330.TW_2026-07-16");
-    assert_eq!(detail.date, NaiveDate::from_ymd_opt(2026, 7, 16));
+    assert_eq!(detail.date, ymd(2026, 7, 16));
     assert!(detail.is_ready());
     assert!(detail.summary.contains("台積電"));
     assert!(!detail.outlook.is_empty());

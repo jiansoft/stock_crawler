@@ -6,13 +6,13 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 一天的市場廣度原始家數。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BreadthDay {
     /// 統計日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 收盤高於 20 日均線的家數。
     pub above_ma20: i32,
     /// 收盤不高於 20 日均線的家數。
@@ -35,7 +35,7 @@ pub struct BreadthDay {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketBreadth {
     /// 統計日期（`until` 之前最近一個有統計的交易日）。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 站上 20 日均線的比例（%）；當天沒有家數為 `None`。
     pub above_ma20_percent: Option<f64>,
     /// 站上 60 日均線的比例（%）。
@@ -56,11 +56,7 @@ pub struct MarketBreadth {
 #[async_trait]
 pub trait BreadthQuery: Send + Sync {
     /// 上市櫃合併在 `until`（含，`None` 為不限）之前最近 `limit` 個交易日的市場廣度，由新到舊。
-    async fn fetch_breadth(
-        &self,
-        until: Option<NaiveDate>,
-        limit: usize,
-    ) -> Result<Vec<BreadthDay>>;
+    async fn fetch_breadth(&self, until: Option<Date>, limit: usize) -> Result<Vec<BreadthDay>>;
 }
 
 /// 讀取 `until` 之前最近 `window + 1` 個交易日並彙總；沒有統計回 `None`。
@@ -70,7 +66,7 @@ pub trait BreadthQuery: Send + Sync {
 /// 查詢失敗時回傳錯誤。
 pub async fn load(
     query: &impl BreadthQuery,
-    until: Option<NaiveDate>,
+    until: Option<Date>,
     window: usize,
 ) -> Result<Option<MarketBreadth>> {
     let days = query.fetch_breadth(until, window + 1).await?;

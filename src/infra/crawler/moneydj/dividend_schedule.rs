@@ -20,8 +20,9 @@
 //! - 發放日只有 `MM/DD`，年份要用除權息日推算；跨年（例如 12 月除息、隔年 1 月發放）
 //!   時月日會比除權息日小，此時年份加一。
 
+use crate::core::util::datetime::ymd;
 use anyhow::Result;
-use chrono::{Datelike, NaiveDate};
+use jiff::civil::Date;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rust_decimal::Decimal;
@@ -55,7 +56,7 @@ pub struct DividendSchedule {
     /// 股票名稱。
     pub name: String,
     /// 除權除息交易日。
-    pub ex_date: NaiveDate,
+    pub ex_date: Date,
     /// 是否為除息。
     pub is_cash: bool,
     /// 是否為除權。
@@ -65,7 +66,7 @@ pub struct DividendSchedule {
     /// 股票股利（元/股）。
     pub stock_dividend: Option<Decimal>,
     /// 現金股利發放日；純除權的資料列一律為 `None`（見模組說明）。
-    pub cash_payable_date: Option<NaiveDate>,
+    pub cash_payable_date: Option<Date>,
 }
 
 /// 「股利」欄位在表格中的索引。
@@ -150,14 +151,14 @@ fn parse_schedules(html: &str) -> Vec<DividendSchedule> {
 }
 
 /// 解析 `2026/09/08` 形式的西元日期。
-fn parse_date(value: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(value.trim(), "%Y/%m/%d").ok()
+fn parse_date(value: &str) -> Option<Date> {
+    Date::strptime("%Y/%m/%d", value.trim()).ok()
 }
 
 /// 解析只有 `MM/DD` 的發放日，並以除權息日推算年份。
 ///
 /// 發放日一定在除權息日之後；若月日比除權息日小，代表跨到隔年。
-fn parse_payable_date(value: &str, ex_date: NaiveDate) -> Option<NaiveDate> {
+fn parse_payable_date(value: &str, ex_date: Date) -> Option<Date> {
     let trimmed = value.trim();
     let mut parts = trimmed.split('/');
     let month = parts.next()?.trim().parse::<u32>().ok()?;
@@ -166,13 +167,15 @@ fn parse_payable_date(value: &str, ex_date: NaiveDate) -> Option<NaiveDate> {
         return None;
     }
 
-    let year = if (month, day) < (ex_date.month(), ex_date.day()) {
-        ex_date.year() + 1
+    let ex_month = u32::from(ex_date.month().unsigned_abs());
+    let ex_day = u32::from(ex_date.day().unsigned_abs());
+    let year = if (month, day) < (ex_month, ex_day) {
+        i32::from(ex_date.year()) + 1
     } else {
-        ex_date.year()
+        i32::from(ex_date.year())
     };
 
-    NaiveDate::from_ymd_opt(year, month, day)
+    ymd(year, month, day)
 }
 
 /// 用指定的正則從股利欄位取出數值。

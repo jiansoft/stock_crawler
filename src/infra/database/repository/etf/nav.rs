@@ -1,10 +1,12 @@
 //! ETF 每日淨值：MIS 預估淨值入庫與前一營業日正式淨值回填、MoneyDJ 歷史回補、淨值序列、
 //! 近幾日的申贖金額、最新單位數與近期折溢價（`etf_daily_nav`）。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
@@ -142,8 +144,10 @@ struct WeeklyFlowRow {
     net_flow: f64,
     premium_avg: Option<f64>,
     premium_last: Option<f64>,
-    from_date: NaiveDate,
-    to_date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    from_date: Date,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    to_date: Date,
 }
 
 pub(super) async fn save_navs(records: &[EtfNavRecord]) -> Result<u64> {
@@ -151,26 +155,28 @@ pub(super) async fn save_navs(records: &[EtfNavRecord]) -> Result<u64> {
         return Ok(0);
     }
     // 同一批內主鍵重複時 ON CONFLICT 會報錯，以最後一筆為準。
-    let mut unique: HashMap<(NaiveDate, &str), &EtfNavRecord> = HashMap::new();
+    let mut unique: HashMap<(Date, &str), &EtfNavRecord> = HashMap::new();
     for record in records {
         unique.insert((record.date, record.stock_symbol.as_str()), record);
     }
     let rows: Vec<&EtfNavRecord> = unique.into_values().collect();
-    let dates: Vec<NaiveDate> = rows.iter().map(|r| r.date).collect();
+    let dates: Vec<Date> = rows.iter().map(|r| r.date).collect();
     let symbols: Vec<&str> = rows.iter().map(|r| r.stock_symbol.as_str()).collect();
     let units: Vec<i64> = rows.iter().map(|r| r.outstanding_units).collect();
     let changes: Vec<i64> = rows.iter().map(|r| r.units_change).collect();
     let prices: Vec<Option<Decimal>> = rows.iter().map(|r| r.market_price).collect();
     let navs: Vec<Option<Decimal>> = rows.iter().map(|r| r.estimated_nav).collect();
     let premiums: Vec<Option<Decimal>> = rows.iter().map(|r| r.premium_rate).collect();
-    let times: Vec<Option<DateTime<Utc>>> = rows
-        .iter()
-        .map(|r| r.source_time.map(|t| t.with_timezone(&Utc)))
-        .collect();
+    let times: Vec<Option<TaipeiDateTime>> = rows.iter().map(|r| r.source_time).collect();
 
     let mut tx = database::get_tx().await?;
     let written = sqlx::query(SAVE_NAVS_SQL)
-        .bind(&dates)
+        .bind(
+            dates
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(&symbols)
         .bind(&units)
         .bind(&changes)
@@ -184,11 +190,16 @@ pub(super) async fn save_navs(records: &[EtfNavRecord]) -> Result<u64> {
         .rows_affected();
 
     let previous: Vec<&&EtfNavRecord> = rows.iter().filter(|r| r.previous_nav.is_some()).collect();
-    let prev_dates: Vec<NaiveDate> = previous.iter().map(|r| r.date).collect();
+    let prev_dates: Vec<Date> = previous.iter().map(|r| r.date).collect();
     let prev_symbols: Vec<&str> = previous.iter().map(|r| r.stock_symbol.as_str()).collect();
     let prev_navs: Vec<Option<Decimal>> = previous.iter().map(|r| r.previous_nav).collect();
     let backfilled = sqlx::query(BACKFILL_NAV_SQL)
-        .bind(&prev_dates)
+        .bind(
+            prev_dates
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(&prev_symbols)
         .bind(&prev_navs)
         .execute(&mut *tx)
@@ -206,12 +217,17 @@ pub(super) async fn insert_nav_history(
     if points.is_empty() {
         return Ok(0);
     }
-    let dates: Vec<NaiveDate> = points.iter().map(|p| p.date).collect();
+    let dates: Vec<Date> = points.iter().map(|p| p.date).collect();
     let navs: Vec<Decimal> = points.iter().map(|p| p.nav).collect();
     let prices: Vec<Option<Decimal>> = points.iter().map(|p| p.market_price).collect();
     Ok(sqlx::query(INSERT_NAV_HISTORY_SQL)
         .bind(stock_symbol)
-        .bind(&dates)
+        .bind(
+            dates
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(&navs)
         .bind(&prices)
         .execute(database::get_connection())
@@ -222,14 +238,20 @@ pub(super) async fn insert_nav_history(
 
 pub(super) async fn nav_series(
     stock_symbols: &[String],
-    from: NaiveDate,
+    from: Date,
 ) -> Result<HashMap<String, Vec<PriceBar>>> {
-    let rows: Vec<(String, NaiveDate, f64)> = sqlx::query_as(NAV_SERIES_SQL)
-        .bind(stock_symbols)
-        .bind(from)
-        .fetch_all(database::get_connection())
-        .await
-        .context("Failed to fetch ETF nav series")?;
+    let rows: Vec<(String, Date, f64)> =
+        sqlx::query_as::<_, (String, jiff_sqlx::Date, f64)>(NAV_SERIES_SQL)
+            .bind(stock_symbols)
+            .bind(from.to_sqlx())
+            .fetch_all(database::get_connection())
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|(c0, c1, c2)| (c0, crate::infra::database::jiff_types::from_wire(c1), c2))
+                    .collect::<Vec<_>>()
+            })
+            .context("Failed to fetch ETF nav series")?;
     let mut series: HashMap<String, Vec<PriceBar>> = HashMap::new();
     for (symbol, date, value) in rows {
         series.entry(symbol).or_default().push(PriceBar {
@@ -265,11 +287,25 @@ pub(super) async fn weekly_flows(days: i64) -> Result<Vec<EtfWeeklyFlow>> {
 pub(super) async fn latest_units(
     stock_symbols: &[String],
 ) -> Result<HashMap<String, UnitsChangePoint>> {
-    let rows: Vec<(String, NaiveDate, i64, i64, Option<f64>)> = sqlx::query_as(LATEST_UNITS_SQL)
-        .bind(stock_symbols)
-        .fetch_all(database::get_connection())
-        .await
-        .context("Failed to fetch ETF units")?;
+    let rows: Vec<(String, Date, i64, i64, Option<f64>)> =
+        sqlx::query_as::<_, (String, jiff_sqlx::Date, i64, i64, Option<f64>)>(LATEST_UNITS_SQL)
+            .bind(stock_symbols)
+            .fetch_all(database::get_connection())
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|(c0, c1, c2, c3, c4)| {
+                        (
+                            c0,
+                            crate::infra::database::jiff_types::from_wire(c1),
+                            c2,
+                            c3,
+                            c4,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .context("Failed to fetch ETF units")?;
     Ok(rows
         .into_iter()
         .map(|(symbol, date, outstanding_units, units_change, nav)| {
@@ -290,12 +326,18 @@ pub(super) async fn recent_premiums(
     stock_symbols: &[String],
     days: i64,
 ) -> Result<HashMap<String, Vec<PremiumPoint>>> {
-    let rows: Vec<(String, NaiveDate, Decimal)> = sqlx::query_as(RECENT_PREMIUMS_SQL)
-        .bind(stock_symbols)
-        .bind(days)
-        .fetch_all(database::get_connection())
-        .await
-        .context("Failed to fetch ETF premiums")?;
+    let rows: Vec<(String, Date, Decimal)> =
+        sqlx::query_as::<_, (String, jiff_sqlx::Date, Decimal)>(RECENT_PREMIUMS_SQL)
+            .bind(stock_symbols)
+            .bind(days)
+            .fetch_all(database::get_connection())
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|(c0, c1, c2)| (c0, crate::infra::database::jiff_types::from_wire(c1), c2))
+                    .collect::<Vec<_>>()
+            })
+            .context("Failed to fetch ETF premiums")?;
     let mut out: HashMap<String, Vec<PremiumPoint>> = HashMap::new();
     for (symbol, date, premium) in rows {
         out.entry(symbol).or_default().push(PremiumPoint {

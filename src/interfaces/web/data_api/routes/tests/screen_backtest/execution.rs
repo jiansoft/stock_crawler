@@ -1,6 +1,7 @@
 //! 條件選股回測 endpoint 整合測試：次日開盤成交（`execution_price=next_open`）與滑價（`slippage_bps`）。
 
 use super::*;
+use jiff_sqlx::ToSqlx;
 
 /// 種入 BA 次日（03-02）起的 5 日報酬與 03-02、03-09 的開收盤：03-02 開 100 收 110、03-09 收 121
 /// 開 133.1，收盤到收盤 +10%，開盤到開盤 +33.1%。
@@ -8,7 +9,7 @@ async fn seed_next_open(pool: &sqlx::PgPool) {
     sqlx::query(
         "INSERT INTO daily_forward_return (date, stock_symbol, return_5d) VALUES ($1, '79979BA', 10)",
     )
-    .bind(day(2))
+    .bind(day(2).to_sqlx())
     .execute(pool)
     .await
     .expect("種入次日報酬");

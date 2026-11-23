@@ -1,6 +1,6 @@
 //! 財務報表實體：特定年度與季度的毛利率、營業利益率、EPS 等。
 
-use chrono::{DateTime, Local};
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 
 /// 財務報表領域實體。
@@ -37,9 +37,9 @@ pub struct FinancialStatement {
     /// 資產報酬率 (ROA, %)
     pub return_on_assets: Decimal,
     /// 建立時間
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
 }
 
 impl Default for FinancialStatement {
@@ -59,8 +59,8 @@ impl Default for FinancialStatement {
             profit_before_tax: Decimal::ZERO,
             return_on_equity: Decimal::ZERO,
             return_on_assets: Decimal::ZERO,
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 }

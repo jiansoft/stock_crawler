@@ -19,7 +19,8 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::RepositoryError;
@@ -125,7 +126,12 @@ impl PgQuoteRepository {
         "#;
 
         sqlx::query(sql)
-            .bind(&dates)
+            .bind(
+                dates
+                    .iter()
+                    .map(|value| value.to_sqlx())
+                    .collect::<Vec<_>>(),
+            )
             .bind(&symbols)
             .bind(&closing_prices)
             .execute(database::get_connection())
@@ -173,7 +179,7 @@ impl QuoteRepository for PgQuoteRepository {
         TableDailyQuote::insert_missing_batch(&table_entities).await
     }
 
-    async fn fetch_quotes_by_date(&self, date: NaiveDate) -> Result<Vec<DomainDailyQuote>> {
+    async fn fetch_quotes_by_date(&self, date: Date) -> Result<Vec<DomainDailyQuote>> {
         // 讀取指定交易日的所有日報價 Table 資料
         let table_quotes = daily_quote::fetch_daily_quotes_by_date(date).await?;
         // 將所有 Table 實體轉換為領域實體清單
@@ -184,20 +190,16 @@ impl QuoteRepository for PgQuoteRepository {
         Ok(domain_quotes)
     }
 
-    async fn delete_quotes_by_date(&self, date: NaiveDate) -> Result<()> {
+    async fn delete_quotes_by_date(&self, date: Date) -> Result<()> {
         // 刪除指定交易日既有的 DailyQuotes 資料
         sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
-            .bind(date)
+            .bind(date.to_sqlx())
             .execute(database::get_connection())
             .await?;
         Ok(())
     }
 
-    async fn replace_quotes_by_date(
-        &self,
-        date: NaiveDate,
-        quotes: &[DomainDailyQuote],
-    ) -> Result<u64> {
+    async fn replace_quotes_by_date(&self, date: Date, quotes: &[DomainDailyQuote]) -> Result<u64> {
         // 先把領域實體轉成資料庫 Table 模型。這一步只在記憶體中進行，
         // 即使失敗也完全不會影響資料庫。
         let table_entities: Vec<TableDailyQuote> = quotes
@@ -212,7 +214,7 @@ impl QuoteRepository for PgQuoteRepository {
         // 步驟 1：刪除該交易日既有的報價。因為還沒 commit，
         // 這個刪除對其他連線是看不見的；若後續寫入失敗，刪除也會一起被取消。
         sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
-            .bind(date)
+            .bind(date.to_sqlx())
             .execute(&mut *tx)
             .await?;
 
@@ -249,7 +251,7 @@ impl QuoteRepository for PgQuoteRepository {
     async fn recalculate_moving_averages(
         &self,
         stock_symbols: &[String],
-        from: NaiveDate,
+        from: Date,
     ) -> Result<u64> {
         TableDailyQuote::recalculate_moving_averages(stock_symbols, from).await
     }
@@ -258,13 +260,13 @@ impl QuoteRepository for PgQuoteRepository {
         TableQuoteHistoryRecord::rebuild_price_extremes(stock_symbols).await
     }
 
-    async fn fetch_symbols_quoted_since(&self, from: NaiveDate) -> Result<Vec<String>> {
+    async fn fetch_symbols_quoted_since(&self, from: Date) -> Result<Vec<String>> {
         daily_quote::fetch_symbols_quoted_since(from).await
     }
 
     // === 最新報價 (LastDailyQuote) ===
 
-    async fn makeup_for_the_lack_daily_quotes(&self, date: NaiveDate) -> Result<u64> {
+    async fn makeup_for_the_lack_daily_quotes(&self, date: Date) -> Result<u64> {
         // 呼叫 Table 實作補齊指定交易日缺漏的收盤資料
         let result = daily_quote::makeup_for_the_lack_daily_quotes(date).await?;
         Ok(result.rows_affected())
@@ -272,8 +274,8 @@ impl QuoteRepository for PgQuoteRepository {
 
     async fn fetch_market_traded_counts(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<Vec<MarketTradedCount>> {
         Ok(daily_quote::fetch_market_traded_counts(from, to)
             .await?
@@ -353,7 +355,7 @@ impl QuoteRepository for PgQuoteRepository {
         Ok(())
     }
 
-    async fn save_stock_price_stats(&self, date: NaiveDate) -> Result<()> {
+    async fn save_stock_price_stats(&self, date: Date) -> Result<()> {
         // 呼叫 Table 實作的 upsert 方法計算並保存當日之全市場統計
         TableDailyStockPriceStats::upsert(date, &mut None).await?;
         Ok(())

@@ -1,12 +1,14 @@
 //! `/stocks/{symbol}/dividend-fill` handler：最近幾次除權息的填息天數的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
 fn row(ex_date: &str) -> ExRightEvent {
     ExRightEvent {
-        ex_date: NaiveDate::parse_from_str(ex_date, "%Y-%m-%d").expect("測試日期合法"),
+        ex_date: Date::strptime("%Y-%m-%d", ex_date).expect("測試日期合法"),
         cash_dividend: dec!(1),
         stock_dividend: Decimal::ZERO,
     }
@@ -15,7 +17,7 @@ fn row(ex_date: &str) -> ExRightEvent {
 /// 最新收盤日之後（尚未除息）的事件略過，其餘由新到舊取前 limit 筆；沒有日線時為空。
 #[test]
 fn select_events_filters_and_limits() {
-    let latest = NaiveDate::from_ymd_opt(2026, 10, 8);
+    let latest = ymd(2026, 10, 8);
     let rows = || {
         vec![
             row("2025-06-12"),

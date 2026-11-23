@@ -10,7 +10,7 @@
 //! 沒有漲跌幅限制的證券（國外成分 ETF 等）漲停寫 `9,999.95`、跌停寫 `0.01`。
 
 use anyhow::{Result, anyhow};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::infra::crawler::{share::ExchangePriceLimits, twse};
@@ -47,7 +47,7 @@ fn parse(response: Response) -> Result<ExchangePriceLimits> {
     if !response.stat.eq_ignore_ascii_case("OK") {
         return Err(anyhow!("TWT84U 回應 stat={}", response.stat));
     }
-    let date = NaiveDate::parse_from_str(&response.date, "%Y%m%d")
+    let date = Date::strptime("%Y%m%d", &response.date)
         .map_err(|why| anyhow!("TWT84U 日期 {:?} 無法解析: {why}", response.date))?;
     let column = |name: &str| {
         response

@@ -1,6 +1,8 @@
 //! `fetch_lagging_statements`：損益表落後官方季報的股票。
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::ToSpan;
 
 /// 落後判斷用的假代號：LA 官方今天公布 Q2、Yahoo 只到 Q1；LB 官方今天公布 Q2、BigGo 已有 Q2；
 /// LC 官方 Q2 是 60 天前公布；LD 官方 10 天前公布 Q1（另有年度列）、損益表完全沒有；
@@ -116,9 +118,7 @@ async fn test_fetch_lagging_statements() {
     );
     // SQL 以台北時間（`AT TIME ZONE 'Asia/Taipei'`）換算公布日；預期值也要用 UTC+8，不能用執行機器的
     // 本地時區（CI 是 UTC，台北 00:00～08:00 之間兩邊會差一天）。
-    let taipei = chrono::FixedOffset::east_opt(8 * 3600).expect("UTC+8 合法");
-    let ten_days_ago =
-        (chrono::Utc::now().with_timezone(&taipei) - chrono::Duration::days(10)).date_naive();
+    let ten_days_ago = (TaipeiDateTime::now() - 10.days()).date();
     assert_eq!(
         stale,
         [LaggingStatement {

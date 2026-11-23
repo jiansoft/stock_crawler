@@ -1,7 +1,8 @@
 //! Data API Bearer token 驗證 middleware。
 //!
-//! 健康檢查與 Swagger UI 不會套用此 middleware；其餘 `/api/v1` 路徑都必須
-//! 使用 `DATA_API_KEY`。比較採固定時間演算法，避免以提早結束的字串比較洩漏 key 前綴。
+//! 用於市場類端點：必須使用 `DATA_API_KEY`。持股類端點（`/portfolio/*`）改由
+//! `scope.rs` 檢查 `DATA_API_PERSONAL_KEY` 與資料範圍；健康檢查與 Swagger UI 不驗證。
+//! 比較採固定時間演算法，避免以提早結束的字串比較洩漏 key 前綴。
 
 use axum::{
     body::Body,

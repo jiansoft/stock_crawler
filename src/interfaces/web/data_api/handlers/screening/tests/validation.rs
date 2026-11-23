@@ -1,6 +1,7 @@
 //! 條件選股參數驗證、排序白名單與新鮮度公式的 deterministic tests。
 
 use super::*;
+use jiff::civil::date;
 
 /// `all` 不縮小市場集合，不能單獨通過；上市／上櫃或任何一個實質條件
 /// 都可成立，固定預設排序與 limit 也應在驗證後補齊。
@@ -268,7 +269,7 @@ fn screening_numeric_boundaries_are_deterministic() {
 /// 為仍有效的最後一天；未來日期一律不視為新鮮。
 #[test]
 fn screening_freshness_boundaries_cross_years() {
-    let query_date = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+    let query_date = date(2026, 1, 31);
     assert!(revenue_month_is_fresh(query_date, 202510));
     assert!(!revenue_month_is_fresh(query_date, 202509));
     assert!(!revenue_month_is_fresh(query_date, 202602));
@@ -284,14 +285,11 @@ fn screening_freshness_boundaries_cross_years() {
     assert!(!f_score_year_is_fresh(query_date, 2023));
     assert!(!f_score_year_is_fresh(query_date, 2026));
 
-    let thirty_days_ago = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
-    let thirty_one_days_ago = NaiveDate::from_ymd_opt(2025, 12, 31).unwrap();
+    let thirty_days_ago = date(2026, 1, 1);
+    let thirty_one_days_ago = date(2025, 12, 31);
     assert!(analytical_date_is_fresh(query_date, thirty_days_ago));
     assert!(!analytical_date_is_fresh(query_date, thirty_one_days_ago));
-    assert!(!analytical_date_is_fresh(
-        query_date,
-        NaiveDate::from_ymd_opt(2026, 2, 1).unwrap()
-    ));
+    assert!(!analytical_date_is_fresh(query_date, date(2026, 2, 1)));
 }
 
 /// 平均成交金額門檻的範圍：1–100000 百萬元；單獨設定也算有篩選條件。

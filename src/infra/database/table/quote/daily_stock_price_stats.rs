@@ -1,7 +1,9 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, Postgres, Transaction, Type, postgres::PgQueryResult};
+use sqlx::{FromRow, Postgres, Transaction, postgres::PgQueryResult};
 
 use crate::infra::database;
 
@@ -223,10 +225,11 @@ ON CONFLICT (date, stock_exchange_market_id) DO NOTHING;"
 /// - `stock_exchange_market_id = 0`：上市＋上櫃合併統計（不含興櫃與公開發行，
 ///   與 Data API 各排行、選股的 `all` 口徑一致）
 /// - 其他 id：各市場分項統計（例如 TWSE、TPEx、興櫃）
-#[derive(Debug, Serialize, Deserialize, Type, FromRow)]
+#[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct DailyStockPriceStats {
     /// 統計日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 市場類型（TWSE: 2、TPEx: 4、全部市場: 0）。
     pub stock_exchange_market_id: i32,
     /// 股價 <= 便宜價的股票數量。
@@ -268,9 +271,9 @@ pub struct DailyStockPriceStats {
     /// 當日最低價創 52 週新低的家數。
     pub new_52_week_low: i32,
     /// 建立時間。
-    pub created_at: DateTime<Local>,
+    pub created_at: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_at: DateTime<Local>,
+    pub updated_at: TaipeiDateTime,
 }
 
 impl DailyStockPriceStats {
@@ -285,10 +288,10 @@ impl DailyStockPriceStats {
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
     /// 是否回滾由呼叫端控制。
     pub async fn upsert(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
-        let query = sqlx::query(UPSERT_SQL).bind(date);
+        let query = sqlx::query(UPSERT_SQL).bind(date.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
@@ -308,9 +311,9 @@ impl DailyStockPriceStats {
     ///
     /// # Errors
     /// 當 SQL 執行失敗時回傳錯誤。
-    pub async fn backfill_breadth(date: NaiveDate) -> Result<u64> {
+    pub async fn backfill_breadth(date: Date) -> Result<u64> {
         let result = sqlx::query(BACKFILL_BREADTH_SQL)
-            .bind(date)
+            .bind(date.to_sqlx())
             .execute(database::get_connection())
             .await
             .with_context(|| format!("daily_stock_price_stats::backfill_breadth({date}) 失敗"))?;

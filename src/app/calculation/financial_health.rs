@@ -5,17 +5,21 @@
 //! 重算前先讀出上一次的結果，重算後比對持股、發送 F 分數變化通知
 //! （[`crate::app::event::taiwan_stock::health_alert`]）。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::today;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
 };
 
 use anyhow::{Result, bail};
-use chrono::{Datelike, Local};
 
 use crate::{
-    app::event::taiwan_stock::{health_alert, holdings},
-    core::alert,
+    app::{
+        event::taiwan_stock::{health_alert, holdings},
+        notify,
+    },
+    core::notify_topic::Topic,
     domain::financial::{
         health::{self, AnnualFigures, FinancialHealthSnapshot, QuarterFigures},
         repository::FinancialHealthRepository,
@@ -65,7 +69,7 @@ pub(crate) struct Rebuilt {
 ///
 /// 讀不到上一次結果時照常重算、只是不通知；通知失敗不影響重算結果。
 pub async fn execute() -> Result<()> {
-    run(Local::now().year()).await
+    run(i32::from(TaipeiDateTime::now().year())).await
 }
 
 /// [`execute`] 的本體：以 `current_year` 為評分基準年度重算並通知。
@@ -83,19 +87,21 @@ async fn run(current_year: i32) -> Result<()> {
         Err(why) => tracing::warn!("F 分數歷史重算失敗: {why:#}"),
     }
 
-    match holdings::common_stock_holdings().await {
-        Ok(held) => {
-            if let Some(message) = health_alert::build_notification(
-                &previous,
-                &rebuilt.snapshots,
+    // 依收件者範圍只列範圍內持股的分數變化（會員系統計畫 7.6）；取得持股失敗只記錄。
+    let dedup_key = format!("{}:{}", Topic::HoldingsFinancialHealth.code(), today());
+    notify::notify_holdings(Topic::HoldingsFinancialHealth, &dedup_key, |view| {
+        let (previous, snapshots) = (&previous, &rebuilt.snapshots);
+        async move {
+            let held = holdings::common_stock_holdings(&view).await?;
+            Ok(health_alert::build_notification(
+                previous,
+                snapshots,
                 &held,
                 holdings::stock_name,
-            ) {
-                alert::send_message(&message).await;
-            }
+            ))
         }
-        Err(why) => tracing::warn!("取得持股失敗，略過財務體質變化通知: {why:#}"),
-    }
+    })
+    .await;
     Ok(())
 }
 

@@ -4,12 +4,13 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::entity::{ReceivedDividend, ReceivedDividendItem, StockOwnershipDetail};
 use super::payout::PayoutAllocation;
 use super::repository::PortfolioRepository;
+use super::view::HoldingView;
 
 /// 股利入帳查詢的倉儲替身；其他方法不會被呼叫。
 #[derive(Debug, Default)]
@@ -17,7 +18,7 @@ pub(crate) struct FakePayoutRepository {
     /// 每次查詢都回傳的分配（不依期間過濾，交給 `split_by_payable_date`）。
     pub(crate) allocations: Vec<PayoutAllocation>,
     /// 每次查詢的 `(member_id, from, to, today)`。
-    pub(crate) queries: Mutex<Vec<(i64, NaiveDate, NaiveDate, NaiveDate)>>,
+    pub(crate) queries: Mutex<Vec<(HoldingView, Date, Date, Date)>>,
     /// 為 `true` 時查詢回傳錯誤。
     pub(crate) fail: bool,
 }
@@ -32,7 +33,7 @@ impl FakePayoutRepository {
     }
 
     /// 目前為止的查詢紀錄。
-    pub(crate) fn queries(&self) -> Vec<(i64, NaiveDate, NaiveDate, NaiveDate)> {
+    pub(crate) fn queries(&self) -> Vec<(HoldingView, Date, Date, Date)> {
         self.queries.lock().expect("queries").clone()
     }
 }
@@ -41,6 +42,14 @@ impl FakePayoutRepository {
 impl PortfolioRepository for FakePayoutRepository {
     async fn fetch_active_holdings(
         &self,
+        _security_codes: Option<Vec<String>>,
+    ) -> Result<Vec<StockOwnershipDetail>> {
+        unimplemented!("入帳測試不查持股明細")
+    }
+
+    async fn fetch_active_holdings_in(
+        &self,
+        _view: &HoldingView,
         _security_codes: Option<Vec<String>>,
     ) -> Result<Vec<StockOwnershipDetail>> {
         unimplemented!("入帳測試不查持股明細")
@@ -75,15 +84,15 @@ impl PortfolioRepository for FakePayoutRepository {
 
     async fn fetch_payout_allocations(
         &self,
-        member_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-        today: NaiveDate,
+        view: &HoldingView,
+        from: Date,
+        to: Date,
+        today: Date,
     ) -> Result<Vec<PayoutAllocation>> {
         self.queries
             .lock()
             .expect("queries")
-            .push((member_id, from, to, today));
+            .push((*view, from, to, today));
         if self.fail {
             anyhow::bail!("入帳查詢測試失敗");
         }

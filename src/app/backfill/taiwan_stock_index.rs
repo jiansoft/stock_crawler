@@ -1,5 +1,6 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{Local, NaiveDate, TimeZone};
+use jiff::civil::Date;
 
 use crate::app::backfill::acl::IndexAclMapper;
 use crate::app::event::handlers::get_global_dispatcher;
@@ -9,7 +10,8 @@ use crate::infra::database::repository::market_index::PgMarketIndexRepository;
 use crate::{infra::cache::SHARE, infra::crawler::twse};
 
 pub async fn execute() -> Result<()> {
-    let tai_ex = twse::taiwan_capitalization_weighted_stock_index::visit(Local::now()).await?;
+    let tai_ex =
+        twse::taiwan_capitalization_weighted_stock_index::visit(TaipeiDateTime::now()).await?;
     if tai_ex.stat.to_uppercase() != "OK" {
         tracing::warn!("抓取加權股價指數 Finish taiex.Stat is not ok");
         return Ok(());
@@ -39,7 +41,7 @@ pub async fn execute() -> Result<()> {
                         date: cmd.date,
                         index: cmd.index,
                         change: cmd.change,
-                        occurred_at: Local::now(),
+                        occurred_at: TaipeiDateTime::now(),
                     };
                     get_global_dispatcher().dispatch_async(vec![event]).await;
 
@@ -70,12 +72,10 @@ pub async fn execute() -> Result<()> {
 /// 4. 不發送 Telegram 通知，避免歷史回補產生誤導訊息。
 ///
 /// 回傳成功 upsert 的資料筆數（0 或 1）。
-pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
-    // 將 NaiveDate 轉成 DateTime<Local>，TWSE API 只看日期中的年月部分。
-    let datetime = Local
-        .from_local_datetime(&date.and_hms_opt(12, 0, 0).unwrap())
-        .single()
-        .unwrap_or_else(Local::now);
+pub async fn execute_for_date(date: Date) -> Result<usize> {
+    // 將 Date 轉成 TaipeiDateTime，TWSE API 只看日期中的年月部分。
+    let datetime = TaipeiDateTime::from_datetime(date.at(12, 0, 0, 0))
+        .unwrap_or_else(|_| TaipeiDateTime::now());
 
     let tai_ex = twse::taiwan_capitalization_weighted_stock_index::visit(datetime).await?;
     if tai_ex.stat.to_uppercase() != "OK" {
@@ -89,7 +89,7 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
 /// 從 TWSE 整月資料中挑出與 `date` 相符的那一筆寫入資料庫並更新快取；回傳寫入筆數（0 或 1）。
 ///
 /// 格式不符的資料列略過；單筆寫入失敗只記錄錯誤。
-async fn upsert_for_date(data: Option<Vec<Vec<String>>>, date: NaiveDate) -> usize {
+async fn upsert_for_date(data: Option<Vec<Vec<String>>>, date: Date) -> usize {
     let mut upserted_count: usize = 0;
 
     if let Some(data) = data {

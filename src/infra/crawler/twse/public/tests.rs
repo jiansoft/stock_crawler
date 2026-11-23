@@ -1,6 +1,7 @@
 //! public的測試；連外的測試標 #[ignore]。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 use crate::infra::cache::SHARE;
 use rust_decimal_macros::dec;
 
@@ -54,18 +55,9 @@ fn map_public_items_maps_rows_and_skips_short_rows() {
     assert_eq!(first.stock_name, "測試公司");
     assert_eq!(first.market, "上市");
     // 民國 115/07/21 → 西元 2026-07-21。
-    assert_eq!(
-        first.drawing_date,
-        chrono::NaiveDate::from_ymd_opt(2026, 7, 21)
-    );
-    assert_eq!(
-        first.offering_start_date,
-        chrono::NaiveDate::from_ymd_opt(2026, 7, 14)
-    );
-    assert_eq!(
-        first.issue_date,
-        chrono::NaiveDate::from_ymd_opt(2026, 7, 28)
-    );
+    assert_eq!(first.drawing_date, ymd(2026, 7, 21));
+    assert_eq!(first.offering_start_date, ymd(2026, 7, 14));
+    assert_eq!(first.issue_date, ymd(2026, 7, 28));
     // 承銷價取「實際承銷價」欄（index 10）。
     assert_eq!(first.offering_price, Some(dec!(52.50)));
 

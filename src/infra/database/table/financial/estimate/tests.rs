@@ -1,5 +1,5 @@
 use crate::infra::cache::SHARE;
-use chrono::Datelike;
+use jiff::civil::Date;
 
 use super::*;
 
@@ -13,8 +13,10 @@ async fn test_upsert() {
     SHARE.load().await;
     tracing::debug!("開始 Estimate::upsert");
 
-    let current_date = NaiveDate::parse_from_str("2023-09-15", "%Y-%m-%d").unwrap();
-    let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
+    let current_date = Date::strptime("%Y-%m-%d", "2023-09-15").unwrap();
+    let years: Vec<i32> = (0..10)
+        .map(|i| i32::from(current_date.year()) - i)
+        .collect();
     let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
     let years_str = years_vec.join(",");
     let estimate = Estimate::new("9921".to_string(), current_date);
@@ -39,8 +41,10 @@ async fn test_upsert_all() {
     SHARE.load().await;
     tracing::debug!("開始 Estimate::upsert_all");
 
-    let current_date = NaiveDate::parse_from_str("2026-03-03", "%Y-%m-%d").unwrap();
-    let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
+    let current_date = Date::strptime("%Y-%m-%d", "2026-03-03").unwrap();
+    let years: Vec<i32> = (0..10)
+        .map(|i| i32::from(current_date.year()) - i)
+        .collect();
     let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
     let years_str = years_vec.join(",");
     // 分桶結果必須與不分桶一致：兩者都是 upsert，影響筆數即輸出的股票數。

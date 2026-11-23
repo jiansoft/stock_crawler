@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{DateTime, Local};
 use sqlx::{QueryBuilder, Row, postgres::PgRow};
 
 use crate::{core::util::map::Keyable, infra::database};
@@ -13,9 +13,9 @@ pub struct StockWord {
     /// 關鍵字內容。
     pub word: String,
     /// 建立時間。
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
 }
 
 impl StockWord {
@@ -24,8 +24,8 @@ impl StockWord {
         StockWord {
             word_id: Default::default(),
             word,
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 

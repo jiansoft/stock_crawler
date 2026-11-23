@@ -3,7 +3,9 @@
 //! 包含缺漏補齊、指定年月的價格統計、指定日期筆數，以及指定日期的全部報價讀取。
 
 use anyhow::{Context, Result};
-use chrono::{NaiveDate, TimeDelta};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use sqlx::{Row, postgres::PgQueryResult};
 
 use crate::infra::database;
@@ -15,8 +17,8 @@ use super::extension::MonthlyStockPriceSummary;
 ///
 /// 以各股前 30 天內最後一筆報價複製出成交量為 0 的補值列；`year`／`month`／`day`
 /// 依補值日期填入（2022-09 起漏填成 0 的 3 萬多列，按年月查詢的月統計都查不到）。
-pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQueryResult> {
-    let prev_date = date - TimeDelta::try_days(30).unwrap();
+pub async fn makeup_for_the_lack_daily_quotes(date: Date) -> Result<PgQueryResult> {
+    let prev_date = date - 30.days();
 
     // 使用參數化查詢代替字串格式化，將 $1 與 $2 分別綁定 date 與 prev_date，以移除 AssertSqlSafe
     let sql = r#"
@@ -88,8 +90,8 @@ WHERE "Serial" IN
 )"#;
 
     sqlx::query(sql)
-        .bind(date)
-        .bind(prev_date)
+        .bind(date.to_sqlx())
+        .bind(prev_date.to_sqlx())
         .execute(database::get_connection())
         .await
         .context(format!(
@@ -133,10 +135,10 @@ pub async fn fetch_monthly_stock_price_summary(
 }
 
 /// 取得指定日期在 `DailyQuotes` 的資料筆數。
-pub async fn fetch_count_by_date(date: NaiveDate) -> Result<i64> {
+pub async fn fetch_count_by_date(date: Date) -> Result<i64> {
     let sql = r#"SELECT count(*) FROM "DailyQuotes" WHERE "Date" = $1"#;
     let row: (i64,) = sqlx::query_as(sql)
-        .bind(date)
+        .bind(date.to_sqlx())
         .fetch_one(database::get_connection())
         .await?;
     Ok(row.0)
@@ -145,10 +147,7 @@ pub async fn fetch_count_by_date(date: NaiveDate) -> Result<i64> {
 /// 查詢 `from`～`to` 每個交易日上市（2）、上櫃（4）各有幾檔有成交。
 ///
 /// 回傳 `(交易日, 市場別, 有成交檔數)`；沒有資料的日期不會出現。
-pub async fn fetch_market_traded_counts(
-    from: NaiveDate,
-    to: NaiveDate,
-) -> Result<Vec<(NaiveDate, i32, i64)>> {
+pub async fn fetch_market_traded_counts(from: Date, to: Date) -> Result<Vec<(Date, i32, i64)>> {
     let sql = r#"
         SELECT q."Date", s.stock_exchange_market_id, count(*)
         FROM "DailyQuotes" q
@@ -158,16 +157,21 @@ pub async fn fetch_market_traded_counts(
           AND s.stock_exchange_market_id IN (2, 4)
         GROUP BY q."Date", s.stock_exchange_market_id
     "#;
-    sqlx::query_as(sql)
-        .bind(from)
-        .bind(to)
+    sqlx::query_as::<_, (jiff_sqlx::Date, i32, i64)>(sql)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .fetch_all(database::get_connection())
         .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(c0, c1, c2)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2))
+                .collect::<Vec<_>>()
+        })
         .with_context(|| format!("Failed to fetch market traded counts {from}~{to}"))
 }
 
 /// 讀取指定日期的所有日報價資料。
-pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuote>> {
+pub async fn fetch_daily_quotes_by_date(date: Date) -> Result<Vec<DailyQuote>> {
     let sql = r#"
     SELECT
         "Serial",
@@ -207,12 +211,18 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
     FROM "DailyQuotes"
     WHERE "Date" = $1"#;
     sqlx::query(sql)
-        .bind(date)
+        .bind(date.to_sqlx())
         .try_map(|row: sqlx::postgres::PgRow| {
             let dq = DailyQuote {
-                maximum_price_in_year_date_on: row.get("maximum_price_in_year_date_on"),
-                minimum_price_in_year_date_on: row.get("minimum_price_in_year_date_on"),
-                date: row.get("Date"),
+                maximum_price_in_year_date_on: crate::infra::database::jiff_types::get(
+                    &row,
+                    "maximum_price_in_year_date_on",
+                ),
+                minimum_price_in_year_date_on: crate::infra::database::jiff_types::get(
+                    &row,
+                    "minimum_price_in_year_date_on",
+                ),
+                date: crate::infra::database::jiff_types::get(&row, "Date"),
                 create_time: row.try_get("CreateTime")?,
                 record_time: row.try_get("RecordTime")?,
                 price_earning_ratio: row.get("PriceEarningRatio"),
@@ -254,11 +264,11 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
 }
 
 /// 查詢 `from`（含）之後有日報價的所有代號（含已下市者），依代號排序。
-pub async fn fetch_symbols_quoted_since(from: NaiveDate) -> Result<Vec<String>> {
+pub async fn fetch_symbols_quoted_since(from: Date) -> Result<Vec<String>> {
     sqlx::query_scalar(
         r#"SELECT DISTINCT stock_symbol FROM "DailyQuotes" WHERE "Date" >= $1 ORDER BY stock_symbol"#,
     )
-    .bind(from)
+    .bind(from.to_sqlx())
     .fetch_all(database::get_connection())
     .await
     .with_context(|| format!("Failed to fetch_symbols_quoted_since({from}) from database"))

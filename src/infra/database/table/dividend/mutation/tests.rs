@@ -1,6 +1,6 @@
 //! 股利資料表寫入操作的測試。
 
-use chrono::Local;
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use sqlx::Row;
@@ -24,8 +24,8 @@ async fn test_upsert() {
     e.ex_dividend_date2 = "尚未公布".to_string();
     e.payable_date1 = "尚未公布".to_string();
     e.payable_date2 = "尚未公布".to_string();
-    e.created_time = Local::now();
-    e.updated_time = Local::now();
+    e.created_time = TaipeiDateTime::now();
+    e.updated_time = TaipeiDateTime::now();
     e.cash_dividend = dec!(1);
     e.stock_dividend = dec!(2);
     e.sum = dec!(3);

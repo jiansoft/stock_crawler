@@ -73,7 +73,7 @@ impl EventDispatcher {
 
     /// 組出指定日期的市場除權息清單訊息。
     pub(super) fn build_market_dividend_message(
-        date: chrono::NaiveDate,
+        date: jiff::civil::Date,
         title: &str,
         stocks_dividend_info: &[StockDividendInfo],
         hints: &FillHints,

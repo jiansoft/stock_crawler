@@ -3,6 +3,7 @@
 //! 訊號在收盤匯總時預先算好寫入 `daily_technical_signal`（見
 //! [`crate::app::calculation::technical_signal`]），這裡只查表並附上當日報價。
 
+use jiff_sqlx::ToSqlx;
 use std::collections::BTreeMap;
 
 use axum::{
@@ -11,7 +12,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::{
@@ -101,10 +102,11 @@ pub(crate) async fn market_signals(Query(params): Query<MarketSignalsParams>) ->
     }
 
     let pool = database::get_connection();
-    let data_date: Option<NaiveDate> = match sqlx::query_scalar(DATE_SQL)
-        .bind(date)
+    let data_date: Option<Date> = match sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(DATE_SQL)
+        .bind(date.map(ToSqlx::to_sqlx))
         .fetch_one(pool)
         .await
+        .map(crate::infra::database::jiff_types::from_wire)
     {
         Ok(value) => value,
         Err(error) => return database_error(error),
@@ -113,7 +115,7 @@ pub(crate) async fn market_signals(Query(params): Query<MarketSignalsParams>) ->
         return error_response(StatusCode::NOT_FOUND, "查無技術訊號資料");
     };
     let rows: Vec<SignalRow> = match sqlx::query_as(ROWS_SQL)
-        .bind(data_date)
+        .bind(data_date.to_sqlx())
         .bind(market_id)
         .bind(params.industry.as_deref())
         .fetch_all(pool)
@@ -135,7 +137,7 @@ pub(crate) async fn market_signals(Query(params): Query<MarketSignalsParams>) ->
 
 /// 統計各來源與種類的家數，再依 `kind`／`indicator` 篩選、依成交值排序後取前 `limit` 筆。
 fn build_response(
-    data_date: NaiveDate,
+    data_date: Date,
     market: &str,
     params: &MarketSignalsParams,
     limit: usize,

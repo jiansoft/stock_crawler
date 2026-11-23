@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::entity::{
     BrokerFlowRecord, HolderDistributionRecord, HolderLevelRecord, InsiderHoldingRecord,
@@ -11,7 +11,7 @@ use super::entity::{
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecentHolderWeeks {
     /// 全表的資料日期，由新到舊；`dates[0]` 是最新一週。
-    pub dates: Vec<NaiveDate>,
+    pub dates: Vec<Date>,
     /// 指定代號在這些日期的週摘要，依代號、日期由新到舊排列；某週沒有資料的代號就沒有那一列。
     pub records: Vec<HolderDistributionRecord>,
 }
@@ -23,7 +23,7 @@ pub trait HolderHistoryRepository: Send + Sync {
     async fn recent_holder_weeks(
         &self,
         symbols: &[String],
-        as_of: NaiveDate,
+        as_of: Date,
         weeks: i64,
     ) -> Result<RecentHolderWeeks>;
 }
@@ -32,16 +32,16 @@ pub trait HolderHistoryRepository: Send + Sync {
 #[async_trait]
 pub trait ChipRepository: Send + Sync {
     /// 寫入（或更正）指定交易日的三大法人買賣超；不動同一列的融資融券欄位。
-    async fn save_institutional(&self, date: NaiveDate, flows: &[InstitutionalNet]) -> Result<u64>;
+    async fn save_institutional(&self, date: Date, flows: &[InstitutionalNet]) -> Result<u64>;
 
     /// 寫入（或更正）指定交易日的融資融券餘額；不動同一列的三大法人欄位。
-    async fn save_margin(&self, date: NaiveDate, margins: &[MarginRecord]) -> Result<u64>;
+    async fn save_margin(&self, date: Date, margins: &[MarginRecord]) -> Result<u64>;
 
     /// 重算 `from`～`to`（皆含）每列的外資、投信、自營商與合計連續買賣超天數。
     ///
     /// 依日期遞推：方向與同一檔前一列相同就累加，淨額 0 或缺值為 0；期間第一段接續 `from` 之前
     /// 最後一列的天數。補寫或更正過去的籌碼後，要從那天起重算到最新一天，後面的天數才會正確。
-    async fn refresh_streaks(&self, from: NaiveDate, to: NaiveDate) -> Result<u64>;
+    async fn refresh_streaks(&self, from: Date, to: Date) -> Result<u64>;
 
     /// 寫入（或更正）集保股權分散週摘要。
     async fn save_holder_distributions(&self, records: &[HolderDistributionRecord]) -> Result<u64>;

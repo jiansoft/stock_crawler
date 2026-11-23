@@ -1,6 +1,8 @@
 create table if not exists public.daily_money_history_detail
 (
     serial                                  bigserial,
+    household_id                            bigint                   not null,
+    settlement_household_id bigint not null,
     member_id                               bigint                   default 0                                       not null,
     date                                    date                     default CURRENT_DATE                            not null,
     security_code                           varchar(24)              default ''::character varying                   not null,
@@ -18,10 +20,11 @@ create table if not exists public.daily_money_history_detail
     previous_day_market_value               numeric(18, 4)           default 0                                       not null,
     previous_day_profit_and_loss            numeric(18, 4)           default 0                                       not null,
     previous_day_profit_and_loss_percentage numeric(18, 4)           default 0                                       not null,
-    primary key (date, security_code, member_id)
+    primary key (date, security_code, household_id, member_id)
 );
 
-comment on column public.daily_money_history_detail.member_id is '資料屬於那一個會員';
+comment on column public.daily_money_history_detail.household_id is '所屬家庭；所有寫入必須明確指定';
+comment on column public.daily_money_history_detail.member_id is '資料屬於那一個會員；0 代表該家庭的合計';
 comment on column public.daily_money_history_detail.date is '資料屬於那一天';
 comment on column public.daily_money_history_detail.closing_price is '當日收盤價格';
 comment on column public.daily_money_history_detail.total_shares is '總股數';
@@ -39,3 +42,5 @@ comment on column public.daily_money_history_detail.previous_day_profit_and_loss
 create index if not exists "daily_money_history_detail-security_code-idx"
     on public.daily_money_history_detail (security_code);
 
+
+comment on column public.daily_money_history_detail.settlement_household_id is '結算時家庭；轉換家庭不改此欄位，用於刪除時重算歷史合計';

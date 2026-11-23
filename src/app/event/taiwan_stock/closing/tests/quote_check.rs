@@ -1,6 +1,8 @@
 //! 收盤行情完整性的測試：成交檔數短缺、臨時停市判斷、重跑與告警內容。
 
 use super::*;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 /// 上櫃整天沒抓到（2026-03-17 只剩零量補值列）時判定不完整；上市正常不列入。
 #[test]
@@ -103,8 +105,8 @@ async fn ensure_quotes_detects_unscheduled_closure_with_database() {
         }
     };
     cleanup().await;
-    let previous = NaiveDate::from_ymd_opt(1999, 3, 16).unwrap();
-    let closed = NaiveDate::from_ymd_opt(1999, 3, 17).unwrap();
+    let previous = date(1999, 3, 16);
+    let closed = date(1999, 3, 17);
     for (symbol, market_id) in [("79974", 2), ("79975", 4)] {
         sqlx::query(
             r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id)
@@ -119,7 +121,7 @@ async fn ensure_quotes_detects_unscheduled_closure_with_database() {
             r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
                VALUES ($1, $2, 10, 1000)"#,
         )
-        .bind(previous)
+        .bind(previous.to_sqlx())
         .bind(symbol)
         .execute(pool)
         .await

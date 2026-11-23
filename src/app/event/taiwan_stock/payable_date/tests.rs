@@ -1,5 +1,8 @@
 //! 08:00 股利發放日通知的訊息組裝與資料庫整合測試。
 
+use crate::core::util::datetime::ymd;
+use crate::domain::portfolio::view::HoldingView;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -7,11 +10,11 @@ use super::*;
 fn payout(member_id: i64, symbol: &str, day: u32, cash: Decimal) -> DividendPayout {
     DividendPayout {
         member_id,
-        payable_date: NaiveDate::from_ymd_opt(2026, 11, day).expect("合法日期"),
+        payable_date: ymd(2026, 11, day).expect("合法日期"),
         stock_symbol: symbol.to_owned(),
         name: format!("{symbol}名稱"),
         quarter: "Q3".to_owned(),
-        ex_date: NaiveDate::from_ymd_opt(2026, 10, 20),
+        ex_date: ymd(2026, 10, 20),
         shares: 1300,
         cash_dividend: dec!(3),
         stock_dividend: Decimal::ZERO,
@@ -24,7 +27,7 @@ fn payout(member_id: i64, symbol: &str, day: u32, cash: Decimal) -> DividendPayo
 /// 今天入帳逐會員列出（含配股、推算標記），本月至今依會員加總並附合計。
 #[test]
 fn build_batch_dividend_message_lists_today_and_month_to_date() {
-    let today = NaiveDate::from_ymd_opt(2026, 11, 20).expect("合法日期");
+    let today = date(2026, 11, 20);
     let mut with_stock = payout(2, "2330", 20, dec!(1500));
     with_stock.stock_shares = 25;
     with_stock.estimated = true;
@@ -32,7 +35,13 @@ fn build_batch_dividend_message_lists_today_and_month_to_date() {
     let mut month = today_payouts.clone();
     month.push(payout(1, "0056", 11, dec!(2872.4)));
 
-    let msg = build_batch_dividend_message(today, &today_payouts, &month).expect("今天有入帳");
+    let msg = build_batch_dividend_message(
+        today,
+        &today_payouts,
+        &month,
+        &crate::app::event::taiwan_stock::test_member_names(),
+    )
+    .expect("今天有入帳");
 
     assert!(msg.starts_with(r"2026\-11\-20 持股股利入帳如下︰"), "{msg}");
     assert!(
@@ -52,16 +61,49 @@ fn build_batch_dividend_message_lists_today_and_month_to_date() {
 /// 今天沒有持股入帳時不發。
 #[test]
 fn build_batch_dividend_message_returns_none_without_payouts_today() {
-    let today = NaiveDate::from_ymd_opt(2026, 11, 20).expect("合法日期");
+    let today = date(2026, 11, 20);
     let month = [payout(1, "0056", 11, dec!(2872.4))];
 
-    assert!(build_batch_dividend_message(today, &[], &month).is_none());
+    assert!(
+        build_batch_dividend_message(
+            today,
+            &[],
+            &month,
+            &crate::app::event::taiwan_stock::test_member_names()
+        )
+        .is_none()
+    );
+}
+
+/// 第五、六位與改名後的名稱由查詢結果帶入，Markdown 只跳脫一次。
+#[test]
+fn payout_message_uses_loaded_names_and_escapes_them() {
+    let today = date(2026, 11, 20);
+    let payouts = [
+        payout(1, "2330", 20, dec!(10)),
+        payout(5, "2330", 20, dec!(20)),
+        payout(6, "2330", 20, dec!(30)),
+    ];
+    let names = BTreeMap::from([
+        (1, "改名_[甲]".to_owned()),
+        (5, "第五`乙`".to_owned()),
+        (6, "第六*丙*".to_owned()),
+    ]);
+    let message = build_batch_dividend_message(today, &payouts, &payouts, &names).expect("有入帳");
+    for name in [r"改名\_\[甲\]", r"第五\`乙\`", r"第六\*丙\*"] {
+        assert!(
+            message.contains(name),
+            "缺少跳脫後的會員名稱 {name}：{message}"
+        );
+    }
+    assert!(!message.contains("Eddie"));
+    assert_eq!(member_label(&names, 999), "Member 999");
 }
 
 #[test]
 fn test_build_payable_summary_message_only_lists_items_payable_today() {
     // 2834、2838 的現金早已發放，今天只發股票股利，訊息不應再列出現金。
-    let today = NaiveDate::from_ymd_opt(2026, 9, 10).unwrap();
+    let today = date(2026, 9, 10);
     let stocks = vec![
         StockDividendPayableDateInfo {
             stock_symbol: "2834".to_string(),
@@ -109,7 +151,7 @@ fn test_build_payable_summary_message_only_lists_items_payable_today() {
 
 #[test]
 fn test_build_payable_summary_message_returns_none_when_nothing_payable_today() {
-    let today = NaiveDate::from_ymd_opt(2026, 9, 10).unwrap();
+    let today = date(2026, 9, 10);
     let stocks = vec![StockDividendPayableDateInfo {
         stock_symbol: "2834".to_string(),
         name: "臺企銀".to_string(),
@@ -216,11 +258,11 @@ async fn notify_lists_recorded_payouts_including_sold_holdings() {
             .expect("種入已領股利明細");
     }
 
-    let today = NaiveDate::from_ymd_opt(2099, 1, 15).expect("合法日期");
+    let today = date(2099, 1, 15);
     let result = notify(today).await;
-    let month_start = NaiveDate::from_ymd_opt(2099, 1, 1).expect("合法日期");
+    let month_start = date(2099, 1, 1);
     let allocations = PgPortfolioRepository::new()
-        .fetch_payout_allocations(MEMBER, month_start, today, today)
+        .fetch_payout_allocations(&HoldingView::member(1, MEMBER), month_start, today, today)
         .await;
     cleanup(pool).await;
 

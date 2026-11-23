@@ -2,6 +2,9 @@
 
 use super::super::snapshot::to_decimal;
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 #[test]
 fn to_decimal_rounds_and_rejects_non_finite() {
@@ -34,7 +37,7 @@ async fn snapshot_combines_quote_nav_dividends_and_performance() {
          VALUES ($2, $1, 20, 0.2, 1.01, 1234567, 24680000)",
     )
     .bind(FAKE)
-    .bind(day(30))
+    .bind(day(30).to_sqlx())
     .execute(pool)
     .await
     .expect("建立假行情");
@@ -90,12 +93,16 @@ async fn snapshot_combines_quote_nav_dividends_and_performance() {
     }])
     .await
     .expect("寫入績效");
-    let nav_perf: (Option<NaiveDate>, Option<Decimal>, Option<Decimal>) = sqlx::query_as(
+    let nav_perf: (Option<Date>, Option<Decimal>, Option<Decimal>) = sqlx::query_as::<
+        _,
+        (Option<jiff_sqlx::Date>, Option<Decimal>, Option<Decimal>),
+    >(
         "SELECT nav_calc_date, nav_ret_1y, nav_ret_3y FROM etf_performance WHERE stock_symbol = $1",
     )
     .bind(FAKE)
     .fetch_one(pool)
     .await
+    .map(|(c0, c1, c2)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2))
     .expect("讀回淨值報酬");
     assert_eq!(nav_perf, (Some(day(29)), Some(dec!(10.1235)), None));
 
@@ -111,12 +118,29 @@ async fn snapshot_combines_quote_nav_dividends_and_performance() {
         Option<Decimal>,
         Option<i32>,
         Option<Decimal>,
-        Option<NaiveDate>,
+        Option<Date>,
         Option<Decimal>,
         Option<Decimal>,
         Option<Decimal>,
     );
-    let row: Row = sqlx::query_as(
+    let row: Row = sqlx::query_as::<
+        _,
+        (
+            String,
+            Vec<String>,
+            String,
+            Option<i64>,
+            Option<Decimal>,
+            Option<Decimal>,
+            Option<Decimal>,
+            Option<i32>,
+            Option<Decimal>,
+            Option<jiff_sqlx::Date>,
+            Option<Decimal>,
+            Option<Decimal>,
+            Option<Decimal>,
+        ),
+    >(
         "SELECT strategy, themes, dividend_frequency, trading_volume, total_assets, net_flow,
                 dividend_12m, dividend_count_12m, yield_12m, next_ex_date, ret_1y, premium_avg_20d,
                 last_dividend
@@ -125,6 +149,23 @@ async fn snapshot_combines_quote_nav_dividends_and_performance() {
     .bind(FAKE)
     .fetch_one(pool)
     .await
+    .map(|(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12)| {
+        (
+            c0,
+            c1,
+            c2,
+            c3,
+            c4,
+            c5,
+            c6,
+            c7,
+            c8,
+            crate::infra::database::jiff_types::from_wire(c9),
+            c10,
+            c11,
+            c12,
+        )
+    })
     .expect("讀回快照");
     assert_eq!(row.0, "high_dividend");
     assert_eq!(row.1, vec!["金融".to_string()]);
@@ -135,7 +176,7 @@ async fn snapshot_combines_quote_nav_dividends_and_performance() {
     assert_eq!(row.6, Some(dec!(1.1)));
     assert_eq!(row.7, Some(2));
     assert_eq!(row.8, Some(dec!(5.5)));
-    assert_eq!(row.9, NaiveDate::from_ymd_opt(2026, 6, 1));
+    assert_eq!(row.9, ymd(2026, 6, 1));
     assert_eq!(row.10, Some(dec!(12.3457)));
     assert_eq!(row.11, Some(dec!(0.5)));
     assert_eq!(row.12, Some(dec!(0.6)));
@@ -188,8 +229,8 @@ async fn snapshot_reads_only_the_latest_nav_holders_and_chip_rows() {
          FROM generate_series($2::date, $3::date, INTERVAL '1 day') AS d",
     )
     .bind(FAKE)
-    .bind(day(1))
-    .bind(day(24))
+    .bind(day(1).to_sqlx())
+    .bind(day(24).to_sqlx())
     .execute(pool)
     .await
     .expect("寫入淨值");
@@ -197,7 +238,7 @@ async fn snapshot_reads_only_the_latest_nav_holders_and_chip_rows() {
         sqlx::query(
             "INSERT INTO holder_distribution (date, stock_symbol, total_holders) VALUES ($1, $2, $3)",
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(FAKE)
         .bind(holders)
         .execute(pool)
@@ -207,7 +248,7 @@ async fn snapshot_reads_only_the_latest_nav_holders_and_chip_rows() {
     // 最新一天外資買賣超還沒出來（NULL），要取前一筆有值的。
     for (date, foreign_net) in [(day(20), Some(5_i64)), (day(23), None)] {
         sqlx::query("INSERT INTO chip_daily (date, stock_symbol, foreign_net) VALUES ($1, $2, $3)")
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(FAKE)
             .bind(foreign_net)
             .execute(pool)
@@ -218,16 +259,28 @@ async fn snapshot_reads_only_the_latest_nav_holders_and_chip_rows() {
     assert!(repo.refresh_snapshot().await.expect("重建快照") >= 1);
 
     type Row = (
-        Option<NaiveDate>,
+        Option<Date>,
         Option<Decimal>,
         Option<Decimal>,
         Option<Decimal>,
         Option<i64>,
-        Option<NaiveDate>,
+        Option<Date>,
         Option<i64>,
-        Option<NaiveDate>,
+        Option<Date>,
     );
-    let row: Row = sqlx::query_as(
+    let row: Row = sqlx::query_as::<
+        _,
+        (
+            Option<jiff_sqlx::Date>,
+            Option<Decimal>,
+            Option<Decimal>,
+            Option<Decimal>,
+            Option<i64>,
+            Option<jiff_sqlx::Date>,
+            Option<i64>,
+            Option<jiff_sqlx::Date>,
+        ),
+    >(
         "SELECT nav_date, nav, premium_rate, premium_avg_20d, holders, holders_date,
                 foreign_net, chip_date
          FROM etf_snapshot WHERE stock_symbol = $1",
@@ -235,6 +288,18 @@ async fn snapshot_reads_only_the_latest_nav_holders_and_chip_rows() {
     .bind(FAKE)
     .fetch_one(pool)
     .await
+    .map(|(c0, c1, c2, c3, c4, c5, c6, c7)| {
+        (
+            crate::infra::database::jiff_types::from_wire(c0),
+            c1,
+            c2,
+            c3,
+            c4,
+            crate::infra::database::jiff_types::from_wire(c5),
+            c6,
+            crate::infra::database::jiff_types::from_wire(c7),
+        )
+    })
     .expect("讀回快照");
     assert_eq!(
         row,

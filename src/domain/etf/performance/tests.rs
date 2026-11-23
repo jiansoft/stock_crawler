@@ -1,8 +1,11 @@
 //! 以還原日線（除權息、分割已調整）計算 ETF 的含息期間報酬與近 1 年風險指標的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
-fn bar(date: NaiveDate, close: f64) -> PriceBar {
+fn bar(date: Date, close: f64) -> PriceBar {
     PriceBar {
         date,
         close,
@@ -12,14 +15,14 @@ fn bar(date: NaiveDate, close: f64) -> PriceBar {
 }
 
 /// 從 `start` 起每天一筆（含週末，簡化），收盤由 `price(i)` 決定。
-fn series(start: NaiveDate, days: u64, price: impl Fn(u64) -> f64) -> Vec<PriceBar> {
+fn series(start: Date, days: u64, price: impl Fn(u64) -> f64) -> Vec<PriceBar> {
     (0..days)
-        .map(|i| bar(start + chrono::Days::new(i), price(i)))
+        .map(|i| bar(start + (i as i64).days(), price(i)))
         .collect()
 }
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("固定日期合法")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("固定日期合法")
 }
 
 #[test]
@@ -48,11 +51,11 @@ fn empty_bars_yield_empty_performance() {
 fn period_returns_use_the_last_bar_on_or_before_the_target() {
     // 2024-01-01 起每天 +0.1 元，到 2026-10-21。
     let start = date(2024, 1, 1);
-    let days = (date(2026, 10, 21) - start).num_days() as u64 + 1;
+    let days = i64::from((date(2026, 10, 21) - start).get_days()) as u64 + 1;
     let bars = series(start, days, |i| 100.0 + i as f64 * 0.1);
     let perf = compute_performance("X", &bars, &[]);
     let last = bars.last().expect("有資料").close;
-    let close_on = |d: NaiveDate| bars.iter().find(|b| b.date == d).expect("有該日").close;
+    let close_on = |d: Date| bars.iter().find(|b| b.date == d).expect("有該日").close;
     let pct = |base: f64| (last / base - 1.0) * 100.0;
 
     assert_eq!(perf.calc_date, Some(date(2026, 10, 21)));
@@ -96,7 +99,7 @@ fn drawdown_and_risk_metrics_follow_the_last_year() {
         perf.mdd_date.expect("有谷底日"),
     );
     assert!(mdd < -20.0, "跌幅約 25%：{mdd}");
-    assert_eq!(trough, start + chrono::Days::new(261));
+    assert_eq!(trough, start + 261.days());
     assert!(perf.vol_1y.expect("有波動") > 0.0);
     assert!(perf.sharpe_1y.is_some());
     let beta = perf.beta_1y.expect("有 beta");

@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rand::RngExt;
 
 use crate::{
@@ -41,7 +41,7 @@ const YAHOO_LOOKUP_LIMIT: usize = 60;
 /// 降低被 Yahoo WAF 擋下的機率。
 pub(super) async fn resolve_with_yahoo(
     plan: &mut ScanPlan,
-    schedules: &HashMap<(String, NaiveDate), DividendSchedule>,
+    schedules: &HashMap<(String, Date), DividendSchedule>,
     existing: &HashMap<String, Vec<Dividend>>,
 ) {
     let sources = YahooSources {
@@ -73,7 +73,7 @@ struct YahooSources<Fetch, Pause> {
 /// [`resolve_with_yahoo`] 的流程本體；Yahoo 來源與間隔由呼叫端注入。
 async fn resolve_with<Fetch, FetchFut, Pause, PauseFut>(
     plan: &mut ScanPlan,
-    schedules: &HashMap<(String, NaiveDate), DividendSchedule>,
+    schedules: &HashMap<(String, Date), DividendSchedule>,
     existing: &HashMap<String, Vec<Dividend>>,
     mut sources: YahooSources<Fetch, Pause>,
 ) where
@@ -157,7 +157,7 @@ fn resolve_from_yahoo(
     announcement: &ExDividendAnnouncement,
     yahoo: &YahooDividend,
 ) -> Option<ResolvedDividend> {
-    let ex_date_text = announcement.ex_date.format(DATE_FORMAT).to_string();
+    let ex_date_text = announcement.ex_date.strftime(DATE_FORMAT).to_string();
 
     yahoo
         .dividend

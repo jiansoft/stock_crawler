@@ -1,5 +1,7 @@
 //! 估值歷史區間、填息分析與同業比較 endpoints 的資料庫語意整合測試。
 
+use crate::core::util::datetime::today;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{SEED_STOCK, SYMBOL, cleanup, get, pool_or_skip, seed};
@@ -187,8 +189,6 @@ async fn stock_dividend_fill_endpoint_db_semantics() {
     ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
 )]
 async fn stock_peers_endpoint_db_semantics() {
-    use chrono::Datelike;
-
     const PEER: &str = "79979DB";
     const INDUSTRY: i32 = 97_979;
     let Some(pool) = pool_or_skip("stock_peers_endpoint_db_semantics").await else {
@@ -212,7 +212,7 @@ async fn stock_peers_endpoint_db_semantics() {
     };
     cleanup_peers().await;
 
-    let today = chrono::Local::now().date_naive();
+    let today = today();
     let month = i64::from(today.year()) * 100 + i64::from(today.month());
     for (symbol, issued, close, pe, pb, yoy) in [
         (SYMBOL, 1_000_000_i64, 100, 20, 2, 10),
@@ -232,7 +232,7 @@ async fn stock_peers_endpoint_db_semantics() {
             r#"INSERT INTO last_daily_quotes (date, stock_symbol, closing_price, price_earning_ratio, "price-to-book_ratio")
                VALUES ($1, $2, $3, $4, $5)"#,
         )
-        .bind(today)
+        .bind(today.to_sqlx())
         .bind(symbol)
         .bind(Decimal::from(close))
         .bind(Decimal::from(pe))
@@ -252,7 +252,7 @@ async fn stock_peers_endpoint_db_semantics() {
         .expect("種入 Revenue");
     }
     sqlx::query("INSERT INTO yield_rank (date, security_code, yield) VALUES ($1, $2, 4.5)")
-        .bind(today)
+        .bind(today.to_sqlx())
         .bind(PEER)
         .execute(pool)
         .await

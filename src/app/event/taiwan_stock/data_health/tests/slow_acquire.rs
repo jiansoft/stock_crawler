@@ -1,9 +1,9 @@
 //! 本週取連線過慢：解析 sqlx 的取連線過慢 WARN、依分鐘加總、最長等待與最集中的一分鐘。
 
-use super::*;
 use crate::app::event::taiwan_stock::data_health::slow_acquire::{
     SlowAcquires, parse_acquire_line, slow_acquire_line, weekly_slow_acquires,
 };
+use jiff::civil::date;
 
 fn line(at: &str, secs: &str) -> String {
     format!(
@@ -63,16 +63,8 @@ fn weekly_slow_acquires_reads_warn_files_in_range() {
     )
     .expect("寫入");
 
-    let acquires = weekly_slow_acquires(
-        &dir,
-        NaiveDate::from_ymd_opt(2026, 10, 27).expect("日期"),
-        NaiveDate::from_ymd_opt(2026, 11, 2).expect("日期"),
-    );
-    let missing = weekly_slow_acquires(
-        &dir.join("missing"),
-        NaiveDate::from_ymd_opt(2026, 10, 27).expect("日期"),
-        NaiveDate::from_ymd_opt(2026, 11, 2).expect("日期"),
-    );
+    let acquires = weekly_slow_acquires(&dir, date(2026, 10, 27), date(2026, 11, 2));
+    let missing = weekly_slow_acquires(&dir.join("missing"), date(2026, 10, 27), date(2026, 11, 2));
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(
         slow_acquire_line(&acquires),

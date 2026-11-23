@@ -1,6 +1,7 @@
 //! 大盤指數防腐層轉換的測試。
 
 use super::*;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 #[test]
@@ -17,7 +18,7 @@ fn test_index_acl_mapping() {
     let cmd = IndexAclMapper::from_strings(&item);
     assert!(cmd.is_some());
     let cmd = cmd.unwrap();
-    assert_eq!(cmd.date, NaiveDate::from_ymd_opt(2023, 5, 20).unwrap());
+    assert_eq!(cmd.date, date(2023, 5, 20));
     assert_eq!(cmd.index, dec!(16000.50));
     assert_eq!(cmd.change, dec!(150.25));
 

@@ -1,8 +1,10 @@
 use super::message::{describe, lots};
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
-fn month(month: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, month, 1).unwrap()
+fn month(month: u32) -> Date {
+    ymd(2026, month, 1).unwrap()
 }
 
 fn row(symbol: &str, title: &str, name: &str, shares: i64, pledged: i64) -> InsiderHolding {

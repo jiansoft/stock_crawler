@@ -1,13 +1,16 @@
 //! 上月持股股利入帳彙總：月份推算、查詢期間、訊息組裝與去年同月比較。
 
+use crate::core::util::datetime::ymd;
+use crate::domain::portfolio::view::HoldingView;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 use crate::domain::portfolio::payout::PayoutAllocation;
 use crate::domain::portfolio::test_double::FakePayoutRepository;
 
-fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("合法日期")
 }
 
 fn payout(member_id: i64, symbol: &str, day: u32, cash: Decimal) -> DividendPayout {
@@ -62,7 +65,11 @@ fn build_message_lists_payouts_and_comparisons() {
         forecast: None,
     };
 
-    let message = build_message(&summary).expect("上月有入帳");
+    let message = build_message(
+        &summary,
+        &crate::app::event::taiwan_stock::test_member_names(),
+    )
+    .expect("上月有入帳");
 
     for line in [
         r"2026\-11 持股股利入帳彙總",
@@ -89,7 +96,13 @@ fn build_message_handles_empty_month_and_last_year_text() {
         year_to_date_cash: Decimal::ZERO,
         forecast: None,
     };
-    assert!(build_message(&summary).is_none());
+    assert!(
+        build_message(
+            &summary,
+            &crate::app::event::taiwan_stock::test_member_names()
+        )
+        .is_none()
+    );
     assert_eq!(last_year_text(dec!(100), Decimal::ZERO), "去年同月沒有入帳");
     assert_eq!(
         last_year_text(dec!(4000), dec!(5000)),
@@ -118,15 +131,32 @@ async fn notify_queries_previous_month_last_year_and_year_to_date() {
     }]);
     let today = date(2026, 12, 1);
 
-    let summary = load_summary(&repo, today).await.expect("彙總");
-    notify(&repo, None, today).await.expect("通知");
+    let summary = load_summary(&repo, &HoldingView::default_household(), today)
+        .await
+        .expect("彙總");
+    notify(&repo, today).await.expect("通知");
 
     assert_eq!(
         repo.queries()[..3],
         [
-            (0, date(2026, 11, 1), date(2026, 11, 30), today),
-            (0, date(2025, 11, 1), date(2025, 11, 30), today),
-            (0, date(2026, 1, 1), date(2026, 11, 30), today),
+            (
+                HoldingView::default_household(),
+                date(2026, 11, 1),
+                date(2026, 11, 30),
+                today
+            ),
+            (
+                HoldingView::default_household(),
+                date(2025, 11, 1),
+                date(2025, 11, 30),
+                today
+            ),
+            (
+                HoldingView::default_household(),
+                date(2026, 1, 1),
+                date(2026, 11, 30),
+                today
+            ),
         ]
     );
     assert_eq!(summary.payouts.len(), 1);
@@ -158,7 +188,11 @@ fn build_message_appends_snapshot_accuracy() {
         }),
     };
 
-    let message = build_message(&summary).expect("上月有入帳");
+    let message = build_message(
+        &summary,
+        &crate::app::event::taiwan_stock::test_member_names(),
+    )
+    .expect("上月有入帳");
 
     let line = r"12\-01 快照預估誤差：比對 2 筆，預估 6,400 元、實際 6,772\.4 元（\+372\.4 元，\+5\.5%）；預估有入帳但沒領到 1 筆（預估 500 元）";
     assert!(message.contains(line), "缺少 {line}：\n{message}");
@@ -217,8 +251,21 @@ async fn load_snapshot_accuracy_uses_latest_snapshot_before_month_end() {
         let _ = sqlx::query("DELETE FROM dividend_forecast_snapshot WHERE stock_symbol = '79979N'")
             .execute(pool)
             .await;
+        let _ = sqlx::query(
+            r#"DELETE FROM "Member" WHERE "Id" = 79979 AND "Account" = '__iam_test_79979'"#,
+        )
+        .execute(pool)
+        .await;
     };
     cleanup().await;
+    // 通知讀的是預設家庭的全體成員（7.6 N2）：測試會員登記在家庭 #1。
+    sqlx::query(
+        r#"INSERT INTO "Member" ("Id", "Account", "Name", household_id)
+           VALUES (79979, '__iam_test_79979', 'IAM 測試', 1) ON CONFLICT ("Id") DO NOTHING"#,
+    )
+    .execute(pool)
+    .await
+    .expect("種入測試會員");
     // 11-01 快照：11-20 預估 500 元；12-01 快照：12-20 預估 900 元（不該被拿來比對 11 月）。
     sqlx::query(
         r"INSERT INTO dividend_forecast_snapshot
@@ -230,8 +277,9 @@ async fn load_snapshot_accuracy_uses_latest_snapshot_before_month_end() {
     .await
     .expect("種入快照");
 
-    let result = load_snapshot_accuracy(date(2019, 12, 1)).await;
-    let before_any = load_snapshot_accuracy(date(2019, 11, 1)).await;
+    let result = load_snapshot_accuracy(&HoldingView::default_household(), date(2019, 12, 1)).await;
+    let before_any =
+        load_snapshot_accuracy(&HoldingView::default_household(), date(2019, 11, 1)).await;
     cleanup().await;
 
     let accuracy = result.expect("讀取快照誤差").expect("11 月有預估");
@@ -248,4 +296,23 @@ async fn load_snapshot_accuracy_uses_latest_snapshot_before_month_end() {
         matches!(before_any, Ok(None)),
         "10 月底以前沒有快照時不附誤差：{before_any:?}"
     );
+}
+
+/// 排程入口：以今天讀本月入帳；測試環境沒有 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_reads_this_month_payouts() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_reads_this_month_payouts：無資料庫連接");
+        return;
+    }
+    execute().await.expect("入帳通知不應失敗");
 }

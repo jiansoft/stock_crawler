@@ -1,5 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::infra::crawler::share::DailyQuoteDto;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 
 /// 儲存每日收盤報價命令。
@@ -8,7 +10,7 @@ pub struct SaveDailyQuoteCommand {
     /// 股票代號
     pub symbol: String,
     /// 交易日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 開盤價
     pub opening_price: Decimal,
     /// 最高價
@@ -70,15 +72,10 @@ impl QuoteAclMapper {
 
     /// 將 `SaveDailyQuoteCommand` 轉譯為領域模型 `DailyQuote`。
     pub fn from_command(cmd: &SaveDailyQuoteCommand) -> crate::domain::quote::entity::DailyQuote {
-        use chrono::{Datelike, Local, TimeZone};
         use rust_decimal::Decimal;
-        // 台北時區 (UTC+8)
-        let timezone = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
-        let record_time = cmd
-            .date
-            .and_hms_opt(15, 0, 0)
-            .and_then(|naive| timezone.from_local_datetime(&naive).single())
-            .unwrap_or_else(|| Local::now().with_timezone(&timezone));
+        // 台北時間（UTC+8）當日 15:00
+        let record_time = TaipeiDateTime::from_datetime(cmd.date.at(15, 0, 0, 0))
+            .unwrap_or_else(|_| TaipeiDateTime::now());
 
         crate::domain::quote::entity::DailyQuote {
             serial: 0,
@@ -108,13 +105,13 @@ impl QuoteAclMapper {
             maximum_price_in_year: Decimal::ZERO,
             minimum_price_in_year: Decimal::ZERO,
             average_price_in_year: Decimal::ZERO,
-            maximum_price_in_year_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
-            minimum_price_in_year_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
-            year: cmd.date.year(),
-            month: cmd.date.month() as i32,
-            day: cmd.date.day() as i32,
-            create_time: Local::now(),
-            record_time: record_time.with_timezone(&Local),
+            maximum_price_in_year_date_on: date(1970, 1, 1),
+            minimum_price_in_year_date_on: date(1970, 1, 1),
+            year: i32::from(cmd.date.year()),
+            month: i32::from(cmd.date.month()),
+            day: i32::from(cmd.date.day()),
+            create_time: TaipeiDateTime::now(),
+            record_time,
         }
     }
 }

@@ -1,4 +1,7 @@
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use crate::domain::portfolio::view::HoldingView;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -7,8 +10,8 @@ use crate::domain::portfolio::chip::ChipReason;
 /// 測試用的假代號：只有數字、不是 00 開頭，才會被當成普通股。
 const SYMBOLS: [&str; 4] = ["79971", "79972", "79973", "79974"];
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1991, 4, d).expect("固定日期合法")
+fn day(d: u32) -> Date {
+    ymd(1991, 4, d).expect("固定日期合法")
 }
 
 async fn cleanup() {
@@ -62,7 +65,7 @@ async fn holding_chips_follow_holdings_on_each_day() {
         )
         .bind(symbol)
         .bind(sold)
-        .bind(bought)
+        .bind(bought.to_sqlx())
         .execute(pool)
         .await
         .expect("種入持股");
@@ -71,8 +74,8 @@ async fn holding_chips_follow_holdings_on_each_day() {
         "INSERT INTO sell_history (member_id, security_code, date, amount, create_time, is_reverted)
          VALUES (9, '79972', $1, 100, now(), false), (9, '79972', $2, 100, now(), true)",
     )
-    .bind(day(10))
-    .bind(day(9))
+    .bind(day(10).to_sqlx())
+    .bind(day(9).to_sqlx())
     .execute(pool)
     .await
     .expect("種入賣出紀錄（含一筆已撤銷）");
@@ -88,7 +91,7 @@ async fn holding_chips_follow_holdings_on_each_day() {
                                      foreign_streak, trust_streak)
              VALUES ($1, $2, $3, 0, 0, 100, 100, 0, 0, $4, 0)",
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbol)
         .bind(foreign)
         .bind(streak)
@@ -100,7 +103,7 @@ async fn holding_chips_follow_holdings_on_each_day() {
         r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
            VALUES ($1, '79971', 25.5, 10000000)"#,
     )
-    .bind(day(9))
+    .bind(day(9).to_sqlx())
     .execute(pool)
     .await
     .expect("種入日線");
@@ -108,7 +111,7 @@ async fn holding_chips_follow_holdings_on_each_day() {
         r#"INSERT INTO broker_flow ("date", stock_symbol, buy_total, sell_total, main_share, buyers, sellers)
            VALUES ($1, '79971', 100, 300, -25.5, '[{"name":"凱基-台北","buy":150,"sell":30,"net":120,"share":"6.98"}]', '[]')"#,
     )
-    .bind(day(9))
+    .bind(day(9).to_sqlx())
     .execute(pool)
     .await
     .expect("種入主力進出");
@@ -131,10 +134,26 @@ async fn holding_chips_follow_holdings_on_each_day() {
     };
 
     let chips = fake(
-        repo.fetch_holding_chips(day(9))
+        repo.fetch_holding_chips(day(9), &HoldingView::member(1, 9))
             .await
             .expect("查詢持股籌碼"),
     );
+    // 指定會員：持股都屬於會員 9，只看會員 9 結果相同；別的會員看不到這幾檔。
+    let of_member = |chips: &[HoldingChip]| -> Vec<String> {
+        chips.iter().map(|chip| chip.stock_symbol.clone()).collect()
+    };
+    let own = fake(
+        repo.fetch_holding_chips(day(9), &HoldingView::member(1, 9))
+            .await
+            .expect("查詢會員 9 的持股籌碼"),
+    );
+    assert_eq!(of_member(&own), of_member(&chips));
+    let others = fake(
+        repo.fetch_holding_chips(day(9), &HoldingView::member(1, 979_799))
+            .await
+            .expect("查詢其他會員的持股籌碼"),
+    );
+    assert!(others.is_empty());
     let symbols: Vec<&str> = chips
         .iter()
         .map(|chip| chip.stock_symbol.as_str())
@@ -163,7 +182,7 @@ async fn holding_chips_follow_holdings_on_each_day() {
 
     // 04-10：79972 已賣出、79973 當天買進。
     let chips = fake(
-        repo.fetch_holding_chips(day(10))
+        repo.fetch_holding_chips(day(10), &HoldingView::member(1, 9))
             .await
             .expect("查詢持股籌碼"),
     );
@@ -201,7 +220,7 @@ async fn broker_period_sums_main_net_within_the_period() {
         sqlx::query(
             r#"INSERT INTO broker_flow ("date", stock_symbol, buy_total, sell_total) VALUES ($1, $2, $3, $4)"#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbol)
         .bind(buy)
         .bind(sell)

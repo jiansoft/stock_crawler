@@ -1,5 +1,6 @@
 //! 條件選股：PEG（`max_peg`、`sort_by=peg`）與近四季 EPS 成長率。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -103,7 +104,7 @@ async fn screen_at_filters_and_sorts_by_peg() {
         .expect("種入日線");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 8, 10).expect("固定日期合法");
+    let query_date = date(1988, 8, 10);
     let screen = |max_peg: Option<f64>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

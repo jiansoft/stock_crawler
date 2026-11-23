@@ -1,14 +1,16 @@
 //! 股利預估誤差比對的單元測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn date(month: u32, day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, month, day).expect("有效日期")
+fn date(month: u32, day: u32) -> Date {
+    ymd(2026, month, day).expect("有效日期")
 }
 
-fn forecast(symbol: &str, pay_date: NaiveDate, amount: Decimal, basis: &str) -> ForecastedPayout {
+fn forecast(symbol: &str, pay_date: Date, amount: Decimal, basis: &str) -> ForecastedPayout {
     ForecastedPayout {
         stock_symbol: symbol.to_owned(),
         name: format!("{symbol}名"),
@@ -18,7 +20,7 @@ fn forecast(symbol: &str, pay_date: NaiveDate, amount: Decimal, basis: &str) -> 
     }
 }
 
-fn actual(symbol: &str, pay_date: NaiveDate, amount: Decimal) -> ActualPayout {
+fn actual(symbol: &str, pay_date: Date, amount: Decimal) -> ActualPayout {
     ActualPayout {
         stock_symbol: symbol.to_owned(),
         name: format!("{symbol}實"),
@@ -176,8 +178,8 @@ fn status_names_are_snake_case() {
 /// 只取已入帳的現金：推算的、只配股的、沒有發放日的都排除。
 #[test]
 fn actual_payouts_keeps_recorded_cash_only() {
-    let allocation = |symbol: &str, cash: Decimal, payable: Option<NaiveDate>, estimated: bool| {
-        PayoutAllocation {
+    let allocation =
+        |symbol: &str, cash: Decimal, payable: Option<Date>, estimated: bool| PayoutAllocation {
             member_id: 1,
             stock_symbol: symbol.to_owned(),
             name: symbol.to_owned(),
@@ -192,8 +194,7 @@ fn actual_payouts_keeps_recorded_cash_only() {
             cash_amount: cash,
             stock_shares: dec!(0),
             estimated,
-        }
-    };
+        };
 
     let actuals = actual_payouts(&[
         allocation("0056", dec!(1000), Some(date(11, 11)), false),
@@ -208,7 +209,7 @@ fn actual_payouts_keeps_recorded_cash_only() {
     );
 }
 
-fn actual_named(symbol: &str, pay_date: NaiveDate, amount: Decimal) -> ActualPayout {
+fn actual_named(symbol: &str, pay_date: Date, amount: Decimal) -> ActualPayout {
     ActualPayout {
         stock_symbol: symbol.to_owned(),
         name: symbol.to_owned(),

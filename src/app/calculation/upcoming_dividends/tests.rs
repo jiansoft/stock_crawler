@@ -1,5 +1,7 @@
 //! 持股未來除權息：股數合併、逐日查詢與單日失敗略過、只取當天除息／除權、排序與金額換算。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -7,8 +9,8 @@ use rust_decimal_macros::dec;
 
 use super::*;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("合法日期")
 }
 
 fn info(symbol: &str, cash: Decimal, stock: Decimal) -> StockDividendInfo {
@@ -35,14 +37,14 @@ fn shares(pairs: &[(&str, i64)]) -> BTreeMap<String, i64> {
 /// 依日期回傳固定除權息；`fail_on` 那天查詢失敗；記錄查過哪些日期。
 #[derive(Default)]
 struct FakeDays {
-    by_day: Vec<(NaiveDate, StockDividendInfo)>,
-    fail_on: Option<NaiveDate>,
-    asked: Mutex<Vec<NaiveDate>>,
+    by_day: Vec<(Date, StockDividendInfo)>,
+    fail_on: Option<Date>,
+    asked: Mutex<Vec<Date>>,
 }
 
 #[async_trait]
 impl ExDividendDayQuery for FakeDays {
-    async fn fetch_on(&self, date: NaiveDate) -> Result<Vec<StockDividendInfo>> {
+    async fn fetch_on(&self, date: Date) -> Result<Vec<StockDividendInfo>> {
         self.asked.lock().expect("未中毒").push(date);
         if self.fail_on == Some(date) {
             return Err(anyhow!("dividend down"));
@@ -158,4 +160,22 @@ fn amounts_follow_shares() {
         dec!(109),
         "1999 × 0.55 ÷ 10 = 109.945 捨去"
     );
+}
+
+/// 依收件者範圍改寫股數：只留範圍內持有的代號，股數換成範圍內的合計。
+#[test]
+fn rescope_keeps_scope_holdings_and_replaces_shares() {
+    let item = |symbol: &str, shares: i64| UpcomingDividend {
+        ex_date: day(21),
+        stock_symbol: symbol.to_owned(),
+        name: format!("名{symbol}"),
+        cash_dividend: dec!(5),
+        stock_dividend: Decimal::ZERO,
+        closing_price: dec!(100),
+        shares,
+    };
+    let all = [item("2330", 3000), item("2412", 2000)];
+    let scoped = rescope(&all, &shares(&[("2330", 1000)]));
+    assert_eq!(scoped, vec![item("2330", 1000)]);
+    assert!(rescope(&all, &BTreeMap::new()).is_empty());
 }

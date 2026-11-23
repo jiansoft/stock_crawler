@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::app::calculation::technical_signal::range_breakout::backfill_with;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 /// 30 根整理（高 10、低 9、收 9.5、量 1000）之後第 `breakout_at` 根帶量突破（收 10.3、量 1600），
 /// 其後回到整理；共 `len` 根，日期 `day(0)` 起連續。
@@ -88,7 +92,7 @@ async fn backfill_writes_breakouts_within_range_only() {
         ("range_breakout", day(40), day(69))
     );
     assert_eq!(count, 2);
-    let written: Vec<(&str, NaiveDate, SignalKind)> = signals
+    let written: Vec<(&str, Date, SignalKind)> = signals
         .iter()
         .map(|s| (s.stock_symbol.as_str(), s.date, s.signal.kind))
         .collect();
@@ -142,7 +146,7 @@ async fn backfill_range_breakout_writes_table() {
         return;
     }
     let symbol = "79979RB";
-    let first = NaiveDate::from_ymd_opt(1990, 1, 1).expect("有效日期");
+    let first = date(1990, 1, 1);
     let cleanup = || async {
         for sql in [
             r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = $1"#,
@@ -176,32 +180,32 @@ async fn backfill_range_breakout_writes_table() {
            FROM generate_series(0, 40) AS n"#,
     )
     .bind(symbol)
-    .bind(first)
+    .bind(first.to_sqlx())
     .execute(pool)
     .await
     .expect("寫入測試日線");
-    let breakout_day = first + chrono::Days::new(30);
+    let breakout_day = first + 30.days();
     // 其他來源的訊號不能被回補刪掉。
     sqlx::query(
         "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
          VALUES ($1, $2, 'kd', 'overbought', '測試')",
     )
-    .bind(breakout_day)
+    .bind(breakout_day.to_sqlx())
     .bind(symbol)
     .execute(pool)
     .await
     .expect("寫入其他來源訊號");
 
-    let from = first + chrono::Days::new(20);
-    let to = first + chrono::Days::new(40);
+    let from = first + 20.days();
+    let to = first + 40.days();
     backfill_range_breakout(from, to).await.expect("回補成功");
 
-    let rows: Vec<(NaiveDate, String, String)> = sqlx::query_as(
+    let rows: Vec<(Date, String, String)> = sqlx::query_as::<_, (jiff_sqlx::Date, String, String)>(
         "SELECT date, indicator, kind FROM daily_technical_signal WHERE stock_symbol = $1 ORDER BY date, indicator",
     )
     .bind(symbol)
     .fetch_all(pool)
-    .await
+    .await.map(|rows| rows.into_iter().map(|(c0, c1, c2)| (crate::infra::database::jiff_types::from_wire(c0), c1, c2)).collect::<Vec<_>>())
     .expect("讀回訊號");
     assert_eq!(
         rows,
@@ -213,7 +217,7 @@ async fn backfill_range_breakout_writes_table() {
                 "breakout".to_owned()
             ),
             (
-                breakout_day + chrono::Days::new(1),
+                breakout_day + 1.days(),
                 "range_breakout".to_owned(),
                 "failed".to_owned()
             ),

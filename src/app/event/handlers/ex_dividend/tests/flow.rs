@@ -1,8 +1,10 @@
 //! 連資料庫跑一次除權息事件：從派發器的預設處理器進入，隔年發放的股利也要寫進已領股利（H28）。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::sync::Arc;
 
-use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use sqlx::PgPool;
@@ -56,11 +58,11 @@ async fn seed(pool: &PgPool) {
     .expect("種入持股");
 }
 
-fn ex_dividend_event(date: NaiveDate, next_trading_date: NaiveDate) -> DomainEvent {
+fn ex_dividend_event(date: Date, next_trading_date: Date) -> DomainEvent {
     DomainEvent::ExDividendReminderTriggered {
         date,
         next_trading_date,
-        occurred_at: Local::now(),
+        occurred_at: TaipeiDateTime::now(),
     }
 }
 
@@ -80,7 +82,7 @@ async fn ex_dividend_event_records_next_year_payout() {
     }
     cleanup(pool).await;
     seed(pool).await;
-    let day = |d: u32| NaiveDate::from_ymd_opt(2024, 12, d).expect("合法日期");
+    let day = |d: u32| ymd(2024, 12, d).expect("合法日期");
     let debouncer = Arc::new(TelegramDebouncer::new());
     let records = || async {
         sqlx::query_as::<_, (i32, Decimal)>(

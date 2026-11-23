@@ -1,5 +1,6 @@
 //! 條件選股：長期高 ROE（`min_roe_years`、`min_annual_roe_percent`）。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -81,7 +82,7 @@ async fn screen_at_filters_by_roe_years() {
     .await
     .expect("種入年度 ROE");
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |threshold: Option<f64>, years: Option<u8>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

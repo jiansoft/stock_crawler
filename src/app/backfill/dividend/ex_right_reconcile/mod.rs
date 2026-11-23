@@ -31,10 +31,11 @@
 //! 證交所的「權」「權息」拆不出現金與股票股利，只用日期比對、不改金額；
 //! 單純「權」也可能是現金增資，因此對不上時不列入缺漏。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, NaiveDate};
 
 use crate::{
     app::calculation::dividend_record,
@@ -106,7 +107,7 @@ pub(crate) struct ReconcilePlan {
 /// # 錯誤
 ///
 /// 任一交易所來源抓取失敗、或資料庫讀寫失敗時回傳錯誤；來源失敗時不寫入任何資料。
-pub async fn execute(start: NaiveDate, end: NaiveDate, apply: bool) -> Result<ReconcileSummary> {
+pub async fn execute(start: Date, end: Date, apply: bool) -> Result<ReconcileSummary> {
     let mut official = Vec::new();
     for (from, to) in calendar_year_chunks(start, end) {
         official.extend(twse::ex_right_result::visit(from, to).await?);
@@ -117,7 +118,7 @@ pub async fn execute(start: NaiveDate, end: NaiveDate, apply: bool) -> Result<Re
 
     let repo = PgDividendRepository::new();
     // 跨年發放（12 月除息、隔年 1 月發放）的資料列在下一個發放年度，前後各多讀一年。
-    let years: Vec<i32> = (start.year() - 1..=end.year() + 1).collect();
+    let years: Vec<i32> = (i32::from(start.year()) - 1..=i32::from(end.year()) + 1).collect();
     let existing = load_existing(&repo, &years).await?;
 
     let plan = build_plan(&official, &existing, end);
@@ -223,16 +224,16 @@ async fn apply_plan(repo: &PgDividendRepository, plan: &ReconcilePlan) -> Result
     Ok(())
 }
 
-fn parse_date(value: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(value, DATE_FORMAT).ok()
+fn parse_date(value: &str) -> Option<Date> {
+    Date::strptime(DATE_FORMAT, value).ok()
 }
 
 /// 把日期區間切成逐個日曆年，避免單次請求跨太多年。
-fn calendar_year_chunks(start: NaiveDate, end: NaiveDate) -> Vec<(NaiveDate, NaiveDate)> {
+fn calendar_year_chunks(start: Date, end: Date) -> Vec<(Date, Date)> {
     (start.year()..=end.year())
         .filter_map(|year| {
-            let from = NaiveDate::from_ymd_opt(year, 1, 1)?.max(start);
-            let to = NaiveDate::from_ymd_opt(year, 12, 31)?.min(end);
+            let from = ymd(i32::from(year), 1, 1)?.max(start);
+            let to = ymd(i32::from(year), 12, 31)?.min(end);
             (from <= to).then_some((from, to))
         })
         .collect()

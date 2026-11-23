@@ -18,7 +18,7 @@
 //! 00632R、0052、00631L 則完全沒登錄。
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
@@ -77,10 +77,7 @@ const SNAP_TOLERANCE: Decimal = Decimal::from_parts(1, 0, 0, false, 2);
 /// # Errors
 ///
 /// HTTP 請求、JSON 反序列化失敗或端點拒絕查詢時回傳錯誤；區間內沒有事件回傳空陣列。
-pub async fn visit_par_value_changes(
-    start: NaiveDate,
-    end: NaiveDate,
-) -> Result<Vec<CorporateAction>> {
+pub async fn visit_par_value_changes(start: Date, end: Date) -> Result<Vec<CorporateAction>> {
     visit("change/TWTB8U", start, end, &PAR_VALUE_CHANGE).await
 }
 
@@ -89,21 +86,21 @@ pub async fn visit_par_value_changes(
 /// # Errors
 ///
 /// HTTP 請求、JSON 反序列化失敗或端點拒絕查詢時回傳錯誤；區間內沒有事件回傳空陣列。
-pub async fn visit_etf_splits(start: NaiveDate, end: NaiveDate) -> Result<Vec<CorporateAction>> {
+pub async fn visit_etf_splits(start: Date, end: Date) -> Result<Vec<CorporateAction>> {
     visit("split/TWTCAU", start, end, &ETF_SPLIT).await
 }
 
 async fn visit(
     path: &str,
-    start: NaiveDate,
-    end: NaiveDate,
+    start: Date,
+    end: Date,
     layout: &Layout,
 ) -> Result<Vec<CorporateAction>> {
     let url = format!(
         "https://www.{host}/rwd/zh/{path}?response=json&startDate={start}&endDate={end}",
         host = twse::HOST,
-        start = start.format("%Y%m%d"),
-        end = end.format("%Y%m%d"),
+        start = start.strftime("%Y%m%d"),
+        end = end.strftime("%Y%m%d"),
     );
     let response = util::http::get_json::<SplitResponse>(&url).await?;
     if response.stat != "OK" && !response.stat.contains("沒有符合條件的資料") {

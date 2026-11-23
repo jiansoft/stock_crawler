@@ -1,6 +1,8 @@
 //! 技術指標日線、除權息與股數變動事件，以及期間內的還原日線。
 
 use super::*;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 /// 截止日（含）之前最近 `$3` 個有成交的交易日，由新到舊；只讀
 /// `(stock_symbol, "Date" DESC)` 覆蓋索引內的欄位（index-only scan）。
@@ -85,15 +87,28 @@ impl PriceBarRepository for PgQuoteRepository {
     async fn fetch_price_bars(
         &self,
         stock_symbol: &str,
-        until: Option<NaiveDate>,
+        until: Option<Date>,
         limit: i64,
     ) -> Result<Vec<PriceBar>> {
-        let rows: Vec<(NaiveDate, Decimal, Decimal, Decimal)> = sqlx::query_as(PRICE_BARS_SQL)
-            .bind(stock_symbol)
-            .bind(until)
-            .bind(limit)
-            .fetch_all(database::get_connection())
-            .await?;
+        let rows: Vec<(Date, Decimal, Decimal, Decimal)> =
+            sqlx::query_as::<_, (jiff_sqlx::Date, Decimal, Decimal, Decimal)>(PRICE_BARS_SQL)
+                .bind(stock_symbol)
+                .bind(until.map(ToSqlx::to_sqlx))
+                .bind(limit)
+                .fetch_all(database::get_connection())
+                .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|(c0, c1, c2, c3)| {
+                            (
+                                crate::infra::database::jiff_types::from_wire(c0),
+                                c1,
+                                c2,
+                                c3,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })?;
         Ok(rows
             .into_iter()
             .rev()
@@ -109,15 +124,20 @@ impl PriceBarRepository for PgQuoteRepository {
     async fn fetch_volumes(
         &self,
         stock_symbol: &str,
-        until: Option<NaiveDate>,
+        until: Option<Date>,
         limit: i64,
     ) -> Result<Vec<VolumeBar>> {
-        let rows: Vec<(NaiveDate, f64)> = sqlx::query_as(VOLUMES_SQL)
+        let rows: Vec<(Date, f64)> = sqlx::query_as::<_, (jiff_sqlx::Date, f64)>(VOLUMES_SQL)
             .bind(stock_symbol)
-            .bind(until)
+            .bind(until.map(ToSqlx::to_sqlx))
             .bind(limit)
             .fetch_all(database::get_connection())
-            .await?;
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|(c0, c1)| (crate::infra::database::jiff_types::from_wire(c0), c1))
+                    .collect::<Vec<_>>()
+            })?;
         Ok(rows
             .into_iter()
             .rev()
@@ -140,11 +160,26 @@ impl PgQuoteRepository {
         &self,
         stock_symbols: &[String],
     ) -> Result<HashMap<String, Vec<PriceAdjustment>>, sqlx::Error> {
-        let rows: Vec<(String, NaiveDate, Decimal, Decimal, Decimal)> =
-            sqlx::query_as(PRICE_ADJUSTMENTS_SQL)
-                .bind(stock_symbols)
-                .fetch_all(database::get_connection())
-                .await?;
+        let rows: Vec<(String, Date, Decimal, Decimal, Decimal)> = sqlx::query_as::<
+            _,
+            (String, jiff_sqlx::Date, Decimal, Decimal, Decimal),
+        >(PRICE_ADJUSTMENTS_SQL)
+        .bind(stock_symbols)
+        .fetch_all(database::get_connection())
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(c0, c1, c2, c3, c4)| {
+                    (
+                        c0,
+                        crate::infra::database::jiff_types::from_wire(c1),
+                        c2,
+                        c3,
+                        c4,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })?;
         let mut out: HashMap<String, Vec<PriceAdjustment>> = HashMap::new();
         for (symbol, date, cash, stock, share_ratio) in rows {
             out.entry(symbol).or_default().push(PriceAdjustment {
@@ -162,15 +197,29 @@ impl PgQuoteRepository {
     pub(crate) async fn fetch_adjusted_bars(
         &self,
         stock_symbols: &[String],
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<HashMap<String, Vec<PriceBar>>, sqlx::Error> {
-        let rows: Vec<(String, NaiveDate, f64, f64, f64)> = sqlx::query_as(RANGE_BARS_SQL)
-            .bind(stock_symbols)
-            .bind(from)
-            .bind(to)
-            .fetch_all(database::get_batch_connection())
-            .await?;
+        let rows: Vec<(String, Date, f64, f64, f64)> =
+            sqlx::query_as::<_, (String, jiff_sqlx::Date, f64, f64, f64)>(RANGE_BARS_SQL)
+                .bind(stock_symbols)
+                .bind(from.to_sqlx())
+                .bind(to.to_sqlx())
+                .fetch_all(database::get_batch_connection())
+                .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|(c0, c1, c2, c3, c4)| {
+                            (
+                                c0,
+                                crate::infra::database::jiff_types::from_wire(c1),
+                                c2,
+                                c3,
+                                c4,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })?;
         let bars = group_bars(rows);
         let adjustments = self.price_adjustments(stock_symbols).await?;
         Ok(bars
@@ -187,20 +236,39 @@ impl PgQuoteRepository {
     /// 由舊到新。呼叫端依各段分別還原（見 `screen_backtest::stops::load_holding_windows`）。
     pub(crate) async fn fetch_bar_windows(
         &self,
-        windows: &[(String, NaiveDate, NaiveDate)],
+        windows: &[(String, Date, Date)],
     ) -> Result<HashMap<String, Vec<PriceBar>>, sqlx::Error> {
         let symbols: Vec<&str> = windows
             .iter()
             .map(|(symbol, _, _)| symbol.as_str())
             .collect();
-        let starts: Vec<NaiveDate> = windows.iter().map(|(_, start, _)| *start).collect();
-        let ends: Vec<NaiveDate> = windows.iter().map(|(_, _, end)| *end).collect();
-        let rows: Vec<(String, NaiveDate, f64, f64, f64)> = sqlx::query_as(WINDOW_BARS_SQL)
-            .bind(&symbols)
-            .bind(&starts)
-            .bind(&ends)
-            .fetch_all(database::get_batch_connection())
-            .await?;
+        let starts: Vec<Date> = windows.iter().map(|(_, start, _)| *start).collect();
+        let ends: Vec<Date> = windows.iter().map(|(_, _, end)| *end).collect();
+        let rows: Vec<(String, Date, f64, f64, f64)> =
+            sqlx::query_as::<_, (String, jiff_sqlx::Date, f64, f64, f64)>(WINDOW_BARS_SQL)
+                .bind(&symbols)
+                .bind(
+                    starts
+                        .iter()
+                        .map(|value| value.to_sqlx())
+                        .collect::<Vec<_>>(),
+                )
+                .bind(ends.iter().map(|value| value.to_sqlx()).collect::<Vec<_>>())
+                .fetch_all(database::get_batch_connection())
+                .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|(c0, c1, c2, c3, c4)| {
+                            (
+                                c0,
+                                crate::infra::database::jiff_types::from_wire(c1),
+                                c2,
+                                c3,
+                                c4,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })?;
         Ok(group_bars(rows))
     }
 }
@@ -217,18 +285,31 @@ impl PgQuoteRepository {
     /// 各 `(代號, 日期)` 當天的開盤價／收盤價比（同一天的還原因子相消，可直接乘在還原收盤上得到還原開盤）。
     pub(crate) async fn fetch_open_ratios(
         &self,
-        points: &[(String, NaiveDate)],
-    ) -> Result<HashMap<(String, NaiveDate), f64>, sqlx::Error> {
+        points: &[(String, Date)],
+    ) -> Result<HashMap<(String, Date), f64>, sqlx::Error> {
         if points.is_empty() {
             return Ok(HashMap::new());
         }
         let symbols: Vec<&str> = points.iter().map(|(symbol, _)| symbol.as_str()).collect();
-        let dates: Vec<NaiveDate> = points.iter().map(|(_, date)| *date).collect();
-        let rows: Vec<(String, NaiveDate, f64)> = sqlx::query_as(OPEN_RATIOS_SQL)
-            .bind(&symbols)
-            .bind(&dates)
-            .fetch_all(database::get_batch_connection())
-            .await?;
+        let dates: Vec<Date> = points.iter().map(|(_, date)| *date).collect();
+        let rows: Vec<(String, Date, f64)> =
+            sqlx::query_as::<_, (String, jiff_sqlx::Date, f64)>(OPEN_RATIOS_SQL)
+                .bind(&symbols)
+                .bind(
+                    dates
+                        .iter()
+                        .map(|value| value.to_sqlx())
+                        .collect::<Vec<_>>(),
+                )
+                .fetch_all(database::get_batch_connection())
+                .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|(c0, c1, c2)| {
+                            (c0, crate::infra::database::jiff_types::from_wire(c1), c2)
+                        })
+                        .collect::<Vec<_>>()
+                })?;
         Ok(rows
             .into_iter()
             .map(|(symbol, date, ratio)| ((symbol, date), ratio))
@@ -237,7 +318,7 @@ impl PgQuoteRepository {
 }
 
 /// 依代號分組日線列（SQL 已依代號、日期排序）。
-fn group_bars(rows: Vec<(String, NaiveDate, f64, f64, f64)>) -> HashMap<String, Vec<PriceBar>> {
+fn group_bars(rows: Vec<(String, Date, f64, f64, f64)>) -> HashMap<String, Vec<PriceBar>> {
     let mut bars: HashMap<String, Vec<PriceBar>> = HashMap::new();
     for (symbol, date, close, high, low) in rows {
         bars.entry(symbol).or_default().push(PriceBar {

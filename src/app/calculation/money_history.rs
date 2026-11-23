@@ -1,7 +1,7 @@
 use crate::domain::money_flow::repository::MoneyFlowRepository;
 use crate::infra::database::repository::money_flow::PgMoneyFlowRepository;
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 計算並重建指定交易日的帳戶市值相關資料。
 ///
@@ -13,7 +13,7 @@ use chrono::NaiveDate;
 ///
 /// # Errors
 /// 當倉儲內部的任何寫入步驟失敗時，會自動 Rollback 並回傳錯誤。
-pub async fn calculate_money_history(date: NaiveDate) -> Result<()> {
+pub async fn calculate_money_history(date: Date) -> Result<()> {
     // 實例化資金流向與帳戶市值倉儲
     let repo = PgMoneyFlowRepository::new();
     // 呼叫倉儲提供的交易式重算與存檔合約

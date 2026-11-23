@@ -1,6 +1,8 @@
 //! `cagr_endpoints_db_semantics` 的測試資料寫入與清理。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use crate::domain::performance::{
@@ -26,8 +28,8 @@ fn symbols() -> Vec<String> {
     ]
 }
 
-fn base_date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(1990, 1, 2).expect("測試日期應合法")
+fn base_date() -> Date {
+    date(1990, 1, 2)
 }
 
 fn record(symbol: &str, period: CagrPeriod, cagr: rust_decimal::Decimal) -> StockCagr {
@@ -42,7 +44,7 @@ fn record(symbol: &str, period: CagrPeriod, cagr: rust_decimal::Decimal) -> Stoc
         date: base_date(),
         stock_symbol: symbol.to_string(),
         period,
-        base_date: NaiveDate::from_ymd_opt(1989, 1, 3),
+        base_date: ymd(1989, 1, 3),
         base_price: Some(dec!(100.0)),
         end_price: Some(dec!(119.4)),
         years: Some(dec!(1.0)),
@@ -50,7 +52,7 @@ fn record(symbol: &str, period: CagrPeriod, cagr: rust_decimal::Decimal) -> Stoc
         price: period.supports_price_metric().then_some(outcome),
         total: Some(outcome),
         reinvested: Some(outcome),
-        first_quote_date: NaiveDate::from_ymd_opt(1988, 1, 4),
+        first_quote_date: ymd(1988, 1, 4),
         shortfall_days: Some(0),
         data_complete: true,
         has_anomaly: false,
@@ -70,7 +72,7 @@ fn incomplete(symbol: &str, period: CagrPeriod) -> StockCagr {
         price: None,
         total: None,
         reinvested: None,
-        first_quote_date: NaiveDate::from_ymd_opt(1989, 6, 1),
+        first_quote_date: ymd(1989, 6, 1),
         shortfall_days: None,
         data_complete: false,
         has_anomaly: true,

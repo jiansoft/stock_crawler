@@ -1,4 +1,7 @@
-use chrono::{Datelike, Local, NaiveDate};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 use crate::core::declare::StockExchange;
 use crate::infra::cache::SHARE;
@@ -37,12 +40,12 @@ async fn test_upsert() {
     ];
 
     let mut e = DailyQuote::from_with_exchange(StockExchange::TWSE, &data);
-    e.date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
-    e.year = e.date.year();
+    e.date = date(2000, 1, 1);
+    e.year = i32::from(e.date.year());
     e.month = e.date.month() as i32;
     e.day = e.date.day() as i32;
-    e.record_time = Local::now();
-    e.create_time = Local::now();
+    e.record_time = TaipeiDateTime::now();
+    e.create_time = TaipeiDateTime::now();
 
     match e.upsert().await {
         Ok(_) => {}
@@ -72,12 +75,12 @@ async fn test_upsert() {
     ];
 
     let mut e = DailyQuote::from_with_exchange(StockExchange::TPEx, &otc);
-    e.date = NaiveDate::from_ymd_opt(2000, 1, 2).unwrap();
-    e.year = e.date.year();
+    e.date = date(2000, 1, 2);
+    e.year = i32::from(e.date.year());
     e.month = e.date.month() as i32;
     e.day = e.date.day() as i32;
-    e.record_time = Local::now();
-    e.create_time = Local::now();
+    e.record_time = TaipeiDateTime::now();
+    e.create_time = TaipeiDateTime::now();
 
     match e.upsert().await {
         Ok(_) => {}
@@ -111,10 +114,10 @@ async fn insert_missing_batch_short_circuits_on_an_empty_slice() {
 }
 
 /// 建立一筆最小可寫入的測試報價（固定歷史日期 + 假代號）。
-fn make_quote(symbol: &str, date: NaiveDate, closing_price: rust_decimal::Decimal) -> DailyQuote {
+fn make_quote(symbol: &str, date: Date, closing_price: rust_decimal::Decimal) -> DailyQuote {
     let mut quote = DailyQuote::new(symbol.to_string());
     quote.date = date;
-    quote.year = date.year();
+    quote.year = i32::from(date.year());
     quote.month = date.month() as i32;
     quote.day = date.day() as i32;
     quote.closing_price = closing_price;
@@ -139,8 +142,8 @@ async fn insert_missing_batch_fills_gaps_without_overwriting() {
 
     // 固定歷史日期 + 假代號，避免碰到任何真實資料。
     const SYMBOL: &str = "79979";
-    let day1 = NaiveDate::from_ymd_opt(1970, 1, 1).expect("測試日期應合法");
-    let day2 = NaiveDate::from_ymd_opt(1970, 1, 2).expect("測試日期應合法");
+    let day1 = date(1970, 1, 1);
+    let day2 = date(1970, 1, 2);
     let cleanup = || async {
         let _ = sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE "stock_symbol" = $1"#)
             .bind(SYMBOL)
@@ -159,7 +162,7 @@ async fn insert_missing_batch_fills_gaps_without_overwriting() {
     assert_eq!(inserted, 2);
 
     // 重跑同一批並多帶一天：只有新的那天會被寫入（ON CONFLICT DO NOTHING）。
-    let day3 = NaiveDate::from_ymd_opt(1970, 1, 3).expect("測試日期應合法");
+    let day3 = date(1970, 1, 3);
     let inserted = DailyQuote::insert_missing_batch(&[
         make_quote(SYMBOL, day1, rust_decimal::Decimal::from(99)),
         make_quote(SYMBOL, day2, rust_decimal::Decimal::from(99)),
@@ -174,7 +177,7 @@ async fn insert_missing_batch_fills_gaps_without_overwriting() {
         r#"SELECT "ClosingPrice" FROM "DailyQuotes" WHERE "stock_symbol" = $1 AND "Date" = $2"#,
     )
     .bind(SYMBOL)
-    .bind(day1)
+    .bind(day1.to_sqlx())
     .fetch_one(database::get_connection())
     .await
     .expect("應查得到既有資料");
@@ -215,7 +218,7 @@ async fn test_copy_in_raw_rolls_back() {
         .map(|(index, field)| (field.as_str(), index))
         .collect();
     // 用不會與真實資料衝突的日期，避免撞到 (stock_symbol, Date) 唯一索引；交易結束即回滾。
-    let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    let date = date(1970, 1, 1);
     let quotes: Vec<DailyQuote> = table
         .data
         .as_ref()
@@ -243,7 +246,7 @@ async fn test_copy_in_raw_rolls_back() {
         .expect("copy_in_raw_on should succeed");
     assert_eq!(copied as usize, quotes.len());
     let inside: i64 = sqlx::query_scalar(count_on_date)
-        .bind(date)
+        .bind(date.to_sqlx())
         .fetch_one(&mut *tx)
         .await
         .expect("count inside transaction");
@@ -255,7 +258,7 @@ async fn test_copy_in_raw_rolls_back() {
     tx.rollback().await.expect("rollback");
 
     let after: i64 = sqlx::query_scalar(count_on_date)
-        .bind(date)
+        .bind(date.to_sqlx())
         .fetch_one(database::get_connection())
         .await
         .expect("count after rollback");

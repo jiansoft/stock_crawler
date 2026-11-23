@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use sqlx::Row;
 
@@ -40,7 +41,7 @@ impl PgCagrSourceRepository {
     pub async fn fetch_single_day_change_percent(
         &self,
         stock_symbol: &str,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Option<Decimal>> {
         let sql = r#"
             WITH px AS (
@@ -59,7 +60,7 @@ impl PgCagrSourceRepository {
 
         let value: Option<Decimal> = sqlx::query_scalar(sql)
             .bind(stock_symbol)
-            .bind(date)
+            .bind(date.to_sqlx())
             .fetch_optional(database::get_connection())
             .await
             .context("Failed to fetch single day change percent")?
@@ -71,7 +72,7 @@ impl PgCagrSourceRepository {
 
 #[async_trait]
 impl CagrSourceRepository for PgCagrSourceRepository {
-    async fn fetch_trading_day_on_or_before(&self, date: NaiveDate) -> Result<Option<NaiveDate>> {
+    async fn fetch_trading_day_on_or_before(&self, date: Date) -> Result<Option<Date>> {
         let sql = r#"
             SELECT MAX("Date") AS trading_day
             FROM "DailyQuotes"
@@ -79,16 +80,19 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         "#;
 
         let row = sqlx::query(sql)
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(SENTINEL_DATE_FLOOR)
             .fetch_one(database::get_connection())
             .await
             .context("Failed to fetch trading day on or before the given date")?;
 
-        Ok(row.try_get::<Option<NaiveDate>, _>("trading_day")?)
+        Ok(crate::infra::database::jiff_types::try_get::<
+            Option<Date>,
+            _,
+        >(&row, "trading_day")?)
     }
 
-    async fn fetch_latest_trading_day(&self) -> Result<Option<NaiveDate>> {
+    async fn fetch_latest_trading_day(&self) -> Result<Option<Date>> {
         let sql = r#"
             SELECT MAX("Date") AS trading_day
             FROM "DailyQuotes"
@@ -101,7 +105,10 @@ impl CagrSourceRepository for PgCagrSourceRepository {
             .await
             .context("Failed to fetch the latest trading day")?;
 
-        Ok(row.try_get::<Option<NaiveDate>, _>("trading_day")?)
+        Ok(crate::infra::database::jiff_types::try_get::<
+            Option<Date>,
+            _,
+        >(&row, "trading_day")?)
     }
 
     async fn fetch_active_symbols(&self) -> Result<Vec<String>> {
@@ -122,7 +129,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
             .collect()
     }
 
-    async fn fetch_first_quote_dates(&self) -> Result<Vec<(String, NaiveDate)>> {
+    async fn fetch_first_quote_dates(&self) -> Result<Vec<(String, Date)>> {
         // 對整張 DailyQuotes GROUP BY 要掃完全部報價（pi 上 1.5～2.8 秒）；改成逐檔沿
         // (stock_symbol, "Date") 索引找第一筆，只讀約 2 千次索引，正式庫實測 975ms → 35ms。
         // 只查計算母體，已下市股票本來就用不到。
@@ -151,13 +158,13 @@ impl CagrSourceRepository for PgCagrSourceRepository {
             .map(|row| {
                 Ok((
                     row.try_get::<String, _>("stock_symbol")?,
-                    row.try_get::<NaiveDate, _>("first_date")?,
+                    crate::infra::database::jiff_types::try_get::<Date, _>(&row, "first_date")?,
                 ))
             })
             .collect()
     }
 
-    async fn fetch_closing_prices_on(&self, date: NaiveDate) -> Result<Vec<(String, Decimal)>> {
+    async fn fetch_closing_prices_on(&self, date: Date) -> Result<Vec<(String, Decimal)>> {
         let sql = r#"
             SELECT stock_symbol, "ClosingPrice"
             FROM "DailyQuotes"
@@ -165,7 +172,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         "#;
 
         let rows = sqlx::query(sql)
-            .bind(date)
+            .bind(date.to_sqlx())
             .fetch_all(database::get_connection())
             .await
             .context("Failed to fetch closing prices on the given date")?;
@@ -182,9 +189,9 @@ impl CagrSourceRepository for PgCagrSourceRepository {
 
     async fn fetch_first_quote_within(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<(String, NaiveDate, Decimal)>> {
+        from: Date,
+        to: Date,
+    ) -> Result<Vec<(String, Date, Decimal)>> {
         // 區間刻意為左開右閉：`from`（統一對齊後的期初交易日）當天有報價的
         // 股票走一般路徑，這裡只處理當天沒有報價、需要套用寬限規則者。
         let sql = r#"
@@ -196,8 +203,8 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         "#;
 
         let rows = sqlx::query(sql)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .fetch_all(database::get_connection())
             .await
             .context("Failed to fetch first quote within the grace period")?;
@@ -206,14 +213,14 @@ impl CagrSourceRepository for PgCagrSourceRepository {
             .map(|row| {
                 Ok((
                     row.try_get::<String, _>("stock_symbol")?,
-                    row.try_get::<NaiveDate, _>("Date")?,
+                    crate::infra::database::jiff_types::try_get::<Date, _>(&row, "Date")?,
                     row.try_get::<Decimal, _>("ClosingPrice")?,
                 ))
             })
             .collect()
     }
 
-    async fn fetch_dividend_events_since(&self, since: NaiveDate) -> Result<Vec<DividendEvent>> {
+    async fn fetch_dividend_events_since(&self, since: Date) -> Result<Vec<DividendEvent>> {
         // 兩個必要的防護，缺一結果就會系統性錯誤：
         //
         // 1. `has_detail` 去重：同一 (security_code, year) 可能同時存在
@@ -248,7 +255,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         "#;
 
         let rows = sqlx::query(sql)
-            .bind(since.format("%Y-%m-%d").to_string())
+            .bind(since.strftime("%Y-%m-%d").to_string())
             .fetch_all(database::get_connection())
             .await
             .context("Failed to fetch dividend events")?;
@@ -278,8 +285,8 @@ impl CagrSourceRepository for PgCagrSourceRepository {
 
     async fn fetch_closing_prices_at(
         &self,
-        pairs: &[(String, NaiveDate)],
-    ) -> Result<Vec<(String, NaiveDate, Decimal)>> {
+        pairs: &[(String, Date)],
+    ) -> Result<Vec<(String, Date, Decimal)>> {
         if pairs.is_empty() {
             return Ok(Vec::new());
         }
@@ -287,7 +294,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         // 以 UNNEST 把數萬筆 (代號, 日期) 組合一次送進資料庫，
         // 比逐筆查詢少掉數萬次往返；JOIN 走 stock_symbol + Date 唯一索引。
         let symbols: Vec<String> = pairs.iter().map(|(symbol, _)| symbol.clone()).collect();
-        let dates: Vec<NaiveDate> = pairs.iter().map(|(_, date)| *date).collect();
+        let dates: Vec<Date> = pairs.iter().map(|(_, date)| *date).collect();
 
         let sql = r#"
             SELECT dq.stock_symbol, dq."Date", dq."ClosingPrice"
@@ -300,7 +307,12 @@ impl CagrSourceRepository for PgCagrSourceRepository {
 
         let rows = sqlx::query(sql)
             .bind(&symbols)
-            .bind(&dates)
+            .bind(
+                dates
+                    .iter()
+                    .map(|value| value.to_sqlx())
+                    .collect::<Vec<_>>(),
+            )
             // 全市場近萬組除息日查價，計畫是 nested loop + index-only scan 已無可改；
             // 05:40 冷資料要約 1.8 秒，走批次連線池以免每次觸發 1 秒慢查詢警告。
             .fetch_all(database::get_batch_connection())
@@ -311,17 +323,14 @@ impl CagrSourceRepository for PgCagrSourceRepository {
             .map(|row| {
                 Ok((
                     row.try_get::<String, _>("stock_symbol")?,
-                    row.try_get::<NaiveDate, _>("Date")?,
+                    crate::infra::database::jiff_types::try_get::<Date, _>(&row, "Date")?,
                     row.try_get::<Decimal, _>("ClosingPrice")?,
                 ))
             })
             .collect()
     }
 
-    async fn fetch_corporate_actions_since(
-        &self,
-        since: NaiveDate,
-    ) -> Result<Vec<CorporateAction>> {
+    async fn fetch_corporate_actions_since(&self, since: Date) -> Result<Vec<CorporateAction>> {
         // 比例非正數的列直接在 SQL 濾掉：那是登錄錯誤（0 會讓持股歸零、
         // 負數毫無意義），寧可當成「沒登錄」也不要算出錯誤的報酬率。
         let sql = r#"
@@ -332,7 +341,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         "#;
 
         let rows = sqlx::query(sql)
-            .bind(since)
+            .bind(since.to_sqlx())
             .fetch_all(database::get_connection())
             .await
             .context("Failed to fetch corporate actions")?;
@@ -346,7 +355,10 @@ impl CagrSourceRepository for PgCagrSourceRepository {
 
                 Ok(CorporateAction {
                     stock_symbol: row.try_get::<String, _>("stock_symbol")?,
-                    effective_date: row.try_get::<NaiveDate, _>("effective_date")?,
+                    effective_date: crate::infra::database::jiff_types::try_get::<Date, _>(
+                        &row,
+                        "effective_date",
+                    )?,
                     action_type,
                     share_ratio,
                     note: row.try_get::<String, _>("note")?,
@@ -355,11 +367,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
             .collect()
     }
 
-    async fn fetch_anomaly_events(
-        &self,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<(String, NaiveDate)>> {
+    async fn fetch_anomaly_events(&self, from: Date, to: Date) -> Result<Vec<(String, Date)>> {
         // 依股票代號雜湊分成 ANOMALY_BUCKETS 桶同時跑：瓶頸是近十年約 478 萬筆日K 的
         // 開窗計算，單一語句只用得到一顆 CPU（2026-10-09 正式庫實測 4.8～5.0 秒 →
         // 4 桶 2.1 秒，結果逐筆相同；8 桶不再變快，每桶仍要掃過整個索引）。
@@ -379,8 +387,8 @@ impl CagrSourceRepository for PgCagrSourceRepository {
 /// `'尚未公布'`、空字串，甚至 `'1.39%'` 這類明顯放錯欄位的百分比字串。
 /// 一律以「解析失敗即視為沒有這個日期」處理，與 domain 層
 /// `Dividend::is_eligible_for_date` 的既有語義一致。
-fn parse_ex_dividend_date(raw: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok()
+fn parse_ex_dividend_date(raw: &str) -> Option<Date> {
+    Date::strptime("%Y-%m-%d", raw.trim()).ok()
 }
 
 #[cfg(test)]

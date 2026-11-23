@@ -1,11 +1,13 @@
 //! ETF 歷史淨值回補的測試。
 
 use super::*;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 #[tokio::test]
 async fn backfill_symbols_counts_and_skips_failures() {
     let point = EtfNavHistoryPoint {
-        date: NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法"),
+        date: date(2026, 10, 21),
         nav: rust_decimal::Decimal::ONE,
         market_price: None,
     };
@@ -63,7 +65,7 @@ async fn backfill_symbols_counts_and_skips_failures() {
 async fn backfill_range_writes_rebuilds_snapshot_and_alerts_on_mass_failure() {
     use crate::domain::etf::test_double::RecordingEtfRepository;
 
-    let day = NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法");
+    let day = date(2026, 10, 21);
     let point = EtfNavHistoryPoint {
         date: day,
         nav: rust_decimal::Decimal::ONE,
@@ -112,8 +114,8 @@ async fn backfill_since_passes_range_to_fetch_and_rejects_future_start() {
     use crate::domain::etf::test_double::RecordingEtfRepository;
     use std::sync::{Arc, Mutex};
 
-    let today = NaiveDate::from_ymd_opt(2026, 10, 26).expect("日期應合法");
-    let from = NaiveDate::from_ymd_opt(2019, 1, 1).expect("日期應合法");
+    let today = date(2026, 10, 26);
+    let from = date(2019, 1, 1);
     let point = EtfNavHistoryPoint {
         date: from,
         nav: rust_decimal::Decimal::ONE,
@@ -140,10 +142,7 @@ async fn backfill_since_passes_range_to_fetch_and_rejects_future_start() {
     .expect("起日早於今天應成功");
     assert_eq!(
         *seen.lock().expect("鎖不應中毒"),
-        Some((
-            from,
-            NaiveDate::from_ymd_opt(2026, 10, 25).expect("日期應合法")
-        ))
+        Some((from, date(2026, 10, 25)))
     );
     assert_eq!(repo.inserted(), vec![("0050".to_string(), 1)]);
 
@@ -164,7 +163,7 @@ async fn backfill_since_passes_range_to_fetch_and_rejects_future_start() {
 #[tokio::test]
 async fn backfill_symbols_stops_between_symbols_when_requested() {
     let point = EtfNavHistoryPoint {
-        date: NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法"),
+        date: date(2026, 10, 21),
         nav: rust_decimal::Decimal::ONE,
         market_price: None,
     };
@@ -202,7 +201,7 @@ async fn backfill_symbols_stops_between_symbols_when_requested() {
 async fn backfill_range_stopped_early_still_rebuilds_snapshot() {
     use crate::domain::etf::test_double::RecordingEtfRepository;
 
-    let day = NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法");
+    let day = date(2026, 10, 21);
     let repo = RecordingEtfRepository::with_listed(&["0050", "0056", "00679B"]);
     backfill_nav_range_with(
         &repo,
@@ -220,9 +219,9 @@ async fn backfill_range_stopped_early_still_rebuilds_snapshot() {
 
 #[test]
 fn nav_history_since_range_runs_to_yesterday() {
-    let today = NaiveDate::from_ymd_opt(2026, 10, 26).expect("日期應合法");
-    let from = NaiveDate::from_ymd_opt(2019, 1, 1).expect("日期應合法");
-    let yesterday = NaiveDate::from_ymd_opt(2026, 10, 25).expect("日期應合法");
+    let today = date(2026, 10, 26);
+    let from = date(2019, 1, 1);
+    let yesterday = date(2026, 10, 25);
     assert_eq!(
         nav_history_since_range(today, from).expect("起日早於今天應有區間"),
         (from, yesterday)
@@ -233,26 +232,20 @@ fn nav_history_since_range_runs_to_yesterday() {
     );
     let err = nav_history_since_range(today, today).expect_err("起日不早於今天應回傳錯誤");
     assert!(err.to_string().contains("必須早於今天"), "{err}");
-    assert!(nav_history_since_range(NaiveDate::MIN, from).is_err());
+    assert!(nav_history_since_range(Date::MIN, from).is_err());
 }
 
 #[test]
 fn nav_history_range_ends_yesterday() {
-    let today = NaiveDate::from_ymd_opt(2026, 10, 22).expect("日期應合法");
+    let today = date(2026, 10, 22);
     assert_eq!(
         nav_history_range(today, 3),
-        Some((
-            NaiveDate::from_ymd_opt(2023, 10, 22).expect("日期應合法"),
-            NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法"),
-        ))
+        Some((date(2023, 10, 22), date(2026, 10, 21),))
     );
     assert_eq!(nav_history_range(today, u32::MAX), None);
     assert_eq!(
         recent_range(today),
-        Some((
-            NaiveDate::from_ymd_opt(2026, 9, 22).expect("日期應合法"),
-            NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法"),
-        ))
+        Some((date(2026, 9, 22), date(2026, 10, 21),))
     );
 }
 
@@ -320,8 +313,7 @@ mod entries {
         let (years, since, gaps) = with_origins(&[("https://www.moneydj.com", &uri)], async {
             (
                 backfill_nav_history(1).await,
-                backfill_nav_history_since(NaiveDate::from_ymd_opt(2026, 10, 1).expect("合法日期"))
-                    .await,
+                backfill_nav_history_since(date(2026, 10, 1)).await,
                 fill_recent_nav_gaps().await,
             )
         })

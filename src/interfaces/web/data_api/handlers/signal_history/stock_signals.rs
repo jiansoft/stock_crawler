@@ -1,12 +1,15 @@
 //! `/stocks/{symbol}/signals` handler：個股出現過的技術訊號與每次訊號之後的報酬。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::rows::StockSignalRow;
 use super::sql::STOCK_SIGNALS_SQL;
@@ -31,7 +34,7 @@ pub(crate) async fn stock_signals(
     Query(params): Query<StockSignalsParams>,
 ) -> Response {
     let to = match parse_optional_date(params.date.as_deref()) {
-        Ok(value) => value.unwrap_or_else(|| Local::now().date_naive()),
+        Ok(value) => value.unwrap_or_else(today),
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let days = params.days.unwrap_or(180);
@@ -50,11 +53,11 @@ pub(crate) async fn stock_signals(
         return response;
     }
 
-    let from = to - chrono::Duration::days(i64::from(days) - 1);
+    let from = to - (i64::from(days) - 1).days();
     let rows: Vec<StockSignalRow> = match sqlx::query_as(STOCK_SIGNALS_SQL)
         .bind(&symbol)
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .bind(params.indicator.as_deref())
         .bind(params.kind.as_deref())
         .bind(i64::from(limit))
@@ -71,8 +74,8 @@ pub(crate) async fn stock_signals(
 /// 組成個股訊號歷史；同一天的訊號依來源、種類的固定順序。
 pub(super) fn build_stock_signals(
     symbol: String,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     mut rows: Vec<StockSignalRow>,
 ) -> StockSignalsResponse {
     let total = rows.first().map_or(0, |row| row.total);

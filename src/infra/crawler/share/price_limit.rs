@@ -1,6 +1,6 @@
 //! 交易所公告的漲跌停價（上市 TWT84U、上櫃每日收盤行情的次日漲跌停價）。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::infra::cache::PriceLimit;
@@ -9,7 +9,7 @@ use crate::infra::cache::PriceLimit;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExchangePriceLimits {
     /// 資料日期：上市是這份漲跌停價適用的交易日；上櫃是收盤行情的日期（漲跌停價適用於下一個交易日）。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 代號與漲跌幅限制；無法解析的列已略過。
     pub limits: Vec<(String, PriceLimit)>,
 }

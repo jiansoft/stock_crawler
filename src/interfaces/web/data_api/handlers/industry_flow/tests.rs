@@ -1,11 +1,12 @@
 //! `/market/industry-flow` handler：三大法人資金在各產業的淨流入流出的測試。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
 use super::*;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("合法日期")
 }
 
 fn row(symbol: &str, market_id: i32, industry: &str, amount: f64) -> FlowRow {

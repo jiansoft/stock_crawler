@@ -1,6 +1,9 @@
 //! 衍生資料表落後、未來報酬缺漏與月營收到期的檢查。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 /// 收盤後的衍生表必須到最新交易日；CAGR、外資持股與籌碼可以晚一天，再晚就算落後；
 /// 未來報酬看第 5 個交易日前的基準日。
@@ -42,7 +45,7 @@ fn forward_return_gaps_list_the_first_dates() {
     assert!(forward_return_gap_problems(&[]).is_empty());
     let gaps: Vec<ForwardReturnGap> = (1..=7)
         .map(|d| ForwardReturnGap {
-            date: NaiveDate::from_ymd_opt(2022, 10, d).expect("日期應合法"),
+            date: ymd(2022, 10, d).expect("日期應合法"),
             rows: 2_000 + i64::from(d),
         })
         .collect();
@@ -68,8 +71,8 @@ fn forward_return_gaps_list_the_first_dates() {
 #[test]
 fn market_forward_return_drift_lists_dates_and_the_rerun_range() {
     assert!(market_forward_return_drift_problems(&[]).is_empty());
-    let dates: Vec<NaiveDate> = (1..=6)
-        .map(|d| NaiveDate::from_ymd_opt(2026, 9, d).expect("日期應合法"))
+    let dates: Vec<Date> = (1..=6)
+        .map(|d| ymd(2026, 9, d).expect("日期應合法"))
         .collect();
     let problems = market_forward_return_drift_problems(&dates);
     assert_eq!(
@@ -95,7 +98,7 @@ fn revenue_is_due_after_the_fifteenth() {
     );
     assert!(revenue_problems(Some(202609), day(16)).is_empty());
     // 一月要看前一年十二月。
-    let january = NaiveDate::from_ymd_opt(2027, 1, 20).expect("日期應合法");
+    let january = date(2027, 1, 20);
     assert_eq!(
         revenue_problems(Some(202611), january),
         ["最新只到 202611，應已有 202612"]

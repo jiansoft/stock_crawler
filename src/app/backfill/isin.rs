@@ -5,6 +5,7 @@
 //! 每天執行時會自動跳過週末，並在偵測到股票資料異動或新增時，非同步派發領域事件
 //! 由背景 EventDispatcher 處理 Telegram 通知與 gRPC 服務同步。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::{
     app::backfill, core::declare::StockExchangeMarket, core::util::datetime::Weekend,
     infra::crawler::twse,
@@ -12,7 +13,6 @@ use crate::{
 };
 
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Local};
 use scopeguard::defer;
 
 /// 執行台股國際證券識別碼 (ISIN) 的回補與更新流程。
@@ -26,11 +26,11 @@ use scopeguard::defer;
 /// - `Ok(())`：執行成功。
 /// - `Err(anyhow::Error)`：在執行或記錄錯誤時發生異常。
 pub async fn execute() -> Result<()> {
-    run(Local::now()).await
+    run(TaipeiDateTime::now()).await
 }
 
 /// [`execute`] 的本體：`now` 決定是否為週末，並傳給各市場的抓取。
-async fn run(now: DateTime<Local>) -> Result<()> {
+async fn run(now: TaipeiDateTime) -> Result<()> {
     // 週末台股不開市且資料不會更新，因此直接跳過不執行以節省資源
     if now.is_weekend() {
         return Ok(());
@@ -81,7 +81,7 @@ fn registry_markets() -> impl Iterator<Item = StockExchangeMarket> {
 /// # 回傳值
 /// - `Ok(())`：該市場處理完成。
 /// - `Err(anyhow::Error)`：爬取或處理過程中發生錯誤。
-async fn process_market(now: DateTime<Local>, mode: StockExchangeMarket) -> Result<()> {
+async fn process_market(now: TaipeiDateTime, mode: StockExchangeMarket) -> Result<()> {
     // 透過 twse crawler 模組爬取指定市場的 ISIN 證券識別碼網頁並解析
     let result = twse::international_securities_identification_number::visit_on(now, mode).await?;
     save_changed(&result).await;

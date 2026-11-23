@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 均線天數。
 pub const MA_DAYS: [u16; 5] = [5, 20, 60, 120, 240];
@@ -75,7 +75,7 @@ impl Alignment {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarketRegime {
     /// 資料日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 收盤。
     pub close: f64,
     /// 與前一個交易日相比的漲跌點數。
@@ -119,7 +119,7 @@ impl MarketRegime {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MovingAverageCross {
     /// 穿越當天。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 均線天數。
     pub days: u16,
     /// `true` 為由下往上站上均線，`false` 為跌破。
@@ -133,9 +133,9 @@ pub trait IndexCloseQuery: Send + Sync {
     async fn fetch_index_closes(
         &self,
         category: &str,
-        until: Option<NaiveDate>,
+        until: Option<Date>,
         limit: usize,
-    ) -> Result<Vec<(NaiveDate, f64)>>;
+    ) -> Result<Vec<(Date, f64)>>;
 }
 
 /// 讀取 `until`（含）之前最近 [`LOOKBACK`] 個交易日的加權指數收盤，由新到舊。
@@ -145,13 +145,13 @@ pub trait IndexCloseQuery: Send + Sync {
 /// 查詢失敗時回傳錯誤。
 pub async fn load_taiex(
     query: &impl IndexCloseQuery,
-    until: Option<NaiveDate>,
-) -> Result<Vec<(NaiveDate, f64)>> {
+    until: Option<Date>,
+) -> Result<Vec<(Date, f64)>> {
     query.fetch_index_closes(TAIEX, until, LOOKBACK).await
 }
 
 /// 由新到舊的 `(日期, 收盤)` 算出最新一天的趨勢狀態；沒有任何資料回 `None`。
-pub fn regime(points: &[(NaiveDate, f64)]) -> Option<MarketRegime> {
+pub fn regime(points: &[(Date, f64)]) -> Option<MarketRegime> {
     let &(date, close) = points.first()?;
     let closes = closes_of(points);
     let percent = |from: f64| (from > 0.0).then(|| (close / from - 1.0) * 100.0);
@@ -210,7 +210,7 @@ pub fn regime(points: &[(NaiveDate, f64)]) -> Option<MarketRegime> {
 ///
 /// 某天收盤與均線的相對位置（上方含等於）和前一個交易日不同就算穿越；前一個交易日沒有均線的
 /// 不算。
-pub fn crosses(points: &[(NaiveDate, f64)], days: u16, within: usize) -> Vec<MovingAverageCross> {
+pub fn crosses(points: &[(Date, f64)], days: u16, within: usize) -> Vec<MovingAverageCross> {
     let closes = closes_of(points);
     let days_usize = usize::from(days);
     let side = |offset: usize| {
@@ -230,7 +230,7 @@ pub fn crosses(points: &[(NaiveDate, f64)], days: u16, within: usize) -> Vec<Mov
 }
 
 /// 只取收盤。
-fn closes_of(points: &[(NaiveDate, f64)]) -> Vec<f64> {
+fn closes_of(points: &[(Date, f64)]) -> Vec<f64> {
     points.iter().map(|(_, close)| *close).collect()
 }
 

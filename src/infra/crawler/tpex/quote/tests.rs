@@ -1,6 +1,8 @@
 //! quote的測試；連外的測試標 #[ignore]。
 
-use chrono::{Local, TimeDelta, Timelike};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::ToSpan;
+use jiff::civil::date;
 use std::time::Duration;
 
 use crate::infra::cache::SHARE;
@@ -41,7 +43,7 @@ async fn test_parse_quote_response() {
         date: "1150613".to_string(),
     }];
 
-    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let date = date(2026, 6, 13);
     let result = parse_quote_response(response, pe_ratio, date)
         .await
         .unwrap();
@@ -91,7 +93,7 @@ async fn test_parse_quote_response_pe_ratio_placeholder_becomes_zero() {
         date: "1150612".to_string(),
     }];
 
-    let date = NaiveDate::from_ymd_opt(2026, 6, 12).unwrap();
+    let date = date(2026, 6, 12);
     let result = parse_quote_response(response, pe_ratio, date)
         .await
         .unwrap();
@@ -135,7 +137,7 @@ async fn test_parse_quote_response_ignores_stale_pe_ratio() {
         date: "1150611".to_string(),
     }];
 
-    let date = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+    let date = date(2026, 6, 15);
     let result = parse_quote_response(response, pe_ratio, date)
         .await
         .unwrap();
@@ -170,7 +172,7 @@ async fn test_parse_quote_response_rejects_corrupted_row() {
         tables: vec![table],
     };
 
-    let date = NaiveDate::from_ymd_opt(2026, 6, 12).unwrap();
+    let date = date(2026, 6, 12);
     // 僅有的一列被拒絕（100% > 10% 門檻），整批應回傳錯誤。
     let err = parse_quote_response(response, vec![], date)
         .await
@@ -185,15 +187,15 @@ async fn test_visit() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    let mut now = Local::now();
+    let mut now = TaipeiDateTime::now();
     if now.hour() < 15 {
-        now -= TimeDelta::try_days(1).unwrap();
+        now -= 1.days();
     }
-    // now -= Duration::days(3);
+    // now -= 3.days();
 
     tracing::debug!("開始 visit");
 
-    match visit(now.date_naive()).await {
+    match visit(now.date()).await {
         Err(why) => {
             tracing::debug!("Failed to visit because: {:?}", why);
         }

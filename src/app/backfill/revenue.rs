@@ -1,3 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::today;
 use crate::{
     app::backfill::acl::{RevenueAclMapper, UpdateRevenueCommand},
     core::util,
@@ -5,17 +7,18 @@ use crate::{
     infra::crawler::twse,
 };
 use anyhow::Result;
-use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, NaiveTime, TimeDelta, TimeZone};
 use futures::{StreamExt, stream};
+use jiff::SignedDuration;
+use jiff::civil::Date;
 use scopeguard::defer;
 
 /// 調用  twse API 取得台股月營收
 pub async fn execute() -> Result<()> {
-    execute_on(Local::now().date_naive()).await
+    execute_on(today()).await
 }
 
 /// [`execute`] 的本體：抓 `today` 上個月的月營收；日期可注入，讓測試以歷史月份跑完整流程。
-async fn execute_on(today: NaiveDate) -> Result<()> {
+async fn execute_on(today: Date) -> Result<()> {
     tracing::info!("更新台股月營收開始");
     defer! {
         tracing::info!("更新台股月營收結束");
@@ -25,32 +28,28 @@ async fn execute_on(today: NaiveDate) -> Result<()> {
 }
 
 /// 上個月最後一分鐘（台北時間 23:59），交給 TWSE 月營收爬蟲決定要抓哪個月份。
-fn previous_month_end(today: NaiveDate) -> DateTime<FixedOffset> {
-    let first_day = today.with_day(1).unwrap_or(today);
-    let last_minute = first_day.and_time(NaiveTime::MIN) - TimeDelta::minutes(1);
-    let taipei = FixedOffset::east_opt(8 * 60 * 60).expect("UTC+8 是合法時區");
-    taipei
-        .from_local_datetime(&last_minute)
-        .single()
-        .expect("固定時差的時區沒有重複或不存在的時間")
+fn previous_month_end(today: Date) -> TaipeiDateTime {
+    let midnight = TaipeiDateTime::from_datetime(today.first_of_month().at(0, 0, 0, 0))
+        .expect("本月 1 日 00:00 一定在可表示的範圍內");
+    midnight - SignedDuration::from_mins(1)
 }
 
-async fn process_revenues(last_month_timezone: DateTime<FixedOffset>) -> Result<()> {
-    let year = last_month_timezone.year();
-    let month = last_month_timezone.month();
+async fn process_revenues(last_month_timezone: TaipeiDateTime) -> Result<()> {
+    let year = i32::from(last_month_timezone.year());
+    let month = i32::from(last_month_timezone.month());
 
     let revenues = twse::revenue::visit(last_month_timezone).await?;
     let cmds: Vec<UpdateRevenueCommand> = revenues.iter().map(RevenueAclMapper::from_dto).collect();
-    save_revenues(cmds, year, month as i32).await?;
+    save_revenues(cmds, year, month).await?;
 
     // 整個月份的營收都寫完才派發事件：逐檔發會產生上千個事件，也無從彙總成一則通知。
     // 事件只帶月份，要通知哪些股票由 handler 依「目前持股」自行查詢。
-    let revenue_date = i64::from((year * 100) + month as i32);
+    let revenue_date = i64::from(year * 100 + month);
     crate::app::event::get_global_dispatcher()
         .dispatch_async(vec![
             crate::domain::events::DomainEvent::MonthlyRevenueUpdated {
                 date: revenue_date,
-                occurred_at: Local::now(),
+                occurred_at: TaipeiDateTime::now(),
             },
         ])
         .await;

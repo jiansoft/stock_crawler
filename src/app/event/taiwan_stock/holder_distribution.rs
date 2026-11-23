@@ -6,23 +6,26 @@
 //! ## 流程（每週六 10:40 排程）
 //!
 //! 1. 集保股權分散入庫（[`chip::execute_holder_distributions`]）；失敗就不送週報，錯誤交給排程告警。
-//! 2. 取目前持股的普通股代號（[`holdings::common_stock_holdings`]）。
+//! 2. 取所有會員目前持股的普通股代號作為讀取範圍（[`holdings::crawl_common_stocks`]）；
+//!    週報依收件者範圍只列範圍內的持股（會員系統計畫 7.6）。
 //! 3. 從 `holder_distribution` 讀最近 5 個資料週：最新一週是本週，每檔在本週之前最近的一筆是上週，
 //!    全表往前第 4 個資料週是 4 週前；缺哪一週就不顯示那一項變化。
 //! 4. 依千張大戶比例的週變化由增到減排列，一則訊息列出全部持股；沒有上週資料時只列現況。
 //! 5. 以資料日期做去重（Redis `tdcc:holder_report:{日期}`）：集保還沒更新、入庫後最新一週仍是
 //!    已通知過的那週時不再送。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::{collections::HashMap, fmt::Write};
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::{add_thousand_separators, format_decimal_with_commas, holdings};
 use crate::{
     app::backfill::chip,
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::chip::{HolderDistributionRecord, HolderHistoryRepository, RecentHolderWeeks},
     infra::{database::repository::chip::PgChipRepository, nosql::redis::CLIENT},
 };
@@ -84,17 +87,12 @@ pub async fn execute() -> Result<()> {
     chip::execute_holder_distributions()
         .await
         .context("集保股權分散入庫失敗，本週持股大戶週報不送")?;
-    let symbols: Vec<String> = holdings::common_stock_holdings()
+    let symbols: Vec<String> = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for holder distribution report failed")?
         .into_iter()
         .collect();
-    let Some((date, rows)) = collect_rows(
-        &PgChipRepository::new(),
-        &symbols,
-        Local::now().date_naive(),
-    )
-    .await?
+    let Some((date, rows)) = collect_rows(&PgChipRepository::new(), &symbols, today()).await?
     else {
         tracing::info!("集保股權分散沒有任何持股的本週資料，略過大戶週報");
         return Ok(());
@@ -103,7 +101,20 @@ pub async fn execute() -> Result<()> {
         tracing::info!("集保股權分散最新仍是 {date}，這週已通知過");
         return Ok(());
     }
-    alert::send_message(&build_message(date, &rows, holdings::stock_name)).await;
+    let dedup_key = format!("{}:{date}", Topic::HoldingsHolderDistribution.code());
+    notify::notify_holdings(Topic::HoldingsHolderDistribution, &dedup_key, |view| {
+        let rows = &rows;
+        async move {
+            let held = holdings::common_stock_holdings(&view).await?;
+            let mine: Vec<Row> = rows
+                .iter()
+                .filter(|row| held.contains(&row.stock_symbol))
+                .cloned()
+                .collect();
+            Ok((!mine.is_empty()).then(|| build_message(date, &mine, holdings::stock_name)))
+        }
+    })
+    .await;
     tracing::info!(
         "持股大戶週報結束: date={date}, holdings={}, reported={}",
         symbols.len(),
@@ -116,8 +127,8 @@ pub async fn execute() -> Result<()> {
 async fn collect_rows(
     repository: &impl HolderHistoryRepository,
     symbols: &[String],
-    as_of: NaiveDate,
-) -> Result<Option<(NaiveDate, Vec<Row>)>> {
+    as_of: Date,
+) -> Result<Option<(Date, Vec<Row>)>> {
     let weeks = repository
         .recent_holder_weeks(symbols, as_of, WEEKS)
         .await
@@ -180,7 +191,7 @@ fn sort_rows(rows: &mut [Row]) {
 /// 組出週報（Telegram MarkdownV2）。每檔兩行：千張一行，400 張與股東人數一行。
 ///
 /// `stock_name` 由呼叫端提供（正式流程讀股票主檔快取），測試時可換成固定對照。
-fn build_message(date: NaiveDate, rows: &[Row], stock_name: impl Fn(&str) -> String) -> String {
+fn build_message(date: Date, rows: &[Row], stock_name: impl Fn(&str) -> String) -> String {
     let mut message = String::with_capacity(256 + rows.len() * 192);
     let _ = writeln!(
         &mut message,
@@ -278,12 +289,12 @@ fn holders_change(previous: i64, current: i64) -> String {
 }
 
 /// 這週已通知的去重鍵。
-fn reported_key(date: NaiveDate) -> String {
+fn reported_key(date: Date) -> String {
     format!("tdcc:holder_report:{date}")
 }
 
 /// 記下這個資料週已通知；回傳 `false` 代表先前已通知過。Redis 失敗時寧可重送，記錄後回傳 `true`。
-async fn mark_reported(date: NaiveDate) -> bool {
+async fn mark_reported(date: Date) -> bool {
     match CLIENT
         .set_if_absent(reported_key(date), "1", REPORTED_TTL_SECONDS)
         .await

@@ -3,10 +3,11 @@ use crate::domain::portfolio::entity::{
 };
 use crate::domain::portfolio::payout::PayoutAllocation;
 use crate::domain::portfolio::repository::PortfolioRepository;
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use sqlx::{QueryBuilder, Row, postgres::PgRow};
 
@@ -82,6 +83,39 @@ impl PortfolioRepository for PgPortfolioRepository {
             .context("Failed to fetch active holdings from PostgreSQL")?;
 
         Ok(rows)
+    }
+
+    /// 某個可見範圍內未售出的持股明細：`member_id = ANY(範圍內成員)`（家庭邊界，2.7）。
+    async fn fetch_active_holdings_in(
+        &self,
+        view: &HoldingView,
+        security_codes: Option<Vec<String>>,
+    ) -> Result<Vec<StockOwnershipDetail>> {
+        let members = crate::infra::database::repository::holding_view::member_ids(view).await?;
+        let mut query_builder = QueryBuilder::new(
+            r#"
+            SELECT
+                serial, member_id, security_code, share_quantity, holding_cost, created_time,
+                share_price_average, current_cost_per_share, is_sold,
+                cumulate_dividends_cash, cumulate_dividends_stock, cumulate_dividends_stock_money, cumulate_dividends_total
+            FROM stock_ownership_details
+            WHERE is_sold = false AND member_id = ANY("#,
+        );
+        query_builder.push_bind(members);
+        query_builder.push(")");
+        if let Some(scs) = security_codes
+            && !scs.is_empty()
+        {
+            query_builder.push(" AND security_code = ANY(");
+            query_builder.push_bind(scs);
+            query_builder.push(")");
+        }
+        query_builder
+            .build()
+            .try_map(Self::row_to_entity)
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch active holdings in view from PostgreSQL")
     }
 
     /// 依序號尋找單筆持股明細。
@@ -321,12 +355,12 @@ impl PortfolioRepository for PgPortfolioRepository {
 
     async fn fetch_payout_allocations(
         &self,
-        member_id: i64,
-        from: NaiveDate,
-        to: NaiveDate,
-        today: NaiveDate,
+        view: &HoldingView,
+        from: Date,
+        to: Date,
+        today: Date,
     ) -> Result<Vec<PayoutAllocation>> {
-        payout::fetch(member_id, from, to, today).await
+        payout::fetch(view, from, to, today).await
     }
 }
 

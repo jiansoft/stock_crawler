@@ -1,5 +1,8 @@
 //! HiStock 全市場快取的背景任務與診斷資訊。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::today;
+use jiff::civil;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -252,14 +255,11 @@ pub(super) fn failure_level(failures: u32) -> tracing::Level {
 /// 10-22、10-27、10-28、10-29 每天 09:02 第一輪都有約 500／2285 列前後矛盾；10-28 收盤統計失敗 111 輪、
 /// 矛盾 45,547 列次，與每輪約 410 列吻合，10-29 11:37 實抓則 0 列矛盾。收盤統計的 `dirty_batches`
 /// 會記下整批捨棄的首末時間，用來確認這段時間窗。
-const OPENING_DIRTY_UNTIL: chrono::NaiveTime = match chrono::NaiveTime::from_hms_opt(9, 15, 0) {
-    Some(time) => time,
-    None => panic!("09:15 是合法時間"),
-};
+const OPENING_DIRTY_UNTIL: civil::Time = civil::time(9, 15, 0, 0);
 
 /// 整批錯亂這一筆要記的等級：開盤時段 info、之後 warn，各自每天只記第一筆，其餘 debug
 /// （錯亂通常連續好幾輪，每 5 秒一輪）。
-pub(super) fn dirty_batch_level(at: chrono::NaiveDateTime) -> tracing::Level {
+pub(super) fn dirty_batch_level(at: civil::DateTime) -> tracing::Level {
     let (key, level) = if at.time() < OPENING_DIRTY_UNTIL {
         ("*dirty-batch-opening*", tracing::Level::INFO)
     } else {
@@ -277,7 +277,7 @@ pub(super) fn dirty_batch_level(at: chrono::NaiveDateTime) -> tracing::Level {
 pub(super) fn report_cycle_error(e: &anyhow::Error) {
     if e.downcast_ref::<DirtyBatch>().is_some() {
         super::stats::record_dirty_batch();
-        match dirty_batch_level(chrono::Local::now().naive_local()) {
+        match dirty_batch_level(TaipeiDateTime::now().datetime()) {
             tracing::Level::WARN => tracing::warn!("{}（今天不再重複記錄）", e),
             tracing::Level::INFO => {
                 tracing::info!("{}（開盤時段的已知現象，今天不再重複記錄）", e);
@@ -286,7 +286,7 @@ pub(super) fn report_cycle_error(e: &anyhow::Error) {
         }
     } else {
         let failures = CONSECUTIVE_FAILURES.fetch_add(1, Ordering::SeqCst) + 1;
-        let today = chrono::Local::now().date_naive();
+        let today = today();
         let (first, threshold) = INCONSISTENT_ROW_WARNED
             .lock()
             .map(|mut seen| {

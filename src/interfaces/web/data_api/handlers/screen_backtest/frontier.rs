@@ -13,7 +13,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::offsets::{
     distribution, excluded_periods, sample_offsets, split_distributions, split_results,
@@ -106,7 +106,7 @@ pub(crate) async fn screen_backtest_frontier(BacktestQuery(params): BacktestQuer
 pub(super) fn frontier(
     raws: &[(u16, Raw)],
     hold_days: u16,
-    split: Option<NaiveDate>,
+    split: Option<Date>,
 ) -> Vec<BacktestFrontierPoint> {
     WEIGHTS
         .iter()

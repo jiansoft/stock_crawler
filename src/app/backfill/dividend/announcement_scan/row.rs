@@ -8,7 +8,7 @@
 //! 比對時**年度合計列一律排除**——它是 `upsert_annual_total_dividend` 聚合出來的結果，
 //! 不是一次配息事件，詳見 [`super`] 的第一個資料模型陷阱。
 
-use chrono::Local;
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 
 use crate::{domain::dividend::entity::Dividend, infra::crawler::share::ExDividendAnnouncement};
@@ -138,7 +138,7 @@ pub(super) fn build_new_dividend(
     paid_year: i32,
     quarter: &str,
 ) -> Dividend {
-    let now = Local::now();
+    let now = TaipeiDateTime::now();
 
     Dividend {
         serial: 0,

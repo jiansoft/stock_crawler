@@ -15,6 +15,10 @@ pub(crate) struct DividendIncomeParams {
     pub(crate) year: Option<i32>,
     /// 會員編號；0（預設）為全部會員合計。
     #[param(minimum = 0, default = 0)]
+    #[allow(
+        dead_code,
+        reason = "由 scope middleware 讀取並驗證後轉成 HoldingView；這裡保留給 OpenAPI 文件"
+    )]
     pub(crate) member_id: Option<i64>,
     /// `true` 時另回 `items`：今年每一筆入帳（同 `/portfolio/upcoming-payouts` 的項目）。
     #[param(default = false)]

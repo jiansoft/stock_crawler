@@ -1,5 +1,6 @@
 //! 外資及陸資持股領域實體的測試。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -8,7 +9,7 @@ fn alert(change_20d: Option<Decimal>) -> HoldingForeignHoldingAlert {
     HoldingForeignHoldingAlert {
         stock_symbol: "2330".to_string(),
         stock_name: "台積電".to_string(),
-        date: NaiveDate::from_ymd_opt(2026, 9, 30).unwrap(),
+        date: date(2026, 9, 30),
         share_holding_percentage: dec!(72.5),
         change_5d: None,
         change_20d,

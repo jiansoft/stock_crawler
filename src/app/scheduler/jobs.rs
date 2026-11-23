@@ -2,13 +2,14 @@
 //!
 //! 依時段分成子模組，每個子模組內依執行時間排序。
 use anyhow::Result;
-use tokio_cron_scheduler::Job;
+
+use crate::core::cron::CronJob;
 
 /// 一個排程的固定中繼資料與不執行任務的建構函式。
 pub(super) struct JobDefinition {
     pub(super) cron: &'static str,
     pub(super) name: &'static str,
-    pub(super) create: fn() -> Result<Job>,
+    pub(super) create: fn() -> Result<CronJob>,
 }
 
 /// 將任務函式與固定中繼資料綁在一起，保留一般與靜默兩種記錄模式。

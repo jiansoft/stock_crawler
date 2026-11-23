@@ -103,7 +103,7 @@ fn lines_and_message() {
         None,
         None,
         &[],
-        HoldingSection {
+        MarketExtras {
             breakouts: Some(&section),
             ..Default::default()
         },

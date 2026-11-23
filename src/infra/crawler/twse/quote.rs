@@ -1,5 +1,6 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{Local, NaiveDate};
+use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -113,9 +114,9 @@ fn is_twse_quote_table(table: &Table) -> bool {
 /// 3. 盡可能計算 `change_range` 後回傳當日清單。
 ///
 /// 若 API 可連線但找不到目標表格，會記錄 warning 並回傳空陣列。
-pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
-    let date_str = date.format("%Y%m%d").to_string();
-    let now_ts = Local::now().timestamp_millis();
+pub async fn visit(date: Date) -> Result<Vec<DailyQuoteDto>> {
+    let date_str = date.strftime("%Y%m%d").to_string();
+    let now_ts = TaipeiDateTime::now().timestamp().as_millisecond();
     let url = format!(
         "https://www.{}/exchangeReport/MI_INDEX?response=json&date={}&type=ALLBUT0999&_={}",
         twse::HOST,
@@ -136,10 +137,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
 ///
 /// # 傳回值
 /// 回傳解析後的 `DailyQuoteDto` 向量，若查無資料則回傳空向量。
-pub async fn parse_listed_response(
-    data: ListedResponse,
-    date: NaiveDate,
-) -> Result<Vec<DailyQuoteDto>> {
+pub async fn parse_listed_response(data: ListedResponse, date: Date) -> Result<Vec<DailyQuoteDto>> {
     // 檢查 API 回應狀態，如查無資料則直接返回空陣列
     if let Some(stat) = &data.stat {
         if is_no_data_stat(stat) {
@@ -192,7 +190,7 @@ pub async fn parse_listed_response(
             }
 
             // 檢查記憶體中的 TTL 快取，避免重複處理相同日期的資料
-            let daily_quote_memory_key = format!("{}-{}", date.format("%Y%m%d"), dto.symbol);
+            let daily_quote_memory_key = format!("{}-{}", date.strftime("%Y%m%d"), dto.symbol);
 
             if TTL.daily_quote_contains_key(&daily_quote_memory_key) {
                 continue;

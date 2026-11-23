@@ -1,9 +1,8 @@
 //! 歸因的計算：每期依產業（與現金）分組，算 Brinson-Fachler 的配置、選股與交互效果，再彙總成
 //! 整段、各年度與各產業。純計算，不做 I/O；公式見上層模組說明。
 
+use jiff::civil::Date;
 use std::collections::{BTreeMap, HashMap};
-
-use chrono::{Datelike, NaiveDate};
 
 use super::super::{PeriodRow, portfolio};
 use crate::interfaces::web::data_api::dto::{
@@ -17,7 +16,8 @@ pub(super) const YEAR_INDUSTRIES: usize = 5;
 /// [`BENCHMARK_SQL`](super::BENCHMARK_SQL) 的一列：一個換股日的基準成分股。
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 pub(super) struct BenchmarkRow {
-    pub(super) date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub(super) date: Date,
     pub(super) industries: Vec<i32>,
     pub(super) returns: Vec<f64>,
     pub(super) trade_values: Vec<f64>,
@@ -57,7 +57,7 @@ impl Effect {
 /// 一期的歸因：策略與基準的報酬（%）、0050 報酬與各類別的效果。
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PeriodAttribution {
-    pub(super) date: NaiveDate,
+    pub(super) date: Date,
     pub(super) strategy_return: f64,
     pub(super) benchmark_return: f64,
     pub(super) etf_return: Option<f64>,
@@ -231,7 +231,10 @@ pub(super) fn attribution_years(
 ) -> Vec<BacktestAttributionYear> {
     let mut by_year: BTreeMap<i32, Vec<&PeriodAttribution>> = BTreeMap::new();
     for period in periods {
-        by_year.entry(period.date.year()).or_default().push(period);
+        by_year
+            .entry(i32::from(period.date.year()))
+            .or_default()
+            .push(period);
     }
     by_year
         .into_iter()

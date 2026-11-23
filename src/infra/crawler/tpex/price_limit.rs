@@ -7,8 +7,9 @@
 //! 回應是 `{"tables":[{"date":"115/11/06","fields":[…],"data":[[…]]}]}`；欄位名稱尾端可能有空白。
 //! 沒有漲跌幅限制的證券（債券 ETF、國外成分 ETF 等）次日漲停寫 `9,999.95`、次日跌停寫 `0.01`。
 
+use crate::core::util::datetime::ymd;
 use anyhow::{Result, anyhow};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::{
@@ -49,7 +50,7 @@ pub async fn visit() -> Result<ExchangePriceLimits> {
 }
 
 /// 解析民國日期 `115/11/06`。
-fn parse_roc_date(text: &str) -> Option<NaiveDate> {
+fn parse_roc_date(text: &str) -> Option<Date> {
     let mut parts = text.trim().split('/');
     let year = roc_year_to_gregorian_year(parts.next()?.parse().ok()?);
     let month = parts.next()?.parse().ok()?;
@@ -57,7 +58,7 @@ fn parse_roc_date(text: &str) -> Option<NaiveDate> {
     if parts.next().is_some() {
         return None;
     }
-    NaiveDate::from_ymd_opt(year, month, day)
+    ymd(year, month, day)
 }
 
 /// 解析收盤行情回應。

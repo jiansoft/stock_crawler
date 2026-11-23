@@ -5,6 +5,10 @@ use super::super::{
     summary::summarize,
 };
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 /// 建立相鄰日期上的還原收盤。
 fn series(values: &[f64]) -> Arc<Vec<PriceBar>> {
     Arc::new(
@@ -12,7 +16,7 @@ fn series(values: &[f64]) -> Arc<Vec<PriceBar>> {
             .iter()
             .enumerate()
             .map(|(i, close)| PriceBar {
-                date: NaiveDate::from_ymd_opt(2024, 1, 2 + i as u32).unwrap(),
+                date: ymd(2024, 1, 2 + i as u32).unwrap(),
                 close: *close,
                 high: *close,
                 low: *close,
@@ -23,8 +27,8 @@ fn series(values: &[f64]) -> Arc<Vec<PriceBar>> {
 /// 建立持有兩天的完整期數。
 fn period(symbols: &[&str]) -> PeriodRow {
     PeriodRow {
-        date: NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
-        exit_date: Some(NaiveDate::from_ymd_opt(2024, 1, 4).unwrap()),
+        date: date(2024, 1, 2),
+        exit_date: Some(date(2024, 1, 4)),
         symbols: symbols.iter().map(|s| s.to_string()).collect(),
         holdings: symbols.len() as i64,
         ..PeriodRow::default()
@@ -34,7 +38,7 @@ fn period(symbols: &[&str]) -> PeriodRow {
 /// 缺比值時沿用收盤；0050 同樣處理；找不到次一交易日時標為不完整。
 #[test]
 fn next_open_daily_path_uses_open_endpoints() {
-    let d = |n: u32| NaiveDate::from_ymd_opt(2024, 1, 2 + n).unwrap();
+    let d = |n: u32| ymd(2024, 1, 2 + n).unwrap();
     // 01-02 換股；01-03 開 100 收 110；01-04 收 121；01-05 出場，開 133.1 收 110。
     let mut row = PeriodRow {
         date: d(0),
@@ -211,8 +215,8 @@ fn missing_daily_prices_are_not_period_end_risk() {
     assert_eq!(summary.period_end_max_drawdown, Some(0.0));
 }
 
-fn wday(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2024, m, d).expect("有效日期")
+fn wday(m: u32, d: u32) -> Date {
+    ymd(2024, m, d).expect("有效日期")
 }
 
 fn wbar(m: u32, d: u32, close: f64) -> PriceBar {
@@ -227,14 +231,13 @@ fn wbar(m: u32, d: u32, close: f64) -> PriceBar {
 /// 持有期間：換股日前 30 天到出場日；同一檔重疊或相鄰的期合併，未完成的期不讀；0050 涵蓋全部期間。
 #[test]
 fn holding_windows_merge_per_symbol() {
-    let mk =
-        |date: NaiveDate, exit: Option<NaiveDate>, symbols: &[&str], pending: bool| PeriodRow {
-            date,
-            exit_date: exit,
-            pending,
-            symbols: symbols.iter().map(|s| s.to_string()).collect(),
-            ..PeriodRow::default()
-        };
+    let mk = |date: Date, exit: Option<Date>, symbols: &[&str], pending: bool| PeriodRow {
+        date,
+        exit_date: exit,
+        pending,
+        symbols: symbols.iter().map(|s| s.to_string()).collect(),
+        ..PeriodRow::default()
+    };
     let rows = [
         mk(wday(3, 1), Some(wday(3, 29)), &["A", "B"], false),
         mk(wday(3, 29), Some(wday(4, 26)), &["A"], false),
@@ -242,7 +245,7 @@ fn holding_windows_merge_per_symbol() {
         mk(wday(7, 1), None, &["C"], true),
     ];
     let windows = holding_windows(&rows);
-    let lookback = chrono::Duration::days(WINDOW_LOOKBACK_DAYS);
+    let lookback = (WINDOW_LOOKBACK_DAYS).days();
     assert_eq!(
         windows,
         vec![

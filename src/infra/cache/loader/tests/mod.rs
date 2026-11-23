@@ -5,7 +5,6 @@
 mod loading;
 mod replace_caches;
 
-use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 use crate::domain::market_index::MarketIndex;

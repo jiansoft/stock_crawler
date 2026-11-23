@@ -1,11 +1,11 @@
 //! 目標配置歷史版本端點的隔離資料庫語意：列出、還原、參數驗證與跨會員隔離。
-use super::support::{get, pool_or_skip};
+use super::support::{api_key, get, pool_or_skip};
 use super::*;
 use serde_json::{Value, json};
 
 /// 帶同一組測試 Bearer 金鑰送出 JSON 請求（PUT 目標配置或 POST 還原）。
 async fn send(method: &str, path: &str, body: Value) -> (StatusCode, Value) {
-    let key = std::env::var("DATA_API_KEY").expect("先以 get 建立測試金鑰");
+    let key = api_key();
     let response = router()
         .oneshot(
             Request::builder()
@@ -107,4 +107,94 @@ async fn revisions_list_and_restore_previous_targets() {
     ] {
         sqlx::query(sql).execute(pool).await.unwrap();
     }
+}
+
+/// 家庭與寫入來源：A 家庭的全家目標在 B 家庭讀不到、版本不能跨家庭還原；版本記下 actor；
+/// household_id 不是正整數或 actor_source 不認得回 422；未帶 household_id 為家庭 #1。
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+async fn targets_are_scoped_by_household_and_record_actor() {
+    let pool = pool_or_skip("targets_are_scoped_by_household_and_record_actor")
+        .await
+        .expect("隔離 DB 必須可用");
+    // 假家庭編號，不碰家庭 #1 的全家目標
+    let cleanup = || async {
+        for sql in [
+            "DELETE FROM portfolio_target WHERE household_id IN (979903, 979904)",
+            "DELETE FROM portfolio_target_dimension WHERE household_id IN (979903, 979904)",
+            "DELETE FROM portfolio_target_revision WHERE household_id IN (979903, 979904)",
+        ] {
+            sqlx::query(sql).execute(pool).await.unwrap();
+        }
+    };
+    cleanup().await;
+    let put = |household: i64, key: &str, actor: Value| {
+        let mut body = json!({
+            "member_id": 0,
+            "household_id": household,
+            "dimension": "industry",
+            "targets": [{"target_key": key, "target_percent": 40.0}],
+        });
+        if let (Some(body), Some(actor)) = (body.as_object_mut(), actor.as_object()) {
+            body.extend(actor.clone());
+        }
+        send("PUT", "/api/v1/portfolio/targets", body)
+    };
+
+    let (status, body) = put(
+        979903,
+        "79979甲",
+        json!({"actor_source": "web", "actor_ref": "1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["household_id"], 979903);
+    let (status, _) = put(
+        979903,
+        "79979丙",
+        json!({"actor_source": "mcp", "actor_ref": "token-1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, other) =
+        get("/api/v1/portfolio/targets?member_id=0&household_id=979904&dimension=industry").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(other["targets"], json!([]));
+
+    let (status, revisions) = get(
+        "/api/v1/portfolio/targets/revisions?member_id=0&household_id=979903&dimension=industry",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(revisions["household_id"], 979903);
+    assert_eq!(revisions["revisions"].as_array().map(Vec::len), Some(1));
+    assert_eq!(revisions["revisions"][0]["actor_source"], "mcp");
+    assert_eq!(revisions["revisions"][0]["actor_ref"], "token-1");
+    assert_eq!(
+        revisions["revisions"][0]["targets"][0]["target_key"],
+        "79979甲"
+    );
+
+    // 版本只能在自己的家庭還原
+    let id = revisions["revisions"][0]["id"].as_i64().unwrap();
+    let (status, _) = send(
+        "POST",
+        &format!("/api/v1/portfolio/targets/revisions/{id}/restore"),
+        json!({"member_id": 0, "household_id": 979904}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, _) = put(0, "79979甲", json!({})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = put(979903, "79979甲", json!({"actor_source": "cli"})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = get("/api/v1/portfolio/targets?household_id=-1").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, default) = get("/api/v1/portfolio/targets?member_id=0&dimension=industry").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(default["household_id"], 1);
+
+    cleanup().await;
 }

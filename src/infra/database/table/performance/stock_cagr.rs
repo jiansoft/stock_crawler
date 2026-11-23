@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::domain::performance::entity::{
@@ -20,13 +20,15 @@ use crate::domain::performance::entity::{
 #[derive(sqlx::FromRow, Debug, Clone, PartialEq, Eq)]
 pub struct StockCagr {
     /// 計算基準日（期末交易日）。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 股票代號。
     pub stock_symbol: String,
     /// 統計期間代碼（見 [`CagrPeriod::code`]）。
     pub period: String,
     /// 實際採用的期初交易日。
-    pub base_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    pub base_date: Option<Date>,
     /// 期初收盤價。
     pub base_price: Option<Decimal>,
     /// 期末收盤價。
@@ -62,7 +64,8 @@ pub struct StockCagr {
     /// 口徑 C：年化報酬率（%）。
     pub reinv_cagr_pct: Option<Decimal>,
     /// 該股最早的報價日。
-    pub first_quote_date: Option<NaiveDate>,
+    #[sqlx(try_from = "crate::infra::database::jiff_types::Nullable<jiff_sqlx::Date>")]
+    pub first_quote_date: Option<Date>,
     /// 期初日順延天數。
     pub shortfall_days: Option<i32>,
     /// 期初資料是否齊全。

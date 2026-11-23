@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::{
     app::backfill::acl::FinancialStatementAclMapper,
     app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
@@ -7,7 +8,6 @@ use crate::{
     infra::crawler::wespai, infra::database::repository::financial::PgFinancialRepository,
 };
 use anyhow::Result;
-use chrono::Local;
 use scopeguard::defer;
 
 /// 一週只抓一次 wespai 年報的 Redis 旗標。
@@ -18,7 +18,7 @@ const ANNUAL_SKIP_KEY: &str = "financial_statement:annual";
 /// 下載年度財報資料，過濾已存在與特別股資料後，寫入領域倉儲。
 /// </summary>
 pub async fn execute() -> Result<()> {
-    if Local::now().is_weekend() {
+    if TaipeiDateTime::now().is_weekend() {
         return Ok(());
     }
 

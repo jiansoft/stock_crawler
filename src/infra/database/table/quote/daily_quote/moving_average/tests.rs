@@ -1,6 +1,8 @@
 //! 均線與年內統計的測試：依日期回填、空批次防呆與整段重算對照逐日回填。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 
 use super::*;
@@ -10,7 +12,7 @@ use super::*;
 async fn test_fetch_moving_average() {
     dotenvy::dotenv().ok();
     tracing::debug!("開始 fetch_moving_average");
-    let date = NaiveDate::from_ymd_opt(2023, 8, 1);
+    let date = ymd(2023, 8, 1);
     let mut dq = DailyQuote::new("2330".to_string());
     dq.date = date.unwrap();
     match dq.fill_moving_average().await {
@@ -85,7 +87,7 @@ WHERE i % $2 = 0 AND i <= $3
             .expect("寫入測試資料列");
     }
 
-    let from = NaiveDate::from_ymd_opt(2001, 1, 1).expect("日期應合法");
+    let from = date(2001, 1, 1);
     let updated = DailyQuote::recalculate_moving_averages(&symbols, from)
         .await
         .expect("重算應成功");
@@ -96,12 +98,17 @@ WHERE i % $2 = 0 AND i <= $3
         .expect("重算應成功");
     assert_eq!(again, 0, "重跑時數值沒變，不該再寫入");
 
-    let dates: Vec<NaiveDate> = sqlx::query_scalar(
+    let dates: Vec<Date> = sqlx::query_scalar::<_, jiff_sqlx::Date>(
         r#"SELECT DISTINCT "Date" FROM "DailyQuotes" WHERE stock_symbol = ANY($1) ORDER BY 1"#,
     )
     .bind(&symbols)
     .fetch_all(database::get_connection())
     .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(crate::infra::database::jiff_types::from_wire)
+            .collect::<Vec<_>>()
+    })
     .expect("讀回測試日期");
     let mut rows = Vec::new();
     for date in dates {
@@ -145,7 +152,7 @@ WHERE i % $2 = 0 AND i <= $3
             expected.average_price_in_year,
         ];
         // 同價時逐日算法取哪一天沒有定義，比對「該日的價格等於極值」即可。
-        let price_on = |date: NaiveDate, pick: fn(&DailyQuote) -> Decimal| {
+        let price_on = |date: Date, pick: fn(&DailyQuote) -> Decimal| {
             rows.iter()
                 .find(|r| r.stock_symbol == row.stock_symbol && r.date == date)
                 .map(|r| pick(r).round_dp(2))

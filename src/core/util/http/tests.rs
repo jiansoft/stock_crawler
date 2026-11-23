@@ -1,6 +1,6 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use std::collections::HashMap;
 
-use chrono::Local;
 use concat_string::concat_string;
 
 use super::*;
@@ -99,9 +99,12 @@ async fn post_and_big5_helpers_round_trip_with_local_server() {
 async fn test_request() {
     let url = concat_string!(
         "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=",
-        Local::now().format("%Y%m%d").to_string(),
+        TaipeiDateTime::now().strftime("%Y%m%d").to_string(),
         "&_=",
-        Local::now().timestamp_millis().to_string()
+        TaipeiDateTime::now()
+            .timestamp()
+            .as_millisecond()
+            .to_string()
     );
 
     tracing::debug!("request_get:{:?}", get(&url, None).await);

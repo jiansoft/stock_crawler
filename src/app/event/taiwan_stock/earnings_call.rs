@@ -5,8 +5,8 @@
 //!
 //! ## 流程（每天 20:30 排程）
 //!
-//! 1. 取目前持股（未售出）的普通股代號（[`holdings::common_stock_holdings`]）——
-//!    ETF 與特別股沒有法說會。
+//! 1. 取所有會員目前持股（未售出）的普通股代號作為檢查範圍（[`holdings::crawl_common_stocks`]）——
+//!    ETF 與特別股沒有法說會。通知只送給範圍內持有該股的收件者（會員系統計畫 7.6）。
 //! 2. 逐檔向 BigGo 取法說會清單，只看 [`LOOKBACK_DAYS`] 天內舉行的場次。
 //! 3. 已通知過的場次（Redis `biggo:earnings_call:notified:{call_id}`）略過；AI 摘要還沒產生的
 //!    場次這次不通知也不記錄，之後的排程再看，直到超過回看天數。
@@ -14,15 +14,18 @@
 //!
 //! BigGo 的整理內容是其著作：只做個人通知，不寫進資料庫，也不經公開網站或 API 轉發。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::fmt::Write;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 
 use super::holdings;
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     infra::{
         crawler::biggo::earnings_call::{self, EarningsCall, EarningsCallDetail},
         nosql::redis::CLIENT,
@@ -68,11 +71,11 @@ enum Outcome {
 ///
 /// 單檔失敗只記錄、不中斷；只有查不到持股時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let symbols = holdings::common_stock_holdings()
+    let symbols = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for earnings call notification failed")?;
 
-    let today = Local::now().date_naive();
+    let today = today();
     let mut summary = RunSummary {
         holdings: symbols.len(),
         ..Default::default()
@@ -130,7 +133,16 @@ async fn notify(stock_symbol: &str, call: &EarningsCall) -> Outcome {
     }
 
     let name = holdings::stock_name(stock_symbol);
-    alert::send_message(&build_message(stock_symbol, &name, call, &detail)).await;
+    let message = build_message(stock_symbol, &name, call, &detail);
+    let dedup_key = format!("{}:{}", Topic::HoldingsEarningsCall.code(), call.call_id);
+    notify::notify_holdings(Topic::HoldingsEarningsCall, &dedup_key, |view| {
+        let message = &message;
+        async move {
+            let held = holdings::common_stock_holdings(&view).await?;
+            Ok(held.contains(stock_symbol).then(|| message.clone()))
+        }
+    })
+    .await;
     mark_notified(&call.call_id).await;
     Outcome::Notified
 }
@@ -158,8 +170,8 @@ async fn mark_notified(call_id: &str) {
 }
 
 /// 回看期間內（含今天）舉行的場次。
-fn recent_calls(calls: &[EarningsCall], today: NaiveDate) -> Vec<&EarningsCall> {
-    let since = today - chrono::Duration::days(LOOKBACK_DAYS);
+fn recent_calls(calls: &[EarningsCall], today: Date) -> Vec<&EarningsCall> {
+    let since = today - (LOOKBACK_DAYS).days();
     calls
         .iter()
         .filter(|call| call.date >= since && call.date <= today)

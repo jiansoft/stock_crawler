@@ -1,10 +1,11 @@
 //! `/market/valuation` handler：上市櫃本益比與股價淨值比中位數的走勢與歷史位置的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 
 fn day(date: (i32, u32, u32), pe: Option<f64>) -> MarketValuationDay {
     MarketValuationDay {
-        date: NaiveDate::from_ymd_opt(date.0, date.1, date.2).expect("合法日期"),
+        date: ymd(date.0, date.1, date.2).expect("合法日期"),
         median_pe: pe,
         median_pb: pe.map(|value| value / 10.0),
         pe_samples: 100,

@@ -1,6 +1,7 @@
 //! 上市股票的三大法人買賣超與融資融券餘額的測試；連外的測試標 #[ignore]。
 
 use super::*;
+use jiff::civil::date;
 
 const T86_FIXTURE: &str = include_str!("../testdata/institutional_t86.json");
 const MARGIN_FIXTURE: &str = include_str!("../testdata/margin_mi_margn.json");
@@ -50,7 +51,7 @@ fn closed_days_yield_empty_maps() {
 #[ignore = "live test：連線真實外部網站，需要時手動執行"]
 async fn test_visit() {
     dotenvy::dotenv().ok();
-    let date = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+    let date = date(2026, 10, 5);
     let flows = visit_institutional(date).await.expect("三大法人");
     let margins = visit_margin(date).await.expect("融資融券");
     dbg!(

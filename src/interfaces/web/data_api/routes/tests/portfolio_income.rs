@@ -1,6 +1,8 @@
 //! 持股年度股利入帳 endpoint 的資料庫語意整合測試。
 
-use chrono::{Datelike, Days, Months, NaiveDate};
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use super::support::{SEED_STOCK, SYMBOL, cleanup, get, pool_or_skip, seed};
 use super::*;
@@ -26,10 +28,10 @@ async fn seed_dividend(
     quarter: &str,
     cash: i32,
     stock: i32,
-    ex: NaiveDate,
-    payable: NaiveDate,
+    ex: Date,
+    payable: Date,
 ) -> i64 {
-    let stock_date = |date: NaiveDate| {
+    let stock_date = |date: Date| {
         if stock > 0 {
             date.to_string()
         } else {
@@ -87,7 +89,7 @@ async fn portfolio_dividend_income_endpoint_db_semantics() {
         return;
     };
     cleanup_income(pool).await;
-    let today = chrono::Local::now().date_naive();
+    let today = today();
     let path = format!(
         "/api/v1/portfolio/dividend-income?member_id={MEMBER}&year={}",
         today.year()
@@ -100,10 +102,10 @@ async fn portfolio_dividend_income_endpoint_db_semantics() {
 
     seed(pool, &[SEED_STOCK]).await;
     // 10 天前除息、今天發放：賣掉的 500 股有明細 1000 元。
-    let received = seed_dividend(pool, "Q1", 2, 0, today - Days::new(10), today).await;
+    let received = seed_dividend(pool, "Q1", 2, 0, today - 10.days(), today).await;
     seed_recorded(pool, 500, received, 1000).await;
     // 明天除權息、同一天發放現金與股票：以目前 1000 股推算。
-    let tomorrow = today + Days::new(1);
+    let tomorrow = today + 1.days();
     seed_dividend(pool, "Q2", 1, 1, tomorrow, tomorrow).await;
     sqlx::query("INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, is_sold) VALUES ($1, $2, 1000, -1, false)")
         .bind(MEMBER)
@@ -112,16 +114,8 @@ async fn portfolio_dividend_income_endpoint_db_semantics() {
         .await
         .expect("種入目前持股");
     // 去年的今天入帳 900 元。
-    let last_year_day = today - Months::new(12);
-    let last_year = seed_dividend(
-        pool,
-        "Q3",
-        3,
-        0,
-        last_year_day - Days::new(10),
-        last_year_day,
-    )
-    .await;
+    let last_year_day = today - 12.months();
+    let last_year = seed_dividend(pool, "Q3", 3, 0, last_year_day - 10.days(), last_year_day).await;
     seed_recorded(pool, 300, last_year, 900).await;
 
     let (status, json) = get(&path).await;
@@ -144,7 +138,7 @@ async fn portfolio_dividend_income_endpoint_db_semantics() {
     assert_eq!(json["total_stock_shares"], estimated_shares, "{json}");
     assert_eq!(json["last_year_cash_amount"], 900.0, "{json}");
     assert_eq!(json["last_year_same_period_cash_amount"], 900.0, "{json}");
-    let month = &json["months"][today.month0() as usize];
+    let month = &json["months"][usize::from(today.month().unsigned_abs()) - 1];
     assert_eq!(month["month"], today.month());
     assert_eq!(month["received_cash_amount"], 1000.0, "{json}");
     assert_eq!(month["last_year_cash_amount"], 900.0, "{json}");

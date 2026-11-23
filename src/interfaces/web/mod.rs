@@ -42,6 +42,8 @@ pub async fn start(shutdown: watch::Receiver<bool>) -> Result<WebServerHandle> {
     let addr = std::env::var(MANUAL_BACKFILL_WEB_ADDR)
         .unwrap_or_else(|_| DEFAULT_MANUAL_BACKFILL_WEB_ADDR.to_string())
         .parse::<SocketAddr>()?;
+    // 開放註冊時 Data API 的持股類端點必須是嚴格模式，否則拒絕啟動。
+    data_api::check_startup()?;
     // 建立目前 Web 服務需要的所有路由。
     let app = backfill_admin::router().merge(data_api::router());
     // bind 必須在 spawn 前完成，讓 port 被占用等錯誤可以在啟動階段直接回報。

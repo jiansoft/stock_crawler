@@ -3,16 +3,17 @@
 //! 快照與入帳由 [`crate::infra::database::repository::portfolio::forecast::load_accuracy_inputs`]
 //! 讀取，比對規則在 [`crate::domain::portfolio::forecast_accuracy`]。
 
+use crate::core::util::datetime::today;
 use axum::{
-    Json,
+    Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Local;
 
 use super::{error_response, parse_optional_date, repository_error};
 use crate::domain::portfolio::forecast_accuracy::{self, ForecastAccuracy};
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database::repository::portfolio::forecast;
 use crate::interfaces::web::data_api::dto::{
     DividendForecastAccuracyParams, DividendForecastAccuracyResponse, ErrorBody,
@@ -29,12 +30,11 @@ use crate::interfaces::web::data_api::dto::{
 /// 記錄內部錯誤並回不含 SQL 細節的 500。還沒有任何快照或指定日沒有快照時回 200 與空清單。
 #[utoipa::path(get, path = "/api/v1/portfolio/dividend-forecast/accuracy", tag = "data-api", params(DividendForecastAccuracyParams), responses((status = 200, body = DividendForecastAccuracyResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn dividend_forecast_accuracy(
+    Extension(view): Extension<HoldingView>,
     Query(params): Query<DividendForecastAccuracyParams>,
 ) -> Response {
-    let member_id = params.member_id.unwrap_or(0);
-    if member_id < 0 {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
-    }
+    // 範圍由 scope middleware 驗證後放進 extension（家庭全體或單一成員，7.6 N2）。
+    let member_id = view.member_id_or_total();
     let requested = match parse_optional_date(params.snapshot_date.as_deref()) {
         Ok(value) => value,
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
@@ -46,9 +46,9 @@ pub(crate) async fn dividend_forecast_accuracy(
             Err(error) => return repository_error(error),
         },
     };
-    let today = Local::now().date_naive();
+    let today = today();
     let accuracy = match snapshot_date {
-        Some(date) => match forecast::load_accuracy_inputs(date, member_id, today).await {
+        Some(date) => match forecast::load_accuracy_inputs(date, &view, today).await {
             Ok(inputs) => forecast_accuracy::compare(&inputs.forecasts, &inputs.actuals, today),
             Err(error) => return repository_error(error),
         },

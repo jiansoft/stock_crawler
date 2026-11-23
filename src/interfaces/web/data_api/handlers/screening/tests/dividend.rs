@@ -1,5 +1,6 @@
 //! 條件選股：存股條件（近 5 年填息率、平均填息天數、連續配息年數、股利成長年數）。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -130,7 +131,7 @@ async fn screen_at_filters_dividend_fill_history() {
         }
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |configure: fn(&mut StockScreeningParams)| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);
@@ -281,7 +282,7 @@ async fn screen_at_computes_dividend_growth_years() {
         }
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |min_years: Option<u8>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

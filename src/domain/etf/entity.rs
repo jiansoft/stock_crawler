@@ -1,11 +1,12 @@
-use chrono::{DateTime, FixedOffset, NaiveDate};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 一檔 ETF 某一天的淨值、折溢價與受益單位（證交所 MIS 預估淨值）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct EtfNavRecord {
     /// 資料日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// ETF 代號。
     pub stock_symbol: String,
     /// 已發行受益權單位數。
@@ -21,14 +22,14 @@ pub struct EtfNavRecord {
     /// 前一營業日的正式單位淨值，用來回填前一筆的 `nav`。
     pub previous_nav: Option<Decimal>,
     /// 來源資料時間。
-    pub source_time: Option<DateTime<FixedOffset>>,
+    pub source_time: Option<TaipeiDateTime>,
 }
 
 /// 一檔 ETF 某一天的正式淨值與收盤市價（MoneyDJ 歷史資料，用來回補 MIS 上線前的日子）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct EtfNavHistoryPoint {
     /// 資料日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 正式單位淨值。
     pub nav: Decimal,
     /// 收盤市價；來源沒有時為 `None`。
@@ -45,7 +46,7 @@ pub struct EtfProfileRecord {
     /// 發行投信。
     pub issuer: String,
     /// 成立日。
-    pub inception_date: Option<NaiveDate>,
+    pub inception_date: Option<Date>,
     /// 追蹤指數。
     pub benchmark: String,
     /// 來源的類型（指數型、主動型…）。
@@ -75,7 +76,7 @@ pub struct EtfProfileRecord {
     /// 來源公布的資產規模（元）。
     pub total_assets: Option<Decimal>,
     /// 資產規模的資料日期。
-    pub total_assets_date: Option<NaiveDate>,
+    pub total_assets_date: Option<Date>,
     /// 來源的淨值報酬（%）。
     pub nav_return: Option<serde_json::Value>,
     /// 資料來源：yahoo、heuristic。
@@ -99,7 +100,7 @@ pub struct EtfHoldingRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EtfHoldingPeriod {
     /// 持股資料日期。
-    pub as_of: NaiveDate,
+    pub as_of: Date,
     /// 前十大持股，依排名。
     pub holdings: Vec<EtfHoldingRecord>,
 }
@@ -130,15 +131,15 @@ pub struct EtfPortfolio {
     /// ETF 代號。
     pub stock_symbol: String,
     /// 前十大持股的資料日期。
-    pub holdings_as_of: Option<NaiveDate>,
+    pub holdings_as_of: Option<Date>,
     /// 前十大持股。
     pub holdings: Vec<EtfHoldingRecord>,
     /// 行業比重的資料日期。
-    pub industries_as_of: Option<NaiveDate>,
+    pub industries_as_of: Option<Date>,
     /// 行業比重。
     pub industries: Vec<EtfAllocationRecord>,
     /// 資產分佈的資料日期。
-    pub assets_as_of: Option<NaiveDate>,
+    pub assets_as_of: Option<Date>,
     /// 資產分佈。
     pub assets: Vec<EtfAllocationRecord>,
 }
@@ -157,16 +158,16 @@ pub struct EtfWeeklyFlow {
     /// 期間最後一天的折溢價（%）。
     pub premium_last: Option<f64>,
     /// 期間第一個交易日。
-    pub from: NaiveDate,
+    pub from: Date,
     /// 期間最後一個交易日。
-    pub to: NaiveDate,
+    pub to: Date,
 }
 
 /// 某一天的受益單位變動，供大額申贖通知使用。
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitsChangePoint {
     /// 資料日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 當天已發行受益權單位數（已含當天增減）。
     pub outstanding_units: i64,
     /// 與前一營業日已發行單位數的差異（正為淨申購）。
@@ -179,7 +180,7 @@ pub struct UnitsChangePoint {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PremiumPoint {
     /// 資料日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 折溢價幅度（%）。
     pub premium_rate: f64,
 }

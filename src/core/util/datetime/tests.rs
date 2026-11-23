@@ -1,13 +1,14 @@
 //! 日期時間工具的測試：民國日期解析、上市櫃已公告季別與季 EPS 預抓的季別。
 
 use super::*;
+use jiff::civil::date;
 
 /// 驗證短格式民國日期正常解析。
 #[test]
 fn test_parse_taiwan_date_short_parses_valid_input() {
     let date = parse_taiwan_date_short("1150409").unwrap();
 
-    assert_eq!(date, NaiveDate::from_ymd_opt(2026, 4, 9).unwrap());
+    assert_eq!(date, jiff::civil::date(2026, 4, 9));
 }
 
 /// 驗證含多位元組字元的輸入回傳 None 而不是 panic。
@@ -36,39 +37,27 @@ fn test_parse_taiwan_date_short_rejects_invalid_input() {
 #[test]
 fn test_latest_published_quarter_for_listed_and_otc_by_date() {
     assert_eq!(
-        latest_published_quarter_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 3, 31).unwrap()
-        ),
+        latest_published_quarter_for_listed_and_otc_by_date(date(2026, 3, 31)),
         ReportQuarter::new(2025, Quarter::Q3)
     );
     assert_eq!(
-        latest_published_quarter_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()
-        ),
+        latest_published_quarter_for_listed_and_otc_by_date(date(2026, 4, 1)),
         ReportQuarter::new(2025, Quarter::Q4)
     );
     assert_eq!(
-        latest_published_quarter_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 5, 15).unwrap()
-        ),
+        latest_published_quarter_for_listed_and_otc_by_date(date(2026, 5, 15)),
         ReportQuarter::new(2025, Quarter::Q4)
     );
     assert_eq!(
-        latest_published_quarter_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 5, 16).unwrap()
-        ),
+        latest_published_quarter_for_listed_and_otc_by_date(date(2026, 5, 16)),
         ReportQuarter::new(2026, Quarter::Q1)
     );
     assert_eq!(
-        latest_published_quarter_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 8, 15).unwrap()
-        ),
+        latest_published_quarter_for_listed_and_otc_by_date(date(2026, 8, 15)),
         ReportQuarter::new(2026, Quarter::Q2)
     );
     assert_eq!(
-        latest_published_quarter_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 11, 15).unwrap()
-        ),
+        latest_published_quarter_for_listed_and_otc_by_date(date(2026, 11, 15)),
         ReportQuarter::new(2026, Quarter::Q3)
     );
 }
@@ -77,60 +66,46 @@ fn test_latest_published_quarter_for_listed_and_otc_by_date() {
 #[test]
 fn test_eps_report_quarter_targets_for_listed_and_otc_by_date() {
     assert_eq!(
-        eps_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2025, 12, 31).unwrap()
-        ),
+        eps_report_quarter_targets_for_listed_and_otc_by_date(date(2025, 12, 31)),
         vec![ReportQuarter::new(2025, Quarter::Q3)]
     );
     assert_eq!(
-        eps_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()
-        ),
+        eps_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 1, 1)),
         vec![
             ReportQuarter::new(2025, Quarter::Q3),
             ReportQuarter::new(2025, Quarter::Q4),
         ]
     );
     assert_eq!(
-        eps_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 2, 28).unwrap()
-        ),
+        eps_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 2, 28)),
         vec![
             ReportQuarter::new(2025, Quarter::Q3),
             ReportQuarter::new(2025, Quarter::Q4),
         ]
     );
     assert_eq!(
-        eps_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()
-        ),
+        eps_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 3, 1)),
         vec![
             ReportQuarter::new(2025, Quarter::Q3),
             ReportQuarter::new(2025, Quarter::Q4),
         ]
     );
     assert_eq!(
-        eps_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 3, 25).unwrap()
-        ),
+        eps_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 3, 25)),
         vec![
             ReportQuarter::new(2025, Quarter::Q3),
             ReportQuarter::new(2025, Quarter::Q4),
         ]
     );
     assert_eq!(
-        eps_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()
-        ),
+        eps_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 4, 1)),
         vec![
             ReportQuarter::new(2025, Quarter::Q4),
             ReportQuarter::new(2026, Quarter::Q1),
         ]
     );
     assert_eq!(
-        eps_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 4, 15).unwrap()
-        ),
+        eps_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 4, 15)),
         vec![
             ReportQuarter::new(2025, Quarter::Q4),
             ReportQuarter::new(2026, Quarter::Q1),
@@ -142,30 +117,22 @@ fn test_eps_report_quarter_targets_for_listed_and_otc_by_date() {
 #[test]
 fn test_backfill_report_quarter_targets_for_listed_and_otc_by_date() {
     assert_eq!(
-        backfill_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 2, 28).unwrap()
-        ),
+        backfill_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 2, 28)),
         vec![ReportQuarter::new(2025, Quarter::Q3)]
     );
     assert_eq!(
-        backfill_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()
-        ),
+        backfill_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 3, 1)),
         vec![
             ReportQuarter::new(2025, Quarter::Q3),
             ReportQuarter::new(2025, Quarter::Q4),
         ]
     );
     assert_eq!(
-        backfill_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()
-        ),
+        backfill_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 4, 1)),
         vec![ReportQuarter::new(2025, Quarter::Q4)]
     );
     assert_eq!(
-        backfill_report_quarter_targets_for_listed_and_otc_by_date(
-            NaiveDate::from_ymd_opt(2026, 4, 15).unwrap()
-        ),
+        backfill_report_quarter_targets_for_listed_and_otc_by_date(date(2026, 4, 15)),
         vec![
             ReportQuarter::new(2025, Quarter::Q4),
             ReportQuarter::new(2026, Quarter::Q1),

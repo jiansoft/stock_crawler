@@ -4,6 +4,8 @@ use super::*;
 use crate::app::backfill::dividend::ex_right_reconcile::exchange_fill::{
     Window, exchange_fills, fill_etf_from_exchange, unresolved_after_exchange_fill,
 };
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
 
 fn etf_event(symbol: &str, date: &str, cash: Decimal) -> ExDividendAnnouncement {
     ExDividendAnnouncement {
@@ -32,8 +34,8 @@ fn etf_row(
 
 fn window(start: &str, end: &str) -> Window {
     Window {
-        start: NaiveDate::parse_from_str(start, DATE_FORMAT).unwrap(),
-        end: NaiveDate::parse_from_str(end, DATE_FORMAT).unwrap(),
+        start: Date::strptime(DATE_FORMAT, start).unwrap(),
+        end: Date::strptime(DATE_FORMAT, end).unwrap(),
     }
 }
 
@@ -307,7 +309,7 @@ async fn fill_etf_from_exchange_saves_rows_and_annual_totals() {
                 Decimal::ZERO,
                 Decimal::ZERO,
                 Decimal::ZERO,
-                Local::now(),
+                TaipeiDateTime::now(),
                 4,
                 24,
                 0,

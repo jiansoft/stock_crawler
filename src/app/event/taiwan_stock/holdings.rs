@@ -2,22 +2,25 @@
 //!
 //! 持股法說會、主力進出、董監質押等通知都只看「目前持股中的普通股」，
 //! 這裡集中取代號與股名，避免各通知各寫一份篩選規則。
+//!
+//! 持股一律依收件者的可見範圍（[`HoldingView`](crate::domain::portfolio::view::HoldingView)）查詢（會員系統計畫 7.6）。
 
 use std::collections::BTreeSet;
 
 use anyhow::Result;
 
 use crate::{
-    domain::portfolio::repository::PortfolioRepository,
+    domain::portfolio::{repository::PortfolioRepository, view::HoldingView},
     infra::{cache::SHARE, database::repository::portfolio::PgPortfolioRepository},
 };
 
-/// 目前持股（未售出）中的普通股代號，去重並排序。
+/// 所有會員目前持股中的普通股代號：**只用於決定要抓哪些公開市場資料**，不得用於通知內容；
+/// 通知內容一律依收件者範圍（[`common_stock_holdings`]）篩選（7.6）。
 ///
 /// # Errors
 ///
 /// 查詢持股失敗時回傳錯誤。
-pub(crate) async fn common_stock_holdings() -> Result<BTreeSet<String>> {
+pub(crate) async fn crawl_common_stocks() -> Result<BTreeSet<String>> {
     let holdings = PgPortfolioRepository::new()
         .fetch_active_holdings(None)
         .await?;
@@ -26,12 +29,12 @@ pub(crate) async fn common_stock_holdings() -> Result<BTreeSet<String>> {
     ))
 }
 
-/// 目前持股（未售出）的全部代號（含 ETF），去重並排序。
+/// 所有會員目前持股的全部代號（含 ETF）：與 [`crawl_common_stocks`] 相同，只用於決定抓取範圍。
 ///
 /// # Errors
 ///
 /// 查詢持股失敗時回傳錯誤。
-pub(crate) async fn active_holding_symbols() -> Result<BTreeSet<String>> {
+pub(crate) async fn crawl_holding_symbols() -> Result<BTreeSet<String>> {
     let holdings = PgPortfolioRepository::new()
         .fetch_active_holdings(None)
         .await?;
@@ -41,14 +44,58 @@ pub(crate) async fn active_holding_symbols() -> Result<BTreeSet<String>> {
         .collect())
 }
 
-/// 目前持股（未售出）每筆的代號（含 ETF）與股數；同一代號分次買進、不同會員會有多筆。
+/// 所有會員目前持股每筆的代號與股數：與 [`crawl_common_stocks`] 相同，只用於決定抓取範圍。
 ///
 /// # Errors
 ///
 /// 查詢持股失敗時回傳錯誤。
-pub(crate) async fn active_holding_quantities() -> Result<Vec<(String, i64)>> {
+pub(crate) async fn crawl_holding_quantities() -> Result<Vec<(String, i64)>> {
     let holdings = PgPortfolioRepository::new()
         .fetch_active_holdings(None)
+        .await?;
+    Ok(holdings
+        .into_iter()
+        .map(|holding| (holding.security_code, holding.share_quantity))
+        .collect())
+}
+
+/// 範圍內目前持股（未售出）中的普通股代號，去重並排序。
+///
+/// # Errors
+///
+/// 查詢持股失敗時回傳錯誤。
+pub(crate) async fn common_stock_holdings(view: &HoldingView) -> Result<BTreeSet<String>> {
+    let holdings = PgPortfolioRepository::new()
+        .fetch_active_holdings_in(view, None)
+        .await?;
+    Ok(common_stocks(
+        holdings.into_iter().map(|holding| holding.security_code),
+    ))
+}
+
+/// 範圍內目前持股（未售出）的全部代號（含 ETF），去重並排序。
+///
+/// # Errors
+///
+/// 查詢持股失敗時回傳錯誤。
+pub(crate) async fn active_holding_symbols(view: &HoldingView) -> Result<BTreeSet<String>> {
+    let holdings = PgPortfolioRepository::new()
+        .fetch_active_holdings_in(view, None)
+        .await?;
+    Ok(holdings
+        .into_iter()
+        .map(|holding| holding.security_code)
+        .collect())
+}
+
+/// 範圍內目前持股（未售出）每筆的代號（含 ETF）與股數；同一代號分次買進、不同會員會有多筆。
+///
+/// # Errors
+///
+/// 查詢持股失敗時回傳錯誤。
+pub(crate) async fn active_holding_quantities(view: &HoldingView) -> Result<Vec<(String, i64)>> {
+    let holdings = PgPortfolioRepository::new()
+        .fetch_active_holdings_in(view, None)
         .await?;
     Ok(holdings
         .into_iter()

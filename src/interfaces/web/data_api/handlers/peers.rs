@@ -4,13 +4,16 @@
 //! F 分數與毛利率取 `financial_health`（新鮮度與選股相同），營收年增率取最近 3 個月內
 //! 最新一個月。統計規則在 [`crate::domain::quote::peer`]。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Datelike, Local, Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::{Decimal, RoundingStrategy, prelude::ToPrimitive};
 
 use super::{database_error, error_response};
@@ -78,7 +81,8 @@ struct PeerRow {
     stock_symbol: String,
     name: String,
     market_id: i32,
-    quote_date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    quote_date: Date,
     closing_price: Decimal,
     market_cap: Option<Decimal>,
     price_earning_ratio: Decimal,
@@ -160,11 +164,11 @@ pub(crate) async fn stock_peers(
         return error_response(StatusCode::NOT_FOUND, "找不到股票");
     };
 
-    let today = Local::now().date_naive();
+    let today = today();
     let rows: Vec<PeerRow> = match sqlx::query_as(PEERS_SQL)
         .bind(industry_id)
         .bind(&symbol)
-        .bind(today)
+        .bind(today.to_sqlx())
         .bind(revenue_month_floor(today))
         .fetch_all(pool)
         .await
@@ -184,8 +188,8 @@ pub(crate) async fn stock_peers(
 }
 
 /// 營收資料最舊可接受的月份（`YYYYMM`）：今天往前 3 個月。
-fn revenue_month_floor(today: NaiveDate) -> i64 {
-    let floor = today.checked_sub_months(Months::new(3)).unwrap_or(today);
+fn revenue_month_floor(today: Date) -> i64 {
+    let floor = today.checked_sub(3.months()).ok().unwrap_or(today);
     i64::from(floor.year()) * 100 + i64::from(floor.month())
 }
 

@@ -9,6 +9,8 @@
 //! 0050 混合；各組合的成本是自己整段連續持有算出來的，換參數當下的調整成本不另計。偏移的取法與
 //! 偏移穩健度相同，回傳各偏移結果的分布，另列 `rebalance_offset` 那一個偏移的逐年明細。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::ops::Range;
 
 use super::limit::run_limited;
@@ -17,7 +19,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Datelike, NaiveDate};
 
 use super::offsets::{distribution, sample_offsets};
 use super::portfolio::PeriodCost;
@@ -88,7 +89,7 @@ pub(super) struct Track {
 
 impl Track {
     /// 訓練期數範圍：只取換股日不早於 `start` 且出場日早於 `end` 的期數（排除跨越年度邊界的期數）。
-    pub(super) fn train_range(&self, start: NaiveDate, end: NaiveDate) -> Range<usize> {
+    pub(super) fn train_range(&self, start: Date, end: Date) -> Range<usize> {
         let from = self.rows.partition_point(|row| row.date < start);
         let to = self
             .rows
@@ -97,7 +98,7 @@ impl Track {
     }
 
     /// 換股日落在 `[start, end)` 的期數範圍（`rows` 依換股日由舊到新）。
-    pub(super) fn range(&self, start: NaiveDate, end: NaiveDate) -> Range<usize> {
+    pub(super) fn range(&self, start: Date, end: Date) -> Range<usize> {
         let from = self.rows.partition_point(|row| row.date < start);
         let to = self.rows.partition_point(|row| row.date < end);
         from..to
@@ -118,8 +119,8 @@ pub(super) struct WalkForward {
 }
 
 /// 年初。
-fn year_start(year: i32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(year, 1, 1).unwrap_or_default()
+fn year_start(year: i32) -> Date {
+    ymd(year, 1, 1).unwrap_or_default()
 }
 
 /// 一段期數的扣成本後累積報酬與 0050 累積報酬（%）；0050 全缺為 `None`。
@@ -143,13 +144,14 @@ pub(super) fn walk_forward(
     candidates: &[Candidate],
     tracks: &[Track],
     baseline: &Track,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     train_years: u8,
     hold_days: u16,
 ) -> WalkForward {
     let mut result = WalkForward::default();
-    for year in from.year() + i32::from(train_years)..=to.year() {
+    let first_test_year = i32::from(from.year()) + i32::from(train_years);
+    for year in first_test_year..=i32::from(to.year()) {
         let (train_start, test_start, test_end) = (
             year_start(year - i32::from(train_years)),
             year_start(year),
@@ -281,7 +283,7 @@ pub(crate) async fn screen_backtest_walk_forward(BacktestQuery(params): Backtest
         Ok(backtest) => backtest.period_end_only(),
         Err(response) => return *response,
     };
-    if backtest.to.year() < backtest.from.year() + i32::from(train_years) {
+    if i32::from(backtest.to.year()) < i32::from(backtest.from.year()) + i32::from(train_years) {
         return unprocessable(
             "回測期間必須超過 train_years 年（樣本外年度從起日年度加訓練年數起）",
         );

@@ -12,16 +12,16 @@
 //!   前一日市值為 0 的日子，以及當天或前一個交易日缺指數的日子都不算；不足
 //!   [`MIN_RISK_DAYS`] 天時為 `None`。
 
+use jiff::civil::Date;
 use std::collections::HashMap;
 
-use chrono::{Datelike, NaiveDate};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 /// 單一交易日的市值與淨投入。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValuePoint {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 當日收盤市值。
     pub market_value: Decimal,
     /// 當日買進成本合計（正數）。
@@ -34,7 +34,7 @@ pub struct ValuePoint {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IndexClose {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 收盤指數。
     pub close: Decimal,
 }
@@ -117,9 +117,9 @@ pub struct MonthReturn {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Performance {
     /// 期間第一個交易日（基準日）。
-    pub from: NaiveDate,
+    pub from: Date,
     /// 期間最後一個交易日。
-    pub to: NaiveDate,
+    pub to: Date,
     /// 基準日市值。
     pub start_value: f64,
     /// 最後一日市值。
@@ -135,9 +135,9 @@ pub struct Performance {
     /// 最大回撤（%，負數或 0）。
     pub max_drawdown_percent: f64,
     /// 最大回撤的高點日；沒有回撤時為 `None`。
-    pub max_drawdown_peak: Option<NaiveDate>,
+    pub max_drawdown_peak: Option<Date>,
     /// 最大回撤的低點日；沒有回撤時為 `None`。
-    pub max_drawdown_trough: Option<NaiveDate>,
+    pub max_drawdown_trough: Option<Date>,
     /// 同期大盤報酬（%）；缺指數時為 `None`。
     pub benchmark_return_percent: Option<f64>,
     /// 各月績效，依月份由舊到新。
@@ -153,12 +153,12 @@ pub fn evaluate(points: &[ValuePoint], index: &[IndexClose]) -> Option<Performan
 
     let mut wealth = 1.0_f64;
     let mut peak = (1.0_f64, first.date);
-    let mut drawdown = (0.0_f64, None::<(NaiveDate, NaiveDate)>);
+    let mut drawdown = (0.0_f64, None::<(Date, Date)>);
     let mut months: Vec<MonthReturn> = Vec::new();
     let mut month_growth = 1.0_f64;
     let mut month_flow = Decimal::ZERO;
     let mut previous = first;
-    let closes: HashMap<NaiveDate, Decimal> = index
+    let closes: HashMap<Date, Decimal> = index
         .iter()
         .map(|point| (point.date, point.close))
         .collect();
@@ -219,7 +219,7 @@ pub fn evaluate(points: &[ValuePoint], index: &[IndexClose]) -> Option<Performan
         month_start = month_end;
     }
 
-    let days = (last.date - first.date).num_days();
+    let days = i64::from((last.date - first.date).get_days());
     let annualized_return_percent =
         (days >= 365).then(|| percent(wealth.powf(365.0 / days as f64) - 1.0));
 
@@ -242,7 +242,7 @@ pub fn evaluate(points: &[ValuePoint], index: &[IndexClose]) -> Option<Performan
 }
 
 /// 期間內 `YYYY-MM` 月份的最後一個交易日。
-fn month_end_date(month: &str, rest: &[ValuePoint]) -> Option<NaiveDate> {
+fn month_end_date(month: &str, rest: &[ValuePoint]) -> Option<Date> {
     rest.iter()
         .rev()
         .find(|point| format!("{:04}-{:02}", point.date.year(), point.date.month()) == month)
@@ -250,8 +250,8 @@ fn month_end_date(month: &str, rest: &[ValuePoint]) -> Option<NaiveDate> {
 }
 
 /// 大盤在 `from`～`to` 的報酬（%）：各取當天或之前最近一筆收盤。
-fn index_return(index: &[IndexClose], from: NaiveDate, to: NaiveDate) -> Option<f64> {
-    let close_on = |date: NaiveDate| {
+fn index_return(index: &[IndexClose], from: Date, to: Date) -> Option<f64> {
+    let close_on = |date: Date| {
         index
             .iter()
             .filter(|point| point.date <= date)

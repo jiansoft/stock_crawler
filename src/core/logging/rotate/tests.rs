@@ -1,4 +1,7 @@
-use chrono::TimeDelta;
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::today;
+use jiff::SignedDuration;
+use jiff::ToSpan;
 
 use crate::core::logging;
 
@@ -16,10 +19,10 @@ async fn test_basic_write() {
     logging::debug_file_async("開始 test_basic_write".to_string());
 
     let mut r = Rotate::new("log/%Y-%m-%d-test.log".to_string());
-    let now = Local::now();
+    let now = TaipeiDateTime::now();
 
     // 使用新的 write_msg 方法
-    let msg = format!("{} 測試訊息\r\n", now.format("%F %X%.6f"));
+    let msg = format!("{} 測試訊息\r\n", now.strftime("%F %X%.6f"));
     if let Err(why) = r.write_msg(now, msg.as_bytes()) {
         logging::error_console(format!("Failed to write: {:?}", why));
     }
@@ -35,15 +38,15 @@ async fn test_date_rotation() {
     logging::debug_file_async("開始 test_date_rotation".to_string());
 
     let mut r = Rotate::new("log/%Y-%m-%d-test.log".to_string());
-    let mut now = Local::now();
+    let mut now = TaipeiDateTime::now();
 
     // 第一天寫入
-    let msg1 = format!("{} Day 1\r\n", now.format("%F %X%.6f"));
+    let msg1 = format!("{} Day 1\r\n", now.strftime("%F %X%.6f"));
     let _ = r.write_msg(now, msg1.as_bytes());
 
     // 模擬下一天
-    now += TimeDelta::try_days(1).unwrap();
-    let msg2 = format!("{} Day 2\r\n", now.format("%F %X%.6f"));
+    now += 1.days();
+    let msg2 = format!("{} Day 2\r\n", now.strftime("%F %X%.6f"));
     let _ = r.write_msg(now, msg2.as_bytes());
 
     logging::debug_file_async("結束 test_date_rotation".to_string());
@@ -63,13 +66,13 @@ async fn test_size_rotation() {
         7,    // 保留 7 天
     );
 
-    let now = Local::now();
+    let now = TaipeiDateTime::now();
 
     // 寫入超過 1KB 的資料，觸發輪轉
     for i in 0..20 {
         let msg = format!(
             "{} Line {} - {}\r\n",
-            now.format("%F %X%.6f"),
+            now.strftime("%F %X%.6f"),
             i,
             "X".repeat(100)
         );
@@ -104,12 +107,12 @@ fn test_configure_limits() {
     // 已建立的 Rotate（跟隨全域）也會讀到新值
     let follower = Rotate::new("log/%Y-%m-%d-configure-test.log".to_string());
     assert_eq!(follower.max_size(), 20 * 1024 * 1024);
-    assert_eq!(follower.max_age(), TimeDelta::days(14));
+    assert_eq!(follower.max_age(), SignedDuration::from_hours(14 * 24));
 
     // 以固定值建立者不受全域影響
     let fixed = Rotate::with_options("log/%Y-%m-%d-configure-test.log".to_string(), 4096, 3);
     assert_eq!(fixed.max_size(), 4096);
-    assert_eq!(fixed.max_age(), TimeDelta::days(3));
+    assert_eq!(fixed.max_age(), SignedDuration::from_hours(3 * 24));
 
     // 超出範圍者收斂至邊界
     configure(4096, 3650);
@@ -150,7 +153,7 @@ fn temp_log_dir(tag: &str) -> PathBuf {
         "{}-{}-{}",
         tag,
         std::process::id(),
-        Local::now().timestamp_nanos_opt().unwrap_or_default()
+        TaipeiDateTime::now().timestamp().as_nanosecond()
     );
     let dir = std::env::temp_dir()
         .join("stock_rust-rotate-test")
@@ -182,7 +185,7 @@ fn test_active_file_has_no_timestamp() {
 
     // 512 bytes 上限，強制多次輪轉
     let mut r = Rotate::with_options(pattern, 512, 7);
-    let now = Local::now();
+    let now = TaipeiDateTime::now();
 
     for i in 0..50 {
         let msg = format!("Line {:03} - {}\r\n", i, "X".repeat(50));
@@ -196,8 +199,8 @@ fn test_active_file_has_no_timestamp() {
         final_generation
     );
 
-    let base_name = now.format("%Y-%m-%d-app").to_string();
-    let stamp = now.format("%H-%M-%S").to_string();
+    let base_name = now.strftime("%Y-%m-%d-app").to_string();
+    let stamp = now.strftime("%H-%M-%S").to_string();
     let files = file_names(&dir);
 
     // 活躍檔（不含時間戳）必定存在，且是目前寫入的目標
@@ -242,14 +245,10 @@ fn test_archive_stamp_uses_last_write_time() {
     let pattern = dir.join("%Y-%m-%d-app.log").to_string_lossy().to_string();
 
     let mut r = Rotate::with_options(pattern, 512, 7);
-    // 基準時間釘在當天中午，而不是 Local::now()：這個測試會把時間往後推一小時
+    // 基準時間釘在當天中午，而不是 TaipeiDateTime::now()：這個測試會把時間往後推一小時
     // 來觸發「大小輪轉」，若在 23 點之後執行，加一小時就跨日了，
     // write_msg 會改走跨日切檔的路徑並把 generation 歸零，測試每天必失敗一小時。
-    let first = Local::now()
-        .date_naive()
-        .and_hms_opt(12, 0, 0)
-        .and_then(|naive| naive.and_local_timezone(Local).earliest())
-        .expect("測試基準時間應合法");
+    let first = TaipeiDateTime::from_datetime(today().at(12, 0, 0, 0)).expect("測試基準時間應合法");
     // 寫到接近上限（每行 63 bytes × 8 = 504 < 512），輪轉留給下一次寫入觸發
     for i in 0..8 {
         let msg = format!("Line {:03} - {}\r\n", i, "X".repeat(50));
@@ -258,14 +257,14 @@ fn test_archive_stamp_uses_last_write_time() {
     assert_eq!(r.generation, 0, "第一個檔案尚未輪轉");
 
     // 一小時後再寫入，觸發輪轉；封存檔名應標記 first（最後一筆日誌時間）
-    let later = first + TimeDelta::try_hours(1).unwrap();
+    let later = first + SignedDuration::from_hours(1);
     r.write_msg(later, b"after rotate\r\n").unwrap();
     assert_eq!(r.generation, 1, "應已輪轉一次");
 
-    let base_name = first.format("%Y-%m-%d-app").to_string();
+    let base_name = first.strftime("%Y-%m-%d-app").to_string();
     let files = file_names(&dir);
-    let expected_archive = format!("{}.{}.log", base_name, first.format("%H-%M-%S"));
-    let unexpected_archive = format!("{}.{}.log", base_name, later.format("%H-%M-%S"));
+    let expected_archive = format!("{}.{}.log", base_name, first.strftime("%H-%M-%S"));
+    let unexpected_archive = format!("{}.{}.log", base_name, later.strftime("%H-%M-%S"));
 
     assert!(
         files.contains(&expected_archive),
@@ -289,7 +288,7 @@ fn test_archive_stamp_uses_last_write_time() {
 fn test_restart_appends_to_active_file() {
     let dir = temp_log_dir("restart");
     let pattern = dir.join("%Y-%m-%d-app.log").to_string_lossy().to_string();
-    let now = Local::now();
+    let now = TaipeiDateTime::now();
 
     let mut first = Rotate::with_options(pattern.clone(), 1024, 7);
     first.write_msg(now, b"first run\r\n").unwrap();
@@ -319,18 +318,18 @@ fn cleanup_old_files_removes_expired_files() {
     let dir = temp_log_dir("cleanup");
     let pattern = dir.join("%Y-%m-%d-app.log").to_string_lossy().to_string();
     let mut r = Rotate::with_options(pattern, 1024 * 1024, 7);
-    let now = Local::now();
+    let now = TaipeiDateTime::now();
     r.write_msg(now, b"active line\r\n").unwrap();
     fs::write(dir.join("2026-01-01-app.log"), b"old").unwrap();
 
     // 已在清理中：直接返回，不刪任何檔。
     r.on_rotate.store(true, Ordering::Relaxed);
-    r.cleanup_old_files(now + TimeDelta::days(30));
+    r.cleanup_old_files(now + 30.days());
     assert_eq!(file_names(&dir).len(), 2);
     r.on_rotate.store(false, Ordering::Relaxed);
 
     // 以 30 天後為「現在」：保留 7 天，目錄內檔案都已過期而被刪除，清理旗標復原。
-    r.cleanup_old_files(now + TimeDelta::days(30));
+    r.cleanup_old_files(now + 30.days());
     assert!(file_names(&dir).is_empty(), "{:?}", file_names(&dir));
     assert!(!r.on_rotate.load(Ordering::Relaxed));
 

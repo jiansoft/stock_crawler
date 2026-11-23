@@ -1,15 +1,16 @@
 //! 證交所 MIS「ETF 預估淨值」的測試。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
 /// 資料時間轉成帶時區的時間，供測試比對。
-fn at(date: NaiveDate, h: u32, m: u32, s: u32) -> chrono::DateTime<FixedOffset> {
-    taipei()
-        .from_local_datetime(&date.and_hms_opt(h, m, s).expect("時間合法"))
-        .single()
-        .expect("固定時區不會有歧義")
+fn at(date: Date, h: u32, m: u32, s: u32) -> TaipeiDateTime {
+    let time = crate::core::util::datetime::hms(h, m, s).expect("時間合法");
+    TaipeiDateTime::from_datetime(date.to_datetime(time)).expect("固定時區不會有歧義")
 }
 
 fn fixture() -> Vec<EtfNavRecord> {
@@ -29,14 +30,14 @@ fn find<'a>(records: &'a [EtfNavRecord], symbol: &str) -> &'a EtfNavRecord {
 fn parses_every_group_and_skips_empty_ones() {
     let records = fixture();
     assert_eq!(records.len(), 8);
-    let day = NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期合法");
+    let day = date(2026, 10, 21);
     assert!(records.iter().all(|r| r.date == day));
 }
 
 #[test]
 fn numbers_may_be_json_numbers_or_strings_with_commas() {
     let records = fixture();
-    let day = NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期合法");
+    let day = date(2026, 10, 21);
 
     let numeric = find(&records, "0050");
     assert_eq!(numeric.outstanding_units, 23_108_000_000);

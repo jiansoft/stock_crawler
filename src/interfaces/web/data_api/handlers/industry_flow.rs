@@ -3,6 +3,7 @@
 //! 個股淨買賣沿用 [`mod@super::institutional_flow`] 的期間累計（估計金額＝每日淨股數 × 當日收盤價），
 //! 依產業加總；另附買超／賣超家數、淨額占產業成交金額的比例與買賣超金額最大的個股。
 
+use crate::core::util::datetime::today;
 use std::collections::BTreeMap;
 
 use axum::{
@@ -11,7 +12,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Local;
 
 use super::institutional_flow::{FlowPeriod, FlowRow, INVESTORS, MAX_FLOW_DAYS, load_flows};
 use super::{error_response, market_id_for_stocks, parse_optional_date, round2};
@@ -59,7 +59,7 @@ pub(crate) async fn industry_flow(Query(params): Query<IndustryFlowParams>) -> R
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "order 必須為 asc 或 desc");
     }
 
-    let until = date.unwrap_or_else(|| Local::now().date_naive());
+    let until = date.unwrap_or_else(today);
     match load_flows(until, usize::from(days), investor).await {
         Ok(Some((period, rows))) => Json(build_response(
             period, investor, market, market_id, order, rows,

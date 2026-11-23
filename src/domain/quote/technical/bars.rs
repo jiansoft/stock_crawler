@@ -4,13 +4,13 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 單日日線。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PriceBar {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 收盤價。
     pub close: f64,
     /// 最高價；未提供（0）時以收盤價代替。
@@ -23,7 +23,7 @@ pub struct PriceBar {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PriceAdjustment {
     /// 事件日：除權息交易日，或減資、分割後恢復交易的第一個交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 每股現金股利（元）；沒有為 0。
     pub cash_dividend: f64,
     /// 每股股票股利（元，面額 10 元）；沒有為 0。
@@ -58,7 +58,7 @@ pub trait PriceBarRepository: Send + Sync {
     async fn fetch_price_bars(
         &self,
         stock_symbol: &str,
-        until: Option<NaiveDate>,
+        until: Option<Date>,
         limit: i64,
     ) -> Result<Vec<PriceBar>>;
 
@@ -67,7 +67,7 @@ pub trait PriceBarRepository: Send + Sync {
     async fn fetch_volumes(
         &self,
         stock_symbol: &str,
-        until: Option<NaiveDate>,
+        until: Option<Date>,
         limit: i64,
     ) -> Result<Vec<super::VolumeBar>>;
 

@@ -1,6 +1,6 @@
 //! `/etfs/{symbol}/holdings/history` handler：ETF 近幾期的前十大持股與期間差異的測試。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
 use rust_decimal::Decimal;
 
 use super::*;
@@ -17,7 +17,7 @@ fn record(rank: i16, symbol: &str, name: &str, weight: &str) -> EtfHoldingRecord
 
 fn period(month: u32, holdings: Vec<EtfHoldingRecord>) -> EtfHoldingPeriod {
     EtfHoldingPeriod {
-        as_of: NaiveDate::from_ymd_opt(2026, month, 1).expect("日期合法"),
+        as_of: ymd(2026, month, 1).expect("日期合法"),
         holdings,
     }
 }

@@ -1,5 +1,8 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, NaiveDate, TimeDelta};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use sqlx::{Postgres, Transaction, postgres::PgQueryResult};
 
 use crate::infra::database;
@@ -11,11 +14,12 @@ use crate::infra::database;
 #[derive(sqlx::FromRow, Default, Debug)]
 pub struct DailyMoneyHistoryDetail {
     /// 交易日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 建立時間。
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
     /// 股票代號。
     pub security_code: String,
     /// 持有股數（同股票同 member 聚合後）。
@@ -58,11 +62,11 @@ impl DailyMoneyHistoryDetail {
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
     /// 錯誤會由呼叫端決定是否回滾。
     pub async fn delete(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = "DELETE FROM daily_money_history_detail WHERE date = $1;";
-        let query = sqlx::query(sql).bind(date);
+        let query = sqlx::query(sql).bind(date.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
@@ -77,34 +81,37 @@ impl DailyMoneyHistoryDetail {
     /// 重建指定日期的持股層級市值明細。
     ///
     /// 此流程會：
-    /// 1. 聚合未賣出庫存（個人與全局）  
-    /// 2. 取當日與前一日收盤價  
-    /// 3. 計算市值、成本、占比、損益與前日對照欄位  
-    /// 4. 以 `(date, security_code, member_id)` 做 upsert
+    /// 1. 聚合未賣出庫存（個人與所屬家庭）
+    /// 2. 取當日與前一日收盤價
+    /// 3. 計算市值、成本、占比、損益與前日對照欄位
+    /// 4. 以 `(date, security_code, household_id, member_id)` 做 upsert
     ///
     /// # Errors
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
     /// 是否回滾由呼叫端控制。
     pub async fn upsert(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
-        let one_month_ago = date - TimeDelta::try_days(30).unwrap();
+        let one_month_ago = date - 30.days();
         let sql = r#"
 WITH ownership_data AS (
-    -- 一次性計算個人與全局(member_id=0)的持有股數與成本，避免多次掃描
-    SELECT 
-        security_code,
-        member_id,
+    -- 一次性計算個人與所屬家庭(member_id=0)的持有股數與成本，避免多次掃描
+    SELECT
+        od.security_code,
+        m.household_id,
+        od.member_id,
         SUM(share_quantity) AS total_share,
         SUM(holding_cost) AS total_cost
-    FROM stock_ownership_details
-    WHERE is_sold = FALSE AND date <= $1
-    GROUP BY GROUPING SETS ((security_code, member_id), (security_code))
+    FROM stock_ownership_details od
+    JOIN "Member" m ON m."Id" = od.member_id AND m.deleted_at IS NULL
+    WHERE od.is_sold = FALSE AND od.date <= $1
+    GROUP BY GROUPING SETS ((od.security_code, m.household_id, od.member_id), (od.security_code, m.household_id))
 ),
 normalized_ownership AS (
-    SELECT 
+    SELECT
         security_code,
+        household_id,
         COALESCE(member_id, 0) as member_id,
         total_share,
         total_cost
@@ -112,7 +119,7 @@ normalized_ownership AS (
 ),
 quote_data AS (
     -- 使用視窗函數取得當日與前一日報價，rn=1 代表最新一筆
-    SELECT 
+    SELECT
         stock_symbol,
         "ClosingPrice" as today_price,
         LAG("ClosingPrice") OVER (PARTITION BY stock_symbol ORDER BY "Date") as yesterday_price,
@@ -127,6 +134,7 @@ latest_quotes AS (
 ),
 calc_base AS (
     SELECT
+        od.household_id,
         od.member_id,
         $1 as date,
         od.security_code,
@@ -139,33 +147,34 @@ calc_base AS (
     JOIN latest_quotes lq ON od.security_code = lq.stock_symbol
 ),
 member_totals AS (
-    SELECT member_id, SUM(market_value) as total_mkt_val
-    FROM calc_base GROUP BY member_id
+    SELECT household_id, member_id, SUM(market_value) as total_mkt_val
+    FROM calc_base GROUP BY household_id, member_id
 )
 INSERT INTO daily_money_history_detail (
-    member_id, date, security_code, closing_price, total_shares, cost,
+    household_id, settlement_household_id, member_id, date, security_code, closing_price, total_shares, cost,
     average_unit_price_per_share, market_value, ratio, transfer_tax,
     profit_and_loss, profit_and_loss_percentage, created_time, updated_time,
     previous_day_market_value, previous_day_profit_and_loss, previous_day_profit_and_loss_percentage
 )
 SELECT
-    cb.member_id, cb.date, cb.security_code, cb.closing_price, cb.total_share, cb.cost,
+    cb.household_id, cb.household_id, cb.member_id, cb.date, cb.security_code, cb.closing_price, cb.total_share, cb.cost,
     ROUND(CAST(-cb.cost / cb.total_share AS numeric), 4),
     cb.market_value,
     ROUND(CAST(cb.market_value / NULLIF(mt.total_mkt_val, 0) * 100 AS numeric), 4),
     cb.market_value * 0.003,
     cb.market_value + cb.cost,
-    CASE 
-        WHEN cb.cost != 0 THEN ROUND(CAST((cb.market_value + cb.cost) / ABS(cb.cost) * 100 AS numeric), 4) 
-        ELSE 100 
+    CASE
+        WHEN cb.cost != 0 THEN ROUND(CAST((cb.market_value + cb.cost) / ABS(cb.cost) * 100 AS numeric), 4)
+        ELSE 100
     END,
     NOW(), NOW(),
     cb.prev_market_value,
     cb.market_value - cb.prev_market_value,
     ROUND(CAST((cb.market_value - cb.prev_market_value) / NULLIF(cb.prev_market_value, 0) * 100 AS numeric), 4)
 FROM calc_base cb
-JOIN member_totals mt ON cb.member_id = mt.member_id
-ON CONFLICT (date, security_code, member_id) DO UPDATE SET
+JOIN member_totals mt ON cb.household_id = mt.household_id AND cb.member_id = mt.member_id
+ON CONFLICT (date, security_code, household_id, member_id) DO UPDATE SET
+    settlement_household_id = EXCLUDED.settlement_household_id,
     closing_price = EXCLUDED.closing_price,
     total_shares = EXCLUDED.total_shares,
     cost = EXCLUDED.cost,
@@ -179,7 +188,9 @@ ON CONFLICT (date, security_code, member_id) DO UPDATE SET
     updated_time = NOW();
 "#;
 
-        let query = sqlx::query(sql).bind(date).bind(one_month_ago);
+        let query = sqlx::query(sql)
+            .bind(date.to_sqlx())
+            .bind(one_month_ago.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,

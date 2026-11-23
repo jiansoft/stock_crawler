@@ -1,6 +1,7 @@
 //! 每日市值歷史表的測試。
 
 use super::*;
+use jiff::civil::Date;
 
 #[tokio::test]
 #[cfg_attr(
@@ -14,7 +15,7 @@ async fn test_upsert() {
         return;
     }
     tracing::debug!("開始 DailyMoneyHistory::upsert");
-    let current_date = NaiveDate::parse_from_str("2023-08-30", "%Y-%m-%d").unwrap();
+    let current_date = Date::strptime("%Y-%m-%d", "2023-08-30").unwrap();
     let mut tx = database::get_tx().await.ok();
     match DailyMoneyHistory::upsert(current_date, &mut tx).await {
         Ok(r) => {

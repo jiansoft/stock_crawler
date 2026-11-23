@@ -2,6 +2,8 @@ create table public.daily_money_history_detail_more
 (
     serial                     bigserial
         primary key,
+    household_id               bigint                   not null,
+    settlement_household_id bigint not null,
     member_id                  bigint                   default 0                                       not null,
     date                       date                     default CURRENT_DATE                            not null,
     transaction_date           date                     default CURRENT_DATE                            not null,
@@ -17,7 +19,8 @@ create table public.daily_money_history_detail_more
     updated_time               timestamp with time zone default ('now'::text)::timestamp with time zone not null
 );
 
-comment on column public.daily_money_history_detail_more.member_id is '資料屬於那一個會員';
+comment on column public.daily_money_history_detail_more.household_id is '所屬家庭；所有寫入必須明確指定';
+comment on column public.daily_money_history_detail_more.member_id is '資料屬於那一個會員；0 代表該家庭的合計';
 comment on column public.daily_money_history_detail_more.date is '記錄所屬日期';
 comment on column public.daily_money_history_detail_more.transaction_date is '成交日期';
 comment on column public.daily_money_history_detail_more.closing_price is '當日收盤價格(參考價)';
@@ -32,3 +35,8 @@ comment on column public.daily_money_history_detail_more.profit_and_loss_percent
 create index "daily_money_history_detail_more-date-member_id"
     on public.daily_money_history_detail_more (date, member_id);
 
+create index if not exists idx_daily_money_history_detail_more_household
+    on public.daily_money_history_detail_more (household_id, date, member_id);
+
+
+comment on column public.daily_money_history_detail_more.settlement_household_id is '結算時家庭；轉換家庭不改此欄位，用於刪除時重算歷史合計';

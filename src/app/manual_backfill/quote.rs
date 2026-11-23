@@ -22,7 +22,8 @@
 //!   `MANUAL_EX_RIGHT_CHANGE_TO`（預設 [`MANUAL_EX_RIGHT_CHANGE_FROM`] 至今天）除權息日為 0 的漲跌與
 //!   漲跌幅，並同步調整市場廣度統計表的漲跌家數；按年請求，重跑安全。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 
 use crate::app::backfill::quote;
 use crate::app::backfill::quote_history;
@@ -71,7 +72,7 @@ async fn test_backfill_daily_quotes_for_date() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    let date = NaiveDate::parse_from_str(MANUAL_DAILY_QUOTE_DATE, "%Y-%m-%d")
+    let date = Date::strptime("%Y-%m-%d", MANUAL_DAILY_QUOTE_DATE)
         .expect("manual daily quote date should be valid");
 
     tracing::debug!(
@@ -109,7 +110,7 @@ async fn test_recalculate_moving_averages() {
     dotenvy::dotenv().ok();
 
     let value = std::env::var("MANUAL_MA_FROM").unwrap_or_else(|_| MANUAL_MA_FROM.to_string());
-    let from = NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+    let from = Date::strptime("%Y-%m-%d", &value)
         .unwrap_or_else(|_| panic!("MANUAL_MA_FROM should be YYYY-MM-DD, got {value}"));
     let symbols: Option<Vec<String>> = std::env::var("MANUAL_MA_SYMBOLS")
         .ok()
@@ -149,7 +150,7 @@ async fn test_backfill_closing_aggregate_for_date() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    let date = NaiveDate::parse_from_str(MANUAL_CLOSING_AGGREGATE_DATE, "%Y-%m-%d")
+    let date = Date::strptime("%Y-%m-%d", MANUAL_CLOSING_AGGREGATE_DATE)
         .expect("manual closing aggregate date should be valid");
 
     tracing::debug!(
@@ -185,7 +186,7 @@ async fn test_backfill_taiwan_stock_index() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    let date = NaiveDate::parse_from_str(MANUAL_TAIWAN_STOCK_INDEX_DATE, "%Y-%m-%d")
+    let date = Date::strptime("%Y-%m-%d", MANUAL_TAIWAN_STOCK_INDEX_DATE)
         .expect("manual taiwan stock index date should be valid");
 
     tracing::debug!(
@@ -225,7 +226,7 @@ async fn test_backfill_quote_history_for_symbols() {
 
     let parse = |name: &str, default: &str| {
         let value = std::env::var(name).unwrap_or_else(|_| default.to_string());
-        NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+        Date::strptime("%Y-%m-%d", &value)
             .unwrap_or_else(|_| panic!("{name} should be YYYY-MM-DD, got {value}"))
     };
     let from = parse("MANUAL_QUOTE_HISTORY_FROM", MANUAL_QUOTE_HISTORY_FROM);
@@ -281,8 +282,7 @@ async fn test_backfill_official_valuation_ratios() {
     dotenvy::dotenv().ok();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date("MANUAL_OFFICIAL_RATIO_FROM", MANUAL_OFFICIAL_RATIO_FROM);
     let to = date("MANUAL_OFFICIAL_RATIO_TO", MANUAL_OFFICIAL_RATIO_TO);
@@ -305,11 +305,10 @@ async fn test_backfill_official_valuation_ratios() {
 #[ignore]
 async fn test_backfill_ex_right_changes() {
     dotenvy::dotenv().ok();
-    let today = chrono::Local::now().date_naive().to_string();
+    let today = today().to_string();
     let date = |name: &str, default: &str| {
         let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
-        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+        Date::strptime("%Y-%m-%d", &raw).unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
     };
     let from = date("MANUAL_EX_RIGHT_CHANGE_FROM", MANUAL_EX_RIGHT_CHANGE_FROM);
     let to = date("MANUAL_EX_RIGHT_CHANGE_TO", &today);

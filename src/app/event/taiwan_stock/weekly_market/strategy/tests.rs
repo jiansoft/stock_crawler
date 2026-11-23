@@ -4,7 +4,8 @@ use super::*;
 use crate::domain::strategy::StrategyPreset;
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 /// 特定條件回測失敗，特定名稱結算失敗，其餘回固定持股與實盤累積。
 struct Gateway;
@@ -23,13 +24,13 @@ impl StrategyGateway for Gateway {
         ))
     }
 
-    async fn settlement(&self, name: &str, date: NaiveDate) -> Result<Option<StrategySettlement>> {
+    async fn settlement(&self, name: &str, date: Date) -> Result<Option<StrategySettlement>> {
         assert_eq!(date.to_string(), "2026-10-18");
         assert!(!name.is_empty(), "未命名策略也應使用換股紀錄的鍵");
         if name == "無結算" {
             bail!("settlement down");
         }
-        let day = NaiveDate::from_ymd_opt(2026, 10, 16).unwrap();
+        let day = jiff::civil::date(2026, 10, 16);
         Ok(Some(StrategySettlement {
             start: day,
             end: day,
@@ -79,7 +80,7 @@ async fn section_sources_degrade_independently() {
             .with_test_writer()
             .finish(),
     );
-    let today = NaiveDate::from_ymd_opt(2026, 10, 17).unwrap();
+    let today = date(2026, 10, 17);
     let empty = Repository {
         fail: false,
         presets: Vec::new(),
@@ -180,12 +181,7 @@ async fn named_strategies_deduplicate_and_degrade_independently() {
         None,
     );
     assert_eq!(strategies.len(), 3);
-    let positions = load_positions(
-        &Gateway,
-        &strategies,
-        NaiveDate::from_ymd_opt(2026, 10, 17).unwrap(),
-    )
-    .await;
+    let positions = load_positions(&Gateway, &strategies, date(2026, 10, 17)).await;
     assert_eq!(positions.len(), 2);
     assert_eq!(positions[0].name, "最佳組合");
     assert!(positions[0].settlement.is_some());
@@ -205,13 +201,9 @@ async fn named_strategies_deduplicate_and_degrade_independently() {
 #[tokio::test]
 async fn no_strategies_load_no_positions() {
     assert!(
-        load_positions(
-            &Gateway,
-            &[],
-            NaiveDate::from_ymd_opt(2026, 10, 17).unwrap()
-        )
-        .await
-        .is_empty()
+        load_positions(&Gateway, &[], date(2026, 10, 17))
+            .await
+            .is_empty()
     );
 }
 
@@ -219,12 +211,7 @@ async fn no_strategies_load_no_positions() {
 #[tokio::test]
 async fn unnamed_env_strategy_uses_record_key() {
     let strategies = alert_strategies(Vec::new(), Some("good".to_owned()), None);
-    let positions = load_positions(
-        &Gateway,
-        &strategies,
-        NaiveDate::from_ymd_opt(2026, 10, 17).unwrap(),
-    )
-    .await;
+    let positions = load_positions(&Gateway, &strategies, date(2026, 10, 17)).await;
     assert_eq!(positions.len(), 1);
     assert!(positions[0].name.is_empty());
     assert!(positions[0].settlement.is_some());

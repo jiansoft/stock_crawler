@@ -9,8 +9,8 @@ use crate::{
     },
 };
 use anyhow::Result;
-use chrono::{Datelike, NaiveDate};
 use hashbrown::HashMap;
+use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 
 // QuoteResponse 上櫃公司每日收盤資訊
@@ -51,19 +51,19 @@ pub struct PeRatioAnalysisResponse {
 }
 
 /// 抓取上櫃公司每日收盤資訊
-pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+pub async fn visit(date: Date) -> Result<Vec<DailyQuoteDto>> {
     let pe_ratio_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis";
     // 本益比
     let pe_ratio_response =
         util::http::get_json::<Vec<PeRatioAnalysisResponse>>(pe_ratio_url).await?;
 
-    let republic_date = util::datetime::gregorian_year_to_roc_year(date.year());
+    let republic_date = util::datetime::gregorian_year_to_roc_year(i32::from(date.year()));
     //https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&_=1681801169006
     let quote_url = format!(
         "https://{}/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&d={}{}&se=EW&_={}",
         tpex::HOST,
         republic_date,
-        date.format("/%m/%d"),
+        date.strftime("/%m/%d"),
         date
     );
 
@@ -83,14 +83,14 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
 pub async fn parse_quote_response(
     quote_response: QuoteResponse,
     pe_ratio_response: Vec<PeRatioAnalysisResponse>,
-    date: NaiveDate,
+    date: Date,
 ) -> Result<Vec<DailyQuoteDto>> {
     // 只採用資料日期就是 `date` 的本益比；不是當天的值留 0，交給官方補值排程
     // （app::backfill::official_ratio，17:30、20:30 以櫃買當日資料覆寫）補上。
     let expected_date = format!(
         "{}{}",
-        util::datetime::gregorian_year_to_roc_year(date.year()),
-        date.format("%m%d")
+        util::datetime::gregorian_year_to_roc_year(i32::from(date.year())),
+        date.strftime("%m%d")
     );
     let mut pe_ratio_analysis: HashMap<String, PeRatioAnalysisResponse> =
         HashMap::with_capacity(pe_ratio_response.len());
@@ -138,7 +138,7 @@ pub async fn parse_quote_response(
                 continue;
             }
 
-            let daily_quote_memory_key = format!("{}-{}", date.format("%Y%m%d"), dto.symbol);
+            let daily_quote_memory_key = format!("{}-{}", date.strftime("%Y%m%d"), dto.symbol);
 
             if TTL.daily_quote_contains_key(&daily_quote_memory_key) {
                 continue;

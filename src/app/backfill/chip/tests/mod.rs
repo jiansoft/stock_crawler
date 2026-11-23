@@ -2,6 +2,8 @@
 
 mod writes;
 
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -18,7 +20,7 @@ fn broker_flow_records_keep_totals_and_brokers() {
     };
     let flow = BrokerFlow {
         stock_symbol: "2884".to_string(),
-        date: NaiveDate::from_ymd_opt(2026, 10, 5).unwrap(),
+        date: date(2026, 10, 5),
         buyers: vec![broker("凱基-台北", 500, dec!(6.98))],
         sellers: vec![broker("元大-總公司", 300, dec!(2.5))],
         buy_total: 500,
@@ -38,7 +40,7 @@ fn broker_flow_records_keep_totals_and_brokers() {
 /// 四個來源的結果合併成入庫記錄：失敗的來源只計數；四個全部失敗回錯誤。
 #[test]
 fn collect_daily_merges_sources_and_counts_failures() {
-    let date = NaiveDate::from_ymd_opt(2026, 10, 12).expect("有效日期");
+    let date = date(2026, 10, 12);
     let flows = |symbol: &str| {
         Ok(HashMap::from([(
             symbol.to_string(),
@@ -118,8 +120,8 @@ fn margin_records_map_today_and_previous() {
     );
 }
 
-fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn ymd(y: i32, m: u32, d: u32) -> Date {
+    crate::core::util::datetime::ymd(y, m, d).expect("合法日期")
 }
 
 /// 逐年切段：頭尾不足一年照實際起訖，同一年只有一段，起日晚於迄日沒有任何段。
@@ -143,20 +145,20 @@ fn yearly_chunks_split_by_calendar_year() {
 /// 只記錄連續天數重算區間的假倉儲；其餘方法不應被呼叫。
 #[derive(Default)]
 struct StreakRecorder {
-    calls: std::sync::Mutex<Vec<(NaiveDate, NaiveDate)>>,
+    calls: std::sync::Mutex<Vec<(Date, Date)>>,
 }
 
 #[async_trait::async_trait]
 impl ChipRepository for StreakRecorder {
-    async fn save_institutional(&self, _: NaiveDate, _: &[InstitutionalNet]) -> Result<u64> {
+    async fn save_institutional(&self, _: Date, _: &[InstitutionalNet]) -> Result<u64> {
         unreachable!("不應寫入三大法人")
     }
 
-    async fn save_margin(&self, _: NaiveDate, _: &[MarginRecord]) -> Result<u64> {
+    async fn save_margin(&self, _: Date, _: &[MarginRecord]) -> Result<u64> {
         unreachable!("不應寫入融資融券")
     }
 
-    async fn refresh_streaks(&self, from: NaiveDate, to: NaiveDate) -> Result<u64> {
+    async fn refresh_streaks(&self, from: Date, to: Date) -> Result<u64> {
         self.calls.lock().expect("測試鎖").push((from, to));
         Ok(10)
     }
@@ -205,15 +207,15 @@ struct HolderRecorder {
 
 #[async_trait::async_trait]
 impl ChipRepository for HolderRecorder {
-    async fn save_institutional(&self, _: NaiveDate, _: &[InstitutionalNet]) -> Result<u64> {
+    async fn save_institutional(&self, _: Date, _: &[InstitutionalNet]) -> Result<u64> {
         unreachable!("不應寫入三大法人")
     }
 
-    async fn save_margin(&self, _: NaiveDate, _: &[MarginRecord]) -> Result<u64> {
+    async fn save_margin(&self, _: Date, _: &[MarginRecord]) -> Result<u64> {
         unreachable!("不應寫入融資融券")
     }
 
-    async fn refresh_streaks(&self, _: NaiveDate, _: NaiveDate) -> Result<u64> {
+    async fn refresh_streaks(&self, _: Date, _: Date) -> Result<u64> {
         unreachable!("不應重算連續天數")
     }
 

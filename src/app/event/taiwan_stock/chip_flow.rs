@@ -5,7 +5,8 @@
 //!
 //! ## 流程（週一至週五 21:40 排程）
 //!
-//! 1. 取目前持股的普通股代號（[`holdings::common_stock_holdings`]）。
+//! 1. 取所有會員目前持股的普通股代號作為檢查範圍（[`holdings::crawl_common_stocks`]）；
+//!    通知依收件者範圍只列範圍內的股票（會員系統計畫 7.6）。
 //! 2. 抓上市、上櫃的三大法人買賣超與融資融券餘額（官方全市場資料，各一次請求）；
 //!    任一來源失敗只記錄，其餘照常。全部都沒有資料（休市或尚未公布）就結束。
 //! 3. 更新 Redis 中每檔外資、投信的連續買賣超天數（`chip:streak:{代號}`），同一天重跑不重複累加。
@@ -16,17 +17,19 @@
 //!    - 融資餘額增減達 [`MARGIN_MIN_PERCENT`]% 且 [`MARGIN_MIN_LOTS`] 張以上
 //!    - 融券餘額增減達 [`SHORT_MIN_PERCENT`]% 且 [`SHORT_MIN_LOTS`] 張以上
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
 use super::{add_thousand_separators, holdings};
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::quote::repository::QuoteRepository,
     infra::{
         crawler::{
@@ -52,7 +55,7 @@ const STREAK_TTL_SECONDS: usize = 60 * 60 * 24 * 30;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Streak {
     /// 最後一次更新的交易日。
-    date: NaiveDate,
+    date: Date,
     foreign: i32,
     trust: i32,
 }
@@ -79,7 +82,7 @@ pub struct RunSummary {
 
 /// 依當天籌碼更新每檔持股的連續天數（Redis），挑出符合任一通知條件的持股。
 async fn collect_reports(
-    date: NaiveDate,
+    date: Date,
     symbols: &BTreeSet<String>,
     flows: &HashMap<String, InstitutionalFlow>,
     margins: &HashMap<String, MarginBalance>,
@@ -121,10 +124,10 @@ async fn collect_reports(
 ///
 /// 來源或單檔失敗只記錄、不中斷；只有查不到持股時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let symbols = holdings::common_stock_holdings()
+    let symbols = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for chip flow notification failed")?;
-    let date = Local::now().date_naive();
+    let date = today();
 
     let (flows, margins) = fetch_sources(date).await;
     if flows.is_empty() && margins.is_empty() {
@@ -146,7 +149,11 @@ pub async fn execute() -> Result<()> {
 
     let (summary, reports) = collect_reports(date, &symbols, &flows, &margins, &volumes).await;
     if !reports.is_empty() {
-        alert::send_message(&build_message(date, &reports, holdings::stock_name)).await;
+        let dedup_key = format!("{}:{date}", Topic::HoldingsChipFlow.code());
+        notify::notify_holdings(Topic::HoldingsChipFlow, &dedup_key, |view| {
+            view_message(date, &reports, view)
+        })
+        .await;
     }
     tracing::info!(
         "持股籌碼通知結束: holdings={}, with_flow={}, with_margin={}, reported={}",
@@ -158,9 +165,28 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
+/// 一個收件者範圍的籌碼通知：只列範圍內持有的普通股，沒有時回 `None`。
+///
+/// # Errors
+///
+/// 查詢範圍內持股失敗時回傳錯誤。
+async fn view_message(
+    date: Date,
+    reports: &[ChipReport],
+    view: crate::domain::portfolio::view::HoldingView,
+) -> Result<Option<String>> {
+    let held = holdings::common_stock_holdings(&view).await?;
+    let mine: Vec<ChipReport> = reports
+        .iter()
+        .filter(|report| held.contains(&report.stock_symbol))
+        .cloned()
+        .collect();
+    Ok((!mine.is_empty()).then(|| build_message(date, &mine, holdings::stock_name)))
+}
+
 /// 併抓上市、上櫃 `date` 的三大法人買賣超與融資融券餘額，各自合併成一張表；失敗的來源只記錄。
 async fn fetch_sources(
-    date: NaiveDate,
+    date: Date,
 ) -> (
     HashMap<String, InstitutionalFlow>,
     HashMap<String, MarginBalance>,
@@ -192,11 +218,7 @@ fn merge<T>(kind: &str, sources: [(&str, Result<HashMap<String, T>>); 2]) -> Has
 }
 
 /// 依當天買賣超方向更新連續天數；同一天重跑時維持原值。
-fn next_streak(
-    previous: Option<Streak>,
-    date: NaiveDate,
-    flow: Option<InstitutionalFlow>,
-) -> Streak {
+fn next_streak(previous: Option<Streak>, date: Date, flow: Option<InstitutionalFlow>) -> Streak {
     let previous = previous.unwrap_or_default();
     if previous.date == date {
         return previous;
@@ -260,7 +282,7 @@ fn reasons(report: &ChipReport) -> Vec<&'static str> {
 ///
 /// `stock_name` 由呼叫端提供（正式流程讀股票主檔快取），測試時可換成固定對照。
 fn build_message(
-    date: NaiveDate,
+    date: Date,
     reports: &[ChipReport],
     stock_name: impl Fn(&str) -> String,
 ) -> String {

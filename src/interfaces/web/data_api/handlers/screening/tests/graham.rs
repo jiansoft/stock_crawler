@@ -1,5 +1,6 @@
 //! 條件選股：葛拉漢（`max_pe_pb_product`、`min_current_ratio`、`sort_by=pe_pb_product`）。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -99,7 +100,7 @@ async fn screen_at_filters_and_sorts_by_graham_criteria() {
         .expect("種入資產負債表");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |max_product: Option<f64>, min_current_ratio: Option<f64>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

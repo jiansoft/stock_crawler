@@ -18,7 +18,7 @@ use crate::{
 };
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// PostgreSQL 實作之資金流向與帳戶市值倉儲。
 ///
@@ -43,6 +43,7 @@ impl From<TableDailyMoneyHistoryMemberWithPreviousTradingDay>
     fn from(table: TableDailyMoneyHistoryMemberWithPreviousTradingDay) -> Self {
         // 將資料庫對照表結構模型轉換為領域實體，以便應用層處理
         DomainMoneyFlowMemberWithPreviousDay {
+            household_id: table.household_id,
             date: table.date,
             previous_date: table.previous_date,
             member_id: table.member_id,
@@ -54,9 +55,14 @@ impl From<TableDailyMoneyHistoryMemberWithPreviousTradingDay>
 
 #[async_trait]
 impl MoneyFlowRepository for PgMoneyFlowRepository {
-    async fn recalculate_and_save_money_flow(&self, date: NaiveDate) -> Result<()> {
+    /// 每日結算與轉家／刪除共用交易鎖，三張市值表不能讀到不同家庭歸屬。
+    async fn recalculate_and_save_money_flow(&self, date: Date) -> Result<()> {
         // 1. 初始化資料庫事務，確保跨表寫入的一致性
-        let mut tx_option = Some(crate::infra::database::get_tx().await?);
+        let mut tx = crate::infra::database::get_tx().await?;
+        sqlx::query("SELECT public.member_money_history_lock()")
+            .execute(&mut *tx)
+            .await?;
+        let mut tx_option = Some(tx);
 
         // 2. 寫入當日市值總覽 (扁平表)
         if let Err(why) = TableDailyMoneyHistory::upsert(date, &mut tx_option).await {
@@ -147,7 +153,7 @@ impl MoneyFlowRepository for PgMoneyFlowRepository {
 
     async fn fetch_member_money_history_with_previous_day(
         &self,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Vec<DomainMoneyFlowMemberWithPreviousDay>> {
         // 從資料庫加載原始對照資料
         let table_rows =

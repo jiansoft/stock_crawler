@@ -9,7 +9,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::{database_error, decimal_to_f64, ensure_stock_exists, error_response};
@@ -59,7 +60,8 @@ ORDER BY level
 /// `holder_distribution_level` 的一列。
 #[derive(sqlx::FromRow)]
 struct LevelRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     level: i16,
     holders: i64,
     shares: i64,
@@ -116,7 +118,7 @@ pub(crate) async fn holder_levels(
 ) -> Response {
     let as_of = match params.date.as_deref() {
         None => None,
-        Some(raw) => match NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        Some(raw) => match Date::strptime("%Y-%m-%d", raw) {
             Ok(date) => Some(date),
             Err(_) => {
                 return error_response(StatusCode::UNPROCESSABLE_ENTITY, "date 必須為 YYYY-MM-DD");
@@ -128,7 +130,7 @@ pub(crate) async fn holder_levels(
     }
     let rows: Vec<LevelRow> = match sqlx::query_as(LEVELS_SQL)
         .bind(&symbol)
-        .bind(as_of)
+        .bind(as_of.map(ToSqlx::to_sqlx))
         .fetch_all(database::get_connection())
         .await
     {

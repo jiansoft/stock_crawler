@@ -38,7 +38,8 @@ pub(super) fn alert_denied_once(category: &YahooClassCategory, err_msg: &str) {
         // 走 core::alert 抽象介面（實際管道由 main 註冊的 adapter 決定），
         // infra 層不再直接依賴 interfaces::bot（反向耦合已移除）。
         tokio::spawn(async move {
-            crate::core::alert::send_alert(
+            crate::core::alert::notify_system(
+                crate::core::alert::Topic::SystemCritical,
                 "Yahoo 類股採集遭遇阻擋",
                 &format!(
                     "類股: {} {}({})\n原因: {}\n該次更新將強制冷卻 10 分鐘，1小時內不重複提醒。",

@@ -1,6 +1,7 @@
 //! 指定基準的年化追蹤誤差；比較相同起訖日期的含息日報酬，避免缺日造成錯配。
 use crate::domain::quote::technical::PriceBar;
-use chrono::{Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 近一年同區間日報酬差的樣本統計；數值以百分比表示。
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -15,11 +16,8 @@ pub fn compute(bars: &[PriceBar], benchmark: &[PriceBar]) -> TrackingStats {
     let Some(last) = bars.last() else {
         return TrackingStats::default();
     };
-    let from = last
-        .date
-        .checked_sub_months(Months::new(12))
-        .unwrap_or(NaiveDate::MIN);
-    let returns = |series: &[PriceBar]| -> std::collections::BTreeMap<(NaiveDate, NaiveDate), f64> {
+    let from = last.date.checked_sub(12.months()).ok().unwrap_or(Date::MIN);
+    let returns = |series: &[PriceBar]| -> std::collections::BTreeMap<(Date, Date), f64> {
         series
             .windows(2)
             .filter_map(|pair| {

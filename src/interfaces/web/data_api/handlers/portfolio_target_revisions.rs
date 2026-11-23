@@ -11,8 +11,10 @@ use axum::{
 };
 
 use super::portfolio_targets::saved_targets_response;
-use super::{error_response, repository_error};
-use crate::domain::portfolio::target::{PortfolioTargetRepository, TargetDimension};
+use super::{error_response, household_param, repository_error};
+use crate::domain::portfolio::target::{
+    PortfolioTargetRepository, TargetActor, TargetDimension, TargetOwner,
+};
 use crate::infra::database::repository::portfolio_target::PgPortfolioTargetRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, PortfolioTargetItemDto, PortfolioTargetRevisionDto,
@@ -45,6 +47,11 @@ pub(crate) async fn list_portfolio_target_revisions(
     if member_id < 0 {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
     }
+    let household_id = match household_param(params.household_id) {
+        Ok(id) => id,
+        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let owner = TargetOwner::new(household_id, member_id.to_string());
     let Some(dimension) = TargetDimension::parse(&params.dimension) else {
         return error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -53,7 +60,7 @@ pub(crate) async fn list_portfolio_target_revisions(
     };
 
     let revisions = match PgPortfolioTargetRepository::new()
-        .list_revisions(&member_id.to_string(), dimension)
+        .list_revisions(&owner, dimension)
         .await
     {
         Ok(revisions) => revisions,
@@ -61,6 +68,7 @@ pub(crate) async fn list_portfolio_target_revisions(
     };
 
     Json(PortfolioTargetRevisionsResponse {
+        household_id,
         member_id,
         dimension: dimension.as_str().to_string(),
         revisions: revisions
@@ -69,8 +77,12 @@ pub(crate) async fn list_portfolio_target_revisions(
                 let total: f64 = revision.targets.iter().map(|(_, percent)| percent).sum();
                 PortfolioTargetRevisionDto {
                     id: revision.id,
-                    saved_time: revision.saved_time.to_rfc3339(),
+                    saved_time: crate::core::util::datetime::rfc3339_utc::to_rfc3339(
+                        revision.saved_time,
+                    ),
                     target_cash_percent: ((100.0 - total).max(0.0) * 100.0).round() / 100.0,
+                    actor_source: revision.actor.source.as_str().to_owned(),
+                    actor_ref: revision.actor.actor_ref,
                     targets: revision
                         .targets
                         .into_iter()
@@ -116,21 +128,26 @@ pub(crate) async fn restore_portfolio_target_revision(
     if member_id < 0 {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
     }
+    let household_id = match household_param(body.household_id) {
+        Ok(id) => id,
+        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let actor = match TargetActor::parse(body.actor_source.as_deref(), body.actor_ref.as_deref()) {
+        Ok(actor) => actor,
+        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let owner = TargetOwner::new(household_id, member_id.to_string());
     let repo = PgPortfolioTargetRepository::new();
-    let revision = match repo.get_revision(&member_id.to_string(), id).await {
+    let revision = match repo.get_revision(&owner, id).await {
         Ok(Some(revision)) => revision,
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "找不到這個目標配置版本"),
         Err(error) => return repository_error(error),
     };
     if let Err(error) = repo
-        .save_targets(
-            &member_id.to_string(),
-            revision.dimension,
-            &revision.targets,
-        )
+        .save_targets(&owner, revision.dimension, &revision.targets, &actor)
         .await
     {
         return repository_error(error);
     }
-    saved_targets_response(&repo, member_id, revision.dimension).await
+    saved_targets_response(&repo, household_id, member_id, revision.dimension).await
 }

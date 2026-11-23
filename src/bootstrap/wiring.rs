@@ -8,7 +8,7 @@ pub(crate) fn register_adapters() {
     // 依 DDD 分層，core/infra/app 不直接依賴 interfaces，改呼叫抽象介面（port）；
     // 這裡把具體實作（adapter）注入，必須在任何可能使用這些介面的流程之前完成。
     //
-    // 1. 告警管道：core/infra 呼叫 core::alert::send_alert / send_message，
+    // 1. 告警管道：core/infra 呼叫 core::alert::notify_system / notify_market，app 層使用 notify_holdings，
     //    訊息由 Telegram adapter 實際送出。
     core::alert::register_alert_sink(std::sync::Arc::new(
         interfaces::bot::telegram::TelegramAlertSink,

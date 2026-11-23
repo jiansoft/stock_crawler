@@ -3,9 +3,9 @@
 //! 23:30 主機健康彙總的慢查詢統計（[`logging::slow_query`]）只在記憶體，重啟就清掉；週報改讀檔案，
 //! 跨重啟也算得到整週。只讀本機檔案，不碰資料庫。
 
+use jiff::civil::Date;
 use std::path::Path;
 
-use super::*;
 use crate::core::logging::{self, slow_query::SlowQueryTally};
 
 /// 檔案日誌的目錄（與主機健康的探針同一個相對路徑）。
@@ -17,7 +17,7 @@ const LISTED_KINDS: usize = 5;
 /// 期間內（含起訖）每天的 warn 檔裡的慢查詢；目錄或檔案讀不到時略過。
 ///
 /// 檔名格式為 `YYYY-MM-DD_default_warn.log` 或輪轉後的 `YYYY-MM-DD_default_warn.HH-MM-SS.log`。
-pub(super) fn weekly_slow_queries(dir: &Path, from: NaiveDate, to: NaiveDate) -> SlowQueryTally {
+pub(super) fn weekly_slow_queries(dir: &Path, from: Date, to: Date) -> SlowQueryTally {
     let mut tally = SlowQueryTally::default();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return tally;
@@ -30,7 +30,7 @@ pub(super) fn weekly_slow_queries(dir: &Path, from: NaiveDate, to: NaiveDate) ->
         }
         let Some(date) = name
             .get(..10)
-            .and_then(|day| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+            .and_then(|day| Date::strptime("%Y-%m-%d", day).ok())
         else {
             continue;
         };

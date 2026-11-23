@@ -1,11 +1,13 @@
 //! `/portfolio/history` handler：持股的時間加權報酬、月報酬、最大回撤與大盤比較的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn day(day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 4, day).expect("有效日期")
+fn day(day: u32) -> Date {
+    ymd(2026, 4, day).expect("有效日期")
 }
 
 /// 週末的買賣併入下一個交易日；同一交易日的多筆相加；超過最後一天的不計。

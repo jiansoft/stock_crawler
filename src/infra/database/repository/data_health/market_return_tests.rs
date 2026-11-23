@@ -1,6 +1,9 @@
 //! 大盤未來報酬彙總與明細比對（[`MARKET_FORWARD_RETURN_DRIFT_SQL`]）的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 /// 彙總筆數與明細一致的日子不列；少算一筆、彙總少一天、彙總多一天都列出。
 #[tokio::test]
@@ -34,13 +37,13 @@ ON CONFLICT DO NOTHING"#,
     .execute(&mut *tx)
     .await
     .expect("種入股票主檔");
-    let day = |d| NaiveDate::from_ymd_opt(2021, 3, d).expect("日期應合法");
+    let day = |d| ymd(2021, 3, d).expect("日期應合法");
     for date in [day(1), day(2), day(3)] {
         sqlx::query(
             r#"INSERT INTO daily_forward_return (date, stock_symbol, return_5d, return_20d)
 SELECT $1, s, 1.5, NULL FROM unnest(ARRAY['79979M1', '79979M2']) AS s"#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .execute(&mut *tx)
         .await
         .expect("寫入明細應成功");
@@ -51,18 +54,24 @@ SELECT $1, s, 1.5, NULL FROM unnest(ARRAY['79979M1', '79979M2']) AS s"#,
             r#"INSERT INTO daily_market_forward_return (date, market_id, n5, sum5, win5, n20, n60, n120, n240)
 VALUES ($1, 0, $2, 3.0, 2.0, 0, 0, 0, 0)"#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(n5)
         .execute(&mut *tx)
         .await
         .expect("寫入彙總應成功");
     }
 
-    let drift: Vec<NaiveDate> = sqlx::query_scalar(MARKET_FORWARD_RETURN_DRIFT_SQL)
-        .bind(day(1))
-        .fetch_all(&mut *tx)
-        .await
-        .expect("查詢應成功");
+    let drift: Vec<Date> =
+        sqlx::query_scalar::<_, jiff_sqlx::Date>(MARKET_FORWARD_RETURN_DRIFT_SQL)
+            .bind(day(1).to_sqlx())
+            .fetch_all(&mut *tx)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(crate::infra::database::jiff_types::from_wire)
+                    .collect::<Vec<_>>()
+            })
+            .expect("查詢應成功");
     tx.rollback().await.expect("rollback 應成功");
 
     assert_eq!(drift, [day(2), day(3), day(4)]);

@@ -5,7 +5,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -92,13 +93,18 @@ impl ExRightChangeRepository for PgQuoteRepository {
             return Ok(0);
         }
         let symbols: Vec<&str> = references.iter().map(|r| r.stock_symbol.as_str()).collect();
-        let dates: Vec<NaiveDate> = references.iter().map(|r| r.date).collect();
+        let dates: Vec<Date> = references.iter().map(|r| r.date).collect();
         let prices: Vec<Decimal> = references.iter().map(|r| r.reference_price).collect();
         let pool = database::get_connection();
         if with_stats {
             let (quotes, _stats): (i64, i64) = sqlx::query_as(UPDATE_QUOTES_AND_STATS_SQL)
                 .bind(&symbols)
-                .bind(&dates)
+                .bind(
+                    dates
+                        .iter()
+                        .map(|value| value.to_sqlx())
+                        .collect::<Vec<_>>(),
+                )
                 .bind(&prices)
                 .fetch_one(pool)
                 .await?;
@@ -106,7 +112,12 @@ impl ExRightChangeRepository for PgQuoteRepository {
         } else {
             let result = sqlx::query(UPDATE_QUOTES_SQL)
                 .bind(&symbols)
-                .bind(&dates)
+                .bind(
+                    dates
+                        .iter()
+                        .map(|value| value.to_sqlx())
+                        .collect::<Vec<_>>(),
+                )
                 .bind(&prices)
                 .execute(pool)
                 .await?;

@@ -1,6 +1,7 @@
 //! 股利實體的單元測試。
 
 use super::*;
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal_macros::dec;
 
 /// 1235 興泰 2026-09-24 同日除權息：現金 0.5、股票 0.5 元，前日收盤 41.15。
@@ -141,8 +142,8 @@ fn unannounced(cash: Decimal, stock: Decimal) -> Dividend {
         ex_dividend_date_stock: "尚未公布".to_string(),
         payable_date_cash: "尚未公布".to_string(),
         payable_date_stock: "尚未公布".to_string(),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     }
 }
 

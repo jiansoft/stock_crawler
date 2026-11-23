@@ -6,7 +6,9 @@ use super::*;
 pub(super) const SYMBOL: &str = "79979DA";
 
 /// 回傳可用的 API 金鑰；測試環境沒設定時自行補一組（`--test-threads=1` 下無競爭）。
-fn api_key() -> String {
+///
+/// nextest 每個測試各自一個行程，不能假設別的測試已經設定過；直接送請求的測試也要經由這裡取得金鑰。
+pub(super) fn api_key() -> String {
     std::env::var("DATA_API_KEY").unwrap_or_else(|_| {
         let generated = "stocks-integration-test-key".to_owned();
         unsafe { std::env::set_var("DATA_API_KEY", &generated) };

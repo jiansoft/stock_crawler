@@ -5,10 +5,11 @@
 //! 單位數從 MIS 開始收錄那天才有，歷史回補的日子不計。前十大持股多半每月更新一次，
 //! 只有這週才收到新一期的才列（[`EtfRepository::holding_periods`]）。
 
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::collections::BTreeSet;
 
 use anyhow::Result;
-use chrono::{Days, NaiveDate};
 
 use super::{WEEK_DAYS, hundred_million};
 use crate::domain::etf::{
@@ -23,7 +24,7 @@ const TOP_FLOWS: usize = 5;
 const TOP_MOVES: usize = 3;
 
 /// 「這週收到」往前看的天數（週六執行，涵蓋週日到週五）。
-const RECORDED_DAYS: u64 = 6;
+const RECORDED_DAYS: i64 = 6;
 
 /// 持有 ETF 的前十大持股換期。
 #[derive(Debug, Clone, PartialEq)]
@@ -31,9 +32,9 @@ pub(super) struct HoldingChange {
     /// ETF 代號。
     pub(super) stock_symbol: String,
     /// 前一期的資料日期。
-    pub(super) from: NaiveDate,
+    pub(super) from: Date,
     /// 新一期的資料日期。
-    pub(super) to: NaiveDate,
+    pub(super) to: Date,
     /// 兩期的差異。
     pub(super) diff: HoldingDiff,
 }
@@ -42,9 +43,9 @@ pub(super) struct HoldingChange {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct EtfWeekSection {
     /// 期間第一個交易日。
-    pub(super) from: NaiveDate,
+    pub(super) from: Date,
     /// 期間最後一個交易日。
-    pub(super) to: NaiveDate,
+    pub(super) to: Date,
     /// 各檔的淨申購與折溢價。
     pub(super) flows: Vec<EtfWeeklyFlow>,
     /// 持有的 ETF 代號（只留這週有資料的）。
@@ -57,7 +58,7 @@ pub(super) struct EtfWeekSection {
 pub(super) async fn etf_section(
     repo: &impl EtfRepository,
     holdings: &BTreeSet<String>,
-    today: NaiveDate,
+    today: Date,
 ) -> Result<Option<EtfWeekSection>> {
     let flows = repo.weekly_flows(WEEK_DAYS as i64).await?;
     let (Some(from), Some(to)) = (
@@ -72,7 +73,7 @@ pub(super) async fn etf_section(
         .map(|flow| flow.stock_symbol.clone())
         .collect();
     let symbols: Vec<String> = holdings.iter().cloned().collect();
-    let since = today - Days::new(RECORDED_DAYS);
+    let since = today - RECORDED_DAYS.days();
     let changes = repo
         .holding_periods(&symbols, since)
         .await?
@@ -132,8 +133,8 @@ fn change_line(change: &HoldingChange, name: &str) -> String {
         "持有 {} {} 前十大持股更新（{} → {}）：{}",
         change.stock_symbol,
         name,
-        change.from.format("%m-%d"),
-        change.to.format("%m-%d"),
+        change.from.strftime("%m-%d"),
+        change.to.strftime("%m-%d"),
         parts.join("；")
     )
 }
@@ -152,28 +153,23 @@ fn percent(value: Option<f64>) -> String {
     value.map_or_else(|| "無".to_owned(), |v| format!("{v:+.2}%"))
 }
 
-/// ETF 一段的各行（開頭為空行）；沒有任何淨申購與持有 ETF 時回空陣列。
-pub(super) fn lines(section: &EtfWeekSection) -> Vec<String> {
+/// 全市場 ETF 資金流向的各行（開頭為空行，市場段）；沒有任何淨申購時回空陣列。不含任何持有資訊。
+pub(super) fn market_lines(section: &EtfWeekSection) -> Vec<String> {
     let mut inflows: Vec<&EtfWeeklyFlow> =
         section.flows.iter().filter(|f| f.net_flow > 0.0).collect();
     inflows.sort_by(|a, b| b.net_flow.total_cmp(&a.net_flow));
     let mut outflows: Vec<&EtfWeeklyFlow> =
         section.flows.iter().filter(|f| f.net_flow < 0.0).collect();
     outflows.sort_by(|a, b| a.net_flow.total_cmp(&b.net_flow));
-    let held: Vec<&EtfWeeklyFlow> = section
-        .held
-        .iter()
-        .filter_map(|symbol| section.flows.iter().find(|f| &f.stock_symbol == symbol))
-        .collect();
-    if inflows.is_empty() && outflows.is_empty() && held.is_empty() && section.changes.is_empty() {
+    if inflows.is_empty() && outflows.is_empty() {
         return Vec::new();
     }
     let mut lines = vec![
         String::new(),
         format!(
             "ETF 資金流向（{}～{}，受益單位增減 × 淨值）",
-            section.from.format("%m-%d"),
-            section.to.format("%m-%d")
+            section.from.strftime("%m-%d"),
+            section.to.strftime("%m-%d")
         ),
     ];
     for (label, rows) in [("淨流入", inflows), ("淨流出", outflows)] {
@@ -182,6 +178,27 @@ pub(super) fn lines(section: &EtfWeekSection) -> Vec<String> {
             lines.push(format!("{label}：{}", text.join("、")));
         }
     }
+    lines
+}
+
+/// 持有 ETF 的各行（開頭為空行，持股段）：淨申購、折溢價週平均與前十大持股換期；沒有時回空陣列。
+pub(super) fn held_lines(section: &EtfWeekSection) -> Vec<String> {
+    let held: Vec<&EtfWeeklyFlow> = section
+        .held
+        .iter()
+        .filter_map(|symbol| section.flows.iter().find(|f| &f.stock_symbol == symbol))
+        .collect();
+    if held.is_empty() && section.changes.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![
+        String::new(),
+        format!(
+            "持有 ETF（{}～{}，受益單位增減 × 淨值）",
+            section.from.strftime("%m-%d"),
+            section.to.strftime("%m-%d")
+        ),
+    ];
     for flow in held {
         lines.push(format!(
             "持有 {} {}：淨申購 {}，折溢價週平均 {}（最新 {}）",

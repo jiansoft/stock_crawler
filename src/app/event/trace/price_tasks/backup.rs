@@ -3,12 +3,12 @@
 //! 全市場快取（HiStock、Yahoo 類股）輪到某檔股票前可能已經過了數十秒；這裡只針對 `Trace`
 //! 資料表內的股票，每 [`BACKUP_SNAPSHOT_REFRESH_INTERVAL`] 從備援站點補抓一次價格。
 
+use crate::core::util::datetime::today;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::Local;
 use futures::future;
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
@@ -36,7 +36,7 @@ static BACKUP_FAILURE_WARNED: Lazy<Mutex<DailySeen>> =
 fn first_backup_failure_today(symbol: &str) -> bool {
     BACKUP_FAILURE_WARNED
         .lock()
-        .map(|mut seen| seen.first_today(symbol, Local::now().date_naive()))
+        .map(|mut seen| seen.first_today(symbol, today()))
         .unwrap_or(true)
 }
 

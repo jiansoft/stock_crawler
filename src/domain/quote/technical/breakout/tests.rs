@@ -1,7 +1,10 @@
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 
-fn day(offset: usize) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 1, 1).expect("固定日期") + chrono::Days::new(offset as u64)
+fn day(offset: usize) -> Date {
+    date(2026, 1, 1) + (offset as i64).days()
 }
 
 /// 30 根整理（高 10、低 9、收 9.5、量 1000），最後一根依參數。
@@ -94,7 +97,7 @@ fn only_last_base_days_count() {
     bars.insert(
         0,
         PriceBar {
-            date: day(0) - chrono::Days::new(1),
+            date: day(0) - 1.days(),
             close: 20.0,
             high: 20.0,
             low: 20.0,
@@ -103,7 +106,7 @@ fn only_last_base_days_count() {
     volumes.insert(
         0,
         VolumeBar {
-            date: day(0) - chrono::Days::new(1),
+            date: day(0) - 1.days(),
             volume: 1000.0,
         },
     );

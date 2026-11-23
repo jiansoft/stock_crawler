@@ -1,11 +1,15 @@
 //! 日報價的 Table／Domain 轉換與倉儲介面整輪讀寫測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 /// Table／Domain 之間的轉換欄位一一對應，來回轉換不遺失資料。
 #[test]
 fn conversions_round_trip_without_losing_fields() {
-    let date = NaiveDate::from_ymd_opt(2026, 10, 12).expect("有效日期");
+    let date = date(2026, 10, 12);
     let quote = DomainDailyQuote {
         serial: 7,
         stock_symbol: "2330".to_string(),
@@ -73,7 +77,7 @@ async fn repository_round_trips_daily_quote_data() {
 
     // 固定歷史日期 + 假代號；day3 只用來驗證補缺。
     const SYMBOL: &str = "79978QR";
-    let day = |d| NaiveDate::from_ymd_opt(1989, 8, d).expect("測試日期應合法");
+    let day = |d| ymd(1989, 8, d).expect("測試日期應合法");
     let (day1, day2, day3) = (day(1), day(2), day(3));
     let pool = database::get_connection();
     let cleanup = || async {
@@ -86,7 +90,7 @@ async fn repository_round_trips_daily_quote_data() {
             let _ = sqlx::query(sql).bind(SYMBOL).execute(pool).await;
         }
         let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date = $1")
-            .bind(day1)
+            .bind(day1.to_sqlx())
             .execute(pool)
             .await;
         let _ = CLIENT.delete(&format!("LastDailyQuote:{SYMBOL}")).await;
@@ -101,10 +105,10 @@ async fn repository_round_trips_daily_quote_data() {
     .await
     .expect("種入 stocks");
 
-    let quote = |date: NaiveDate, close: Decimal| DomainDailyQuote {
+    let quote = |date: Date, close: Decimal| DomainDailyQuote {
         stock_symbol: SYMBOL.to_string(),
         date,
-        year: date.year(),
+        year: i32::from(date.year()),
         month: date.month() as i32,
         day: date.day() as i32,
         opening_price: close,
@@ -187,7 +191,7 @@ async fn repository_round_trips_daily_quote_data() {
         r#"SELECT "ClosingPrice", "TradingVolume" FROM "DailyQuotes" WHERE stock_symbol = $1 AND "Date" = $2"#,
     )
     .bind(SYMBOL)
-    .bind(day3)
+    .bind(day3.to_sqlx())
     .fetch_one(pool)
     .await
     .expect("補缺列");

@@ -6,10 +6,10 @@
 //! 這一層只負責「取得與整理」，不做任何期別或異動的判斷；
 //! 哪些來源失敗可以降級、哪些必須中止，由 [`super::scan_ex_dividend_announcements`] 決定。
 
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use anyhow::Result;
-use chrono::{Datelike, NaiveDate};
 
 use crate::{
     domain::dividend::{entity::Dividend, repository::DividendRepository},
@@ -52,7 +52,7 @@ pub(super) fn index_allotments(
 /// 以「股票代號 + 除權息日」索引 MoneyDJ 的日程資料。
 pub(super) fn index_schedules(
     data: Vec<DividendSchedule>,
-) -> HashMap<(String, NaiveDate), DividendSchedule> {
+) -> HashMap<(String, Date), DividendSchedule> {
     data.into_iter()
         .map(|item| ((item.stock_symbol.clone(), item.ex_date), item))
         .collect()
@@ -68,7 +68,10 @@ pub(super) async fn fetch_existing(
 ) -> Result<HashMap<String, Vec<Dividend>>> {
     let mut years: Vec<i32> = announcements
         .iter()
-        .flat_map(|item| [item.ex_date.year(), item.ex_date.year() + 1])
+        .flat_map(|item| {
+            let year = i32::from(item.ex_date.year());
+            [year, year + 1]
+        })
         .collect();
     years.sort_unstable();
     years.dedup();

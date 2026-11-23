@@ -1,6 +1,7 @@
 //! 條件選股整合測試：月營收創新高與排除產業。
 
 use super::*;
+use jiff::civil::date;
 
 /// 營收創歷史新高：以固定查詢日 1988-03-05 執行。SR1 1988-01 營收 200 高於之前 12 個月（100），
 /// SR2 1988-01 營收 90 不是新高，SR3 之前只有 5 個月不判斷（`null`），SR4 創新高的月份是 1987-10，
@@ -65,7 +66,7 @@ async fn screen_at_filters_revenue_record() {
         .expect("種入月營收");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let query_date = date(1988, 3, 5);
     let run = |record: Option<bool>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);
@@ -163,7 +164,7 @@ async fn screen_at_excludes_industries() {
         .expect("種入月營收");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let query_date = date(1988, 3, 5);
     let run = |excluded: &'static str| async move {
         let mut params = screening_params();
         params.min_monthly_revenue = Some(979_790.0);
@@ -267,7 +268,7 @@ async fn screen_at_counts_revenue_acceleration_months() {
         }
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let query_date = date(1988, 3, 5);
     let run = |min_months: Option<u8>| async move {
         let mut params = screening_params();
         params.min_monthly_revenue = Some(979_790.0);

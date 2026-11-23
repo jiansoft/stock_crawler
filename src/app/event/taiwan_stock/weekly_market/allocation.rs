@@ -5,16 +5,18 @@
 //! 涵蓋個股、產業與 ETF 穿透三個維度。ETF 穿透以持有 ETF 的前十大成分（與再平衡頁同一份來源）
 //! 試算，只列使用者設了目標的個股；成分資料超過 [`STALE_COMPONENT_DAYS`] 天的 ETF 不計入並註明。
 
+use crate::domain::portfolio::view::HoldingView;
+use jiff::ToSpan;
 use std::collections::HashSet;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::domain::portfolio::{
     rebalance::{
         CurrentPosition, EtfLookThroughComponent, PortfolioPositionQuery, PortfolioRebalanceResult,
         RebalanceParams, calculate_rebalance,
     },
-    target::{PortfolioTargetRepository, TargetDimension},
+    target::{PortfolioTargetRepository, TargetDimension, TargetOwner},
 };
 
 /// ETF 成分資料超過這麼多天（日曆天）未更新就視為過舊，不計入穿透。
@@ -25,9 +27,6 @@ pub(super) const TOLERANCE_PERCENT: f64 = 2.0;
 
 /// 每個維度最多列出的偏離項目數。
 const MAX_ITEMS: usize = 5;
-
-/// 週報提醒的預設組合。
-const MEMBER_ID: i64 = 0;
 
 /// 偏離方向：目前權重高於目標建議減碼，低於目標建議加碼。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,9 +122,9 @@ pub(super) fn section_from_result(result: &PortfolioRebalanceResult) -> Option<A
 fn fresh_components(
     held: &[CurrentPosition],
     components: Vec<crate::domain::portfolio::rebalance::DatedEtfComponent>,
-    today: NaiveDate,
+    today: Date,
 ) -> (Vec<EtfLookThroughComponent>, Vec<String>) {
-    let oldest = today - chrono::Duration::days(STALE_COMPONENT_DAYS);
+    let oldest = today - (STALE_COMPONENT_DAYS).days();
     let mut fresh_etfs = HashSet::new();
     let fresh: Vec<EtfLookThroughComponent> = components
         .into_iter()
@@ -151,7 +150,7 @@ async fn etf_look_through_section(
     targets: &[(String, f64)],
     held: &[CurrentPosition],
     params: &RebalanceParams,
-    today: NaiveDate,
+    today: Date,
 ) -> Option<AllocationSection> {
     let etf_symbols: Vec<String> = held
         .iter()
@@ -193,12 +192,17 @@ async fn etf_look_through_section(
 
 /// 載入預設組合的目標與持股，試算個股、產業與 ETF 穿透維度的偏離；任何一步失敗只記警告並略過該維度。
 /// `today` 用來判斷 ETF 成分資料是否過舊。
+///
+/// 目標與持股都依收件者範圍（會員系統計畫 7.6）：含家庭成員時為該家庭的全家目標與全家持股，
+/// 只含本人時為本人的目標與本人的持股。
 pub(super) async fn allocation_sections(
     targets: &impl PortfolioTargetRepository,
     positions: &impl PortfolioPositionQuery,
-    today: NaiveDate,
+    view: &HoldingView,
+    today: Date,
 ) -> Vec<AllocationSection> {
-    let records = match targets.list_targets(&MEMBER_ID.to_string(), None).await {
+    let owner = TargetOwner::new(view.household_id(), view.member_id_or_total().to_string());
+    let records = match targets.list_targets(&owner, None).await {
         Ok(records) => records,
         Err(why) => {
             tracing::warn!("每週市場摘要：讀取目標配置失敗: {why:#}");
@@ -213,7 +217,7 @@ pub(super) async fn allocation_sections(
         .filter(|record| record.dimension == TargetDimension::Stock)
         .map(|record| record.key.clone())
         .collect();
-    let held = match positions.fetch_positions(MEMBER_ID, &extra).await {
+    let held = match positions.fetch_positions(view, &extra).await {
         Ok(held) => held,
         Err(why) => {
             tracing::warn!("每週市場摘要：讀取持股部位失敗: {why:#}");

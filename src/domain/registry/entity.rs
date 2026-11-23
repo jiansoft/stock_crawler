@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::domain::events::DomainEvent;
-use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 
 /// <summary>
@@ -41,7 +41,7 @@ pub struct Stock {
     net_asset_value_per_share: Decimal,
     weight: Decimal,
     return_on_equity: Decimal,
-    created_time: DateTime<Local>,
+    created_time: TaipeiDateTime,
     market_id: i32,
     industry_id: i32,
     issued_share: i64,
@@ -58,7 +58,7 @@ impl Stock {
     /// 此方法會自動觸發 `DomainEvent::StockRegistered` 事件。
     /// </summary>
     pub fn register(symbol: String, name: String, market_id: i32, industry_id: i32) -> Self {
-        let occurred_at = Local::now();
+        let occurred_at = TaipeiDateTime::now();
         let mut stock = Stock {
             symbol: StockSymbol(symbol.clone()),
             name: name.clone(),
@@ -98,7 +98,7 @@ impl Stock {
         net_asset_value_per_share: Decimal,
         weight: Decimal,
         return_on_equity: Decimal,
-        created_time: DateTime<Local>,
+        created_time: TaipeiDateTime,
         market_id: i32,
         industry_id: i32,
         issued_share: i64,
@@ -144,7 +144,7 @@ impl Stock {
                 new_market_id: market_id,
                 old_industry_id: old_industry,
                 new_industry_id: industry_id,
-                occurred_at: Local::now(),
+                occurred_at: TaipeiDateTime::now(),
             });
         }
     }
@@ -161,7 +161,7 @@ impl Stock {
                 symbol: self.symbol.0.clone(),
                 old_nav,
                 new_nav,
-                occurred_at: Local::now(),
+                occurred_at: TaipeiDateTime::now(),
             });
         }
     }
@@ -228,7 +228,7 @@ impl Stock {
     pub fn return_on_equity(&self) -> Decimal {
         self.return_on_equity
     }
-    pub fn created_time(&self) -> DateTime<Local> {
+    pub fn created_time(&self) -> TaipeiDateTime {
         self.created_time
     }
     pub fn market_id(&self) -> i32 {

@@ -8,19 +8,20 @@ mod dividends;
 mod edge_cases;
 
 use super::*;
-use chrono::Duration;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 /// 建立測試用日期。
-pub(super) fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
+pub(super) fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("測試日期應合法")
 }
 
 /// 建立除權息事件；日期為 `None` 表示該項不存在。
 pub(super) fn event(
-    cash_date: Option<NaiveDate>,
+    cash_date: Option<Date>,
     cash: Decimal,
-    stock_date: Option<NaiveDate>,
+    stock_date: Option<Date>,
     stock: Decimal,
 ) -> DividendEvent {
     DividendEvent {
@@ -34,8 +35,8 @@ pub(super) fn event(
 
 /// 建立模擬輸入的輔助結構（避免每個測試重複填欄位）。
 pub(super) struct Case<'a> {
-    pub(super) base_date: NaiveDate,
-    pub(super) end_date: NaiveDate,
+    pub(super) base_date: Date,
+    pub(super) end_date: Date,
     pub(super) base_price: Decimal,
     pub(super) end_price: Decimal,
     pub(super) events: &'a [DividendEvent],
@@ -58,7 +59,7 @@ impl Case<'_> {
 }
 
 /// 建立一筆公司行動。
-pub(super) fn corporate_action(effective_date: NaiveDate, share_ratio: Decimal) -> CorporateAction {
+pub(super) fn corporate_action(effective_date: Date, share_ratio: Decimal) -> CorporateAction {
     CorporateAction {
         action_type: crate::domain::performance::CorporateActionType::Split,
         stock_symbol: "0050".to_string(),
@@ -73,7 +74,7 @@ pub(super) fn run_with_price(
     case: &Case<'_>,
     reinvest_price: Option<Decimal>,
 ) -> Option<SimulationResult> {
-    let lookup = move |_: NaiveDate| reinvest_price;
+    let lookup = move |_: Date| reinvest_price;
     let input = SimulationInput {
         principal: dec!(10000),
         base_date: case.base_date,

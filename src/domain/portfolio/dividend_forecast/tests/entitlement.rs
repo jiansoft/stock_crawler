@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::domain::portfolio::payout::PayoutAllocation;
+use jiff::civil::Date;
+use jiff::civil::date;
 
 #[allow(clippy::too_many_arguments)]
 fn allocation(
@@ -9,8 +11,8 @@ fn allocation(
     symbol: &str,
     quarter: &str,
     cash: Decimal,
-    ex_date: NaiveDate,
-    pay_date: NaiveDate,
+    ex_date: Date,
+    pay_date: Date,
     shares: i64,
     estimated: bool,
 ) -> PayoutAllocation {

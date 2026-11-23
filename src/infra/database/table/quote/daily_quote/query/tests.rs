@@ -1,4 +1,7 @@
+use crate::core::util::datetime::ymd;
 use crate::infra::cache::SHARE;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 use super::*;
 
@@ -11,7 +14,7 @@ use super::*;
 )]
 async fn fetch_market_traded_counts_counts_only_traded_rows() {
     dotenvy::dotenv().ok();
-    let date = NaiveDate::from_ymd_opt(1999, 3, 17).unwrap();
+    let date = date(1999, 3, 17);
     let pool = database::get_connection();
     let cleanup = || async {
         for sql in [
@@ -42,7 +45,7 @@ async fn fetch_market_traded_counts_counts_only_traded_rows() {
             r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
                VALUES ($1, $2, 10, $3)"#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .bind(symbol)
         .bind(volume)
         .execute(pool)
@@ -66,7 +69,7 @@ async fn fetch_market_traded_counts_counts_only_traded_rows() {
 async fn test_fetch_daily_quotes_by_date() {
     dotenvy::dotenv().ok();
     tracing::debug!("開始 fetch_daily_quotes_by_date");
-    let date = NaiveDate::from_ymd_opt(2023, 7, 31);
+    let date = ymd(2023, 7, 31);
     match fetch_daily_quotes_by_date(date.unwrap()).await {
         Ok(dqs) => {
             tracing::debug!("fetch_daily_quotes_by_date: {:#?}", dqs);
@@ -87,7 +90,7 @@ async fn test_fetch_daily_quotes_by_date() {
 async fn test_fetch_count_by_date() {
     dotenvy::dotenv().ok();
     tracing::debug!("開始 fetch_count_by_date");
-    let date = NaiveDate::from_ymd_opt(2023, 7, 31);
+    let date = ymd(2023, 7, 31);
     match fetch_count_by_date(date.unwrap()).await {
         Ok(count) => {
             tracing::debug!("count_by_date: {:?}", count);
@@ -109,12 +112,12 @@ async fn test_makeup_for_the_lack_daily_quotes() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    // 使用固定的歷史「真實交易日」驗證補列 SQL，避免以 Local::now()
+    // 使用固定的歷史「真實交易日」驗證補列 SQL，避免以 TaipeiDateTime::now()
     // （可能是週末或假日）為日期執行：當本機 .env 指向正式庫時，
     // 會整批複製前一交易日產生 0 成交量占位資料並污染正式資料
     // （2026-07-18 事件的根因之一）。歷史交易日的缺漏已補齊，
     // 重跑僅會插入 0 筆，冪等且無副作用。
-    let now = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+    let now = date(2026, 4, 30);
 
     tracing::debug!("開始 makeup_for_the_lack_daily_quotes");
 

@@ -1,7 +1,7 @@
 //! 股利的讀取查詢（依年度、代號、尚未公布日期與持有期間取出股利列）與配息日期更新。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local};
 use sqlx::{Row, postgres::PgRow};
 
 use super::PgDividendRepository;
@@ -178,7 +178,7 @@ pub(super) async fn fetch_unpublished_dividend_date_or_payable_date_for_specifie
 pub(super) async fn fetch_dividends_summary_by_date(
     security_code: &str,
     year: i32,
-    created_time: DateTime<Local>,
+    created_time: TaipeiDateTime,
 ) -> Result<Vec<Dividend>> {
     let sql = r#"
         SELECT
@@ -208,8 +208,12 @@ pub(super) async fn fetch_dividends_summary_by_date(
     let rows = sqlx::query(sql)
         .bind(security_code)
         .bind(year)
-        .bind(Local::now().format("%Y-%m-%d %H:%M:%S").to_string())
-        .bind(created_time.format("%Y-%m-%d %H:%M:%S").to_string())
+        .bind(
+            TaipeiDateTime::now()
+                .strftime("%Y-%m-%d %H:%M:%S")
+                .to_string(),
+        )
+        .bind(created_time.strftime("%Y-%m-%d %H:%M:%S").to_string())
         .try_map(PgDividendRepository::row_to_entity)
         .fetch_all(database::get_connection())
         .await

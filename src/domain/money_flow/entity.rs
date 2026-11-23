@@ -1,4 +1,6 @@
-use chrono::{DateTime, Local, NaiveDate};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 
 /// 大盤與個人帳戶市值總覽領域實體 (Aggregate Root)。
@@ -7,11 +9,11 @@ use rust_decimal::Decimal;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoneyFlow {
     /// 交易日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 建立時間
-    pub created_at: DateTime<Local>,
+    pub created_at: TaipeiDateTime,
     /// 最後更新時間
-    pub updated_at: DateTime<Local>,
+    pub updated_at: TaipeiDateTime,
     /// Unice 帳戶市值總額
     pub unice: Decimal,
     /// Eddie 帳戶市值總額
@@ -26,11 +28,11 @@ pub struct MoneyFlow {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoneyFlowDetail {
     /// 交易日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 建立時間
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
     /// 股票代號
     pub security_code: String,
     /// 持有總股數
@@ -65,11 +67,11 @@ pub struct MoneyFlowDetail {
 
 impl Default for MoneyFlowDetail {
     fn default() -> Self {
-        let ep = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        let ep = date(1970, 1, 1);
         MoneyFlowDetail {
             date: ep,
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
             security_code: String::new(),
             total_shares: 0,
             serial: 0,
@@ -99,9 +101,9 @@ pub struct MoneyFlowDetailMore {
     /// 會員識別碼
     pub member_id: i64,
     /// 統計日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 原始買入交易日期
-    pub transaction_date: NaiveDate,
+    pub transaction_date: Date,
     /// 股票代號
     pub security_code: String,
     /// 當日收盤價
@@ -119,14 +121,14 @@ pub struct MoneyFlowDetailMore {
     /// 此批次當日損益百分比
     pub profit_and_loss_percentage: Decimal,
     /// 建立時間
-    pub created_time: DateTime<Local>,
+    pub created_time: TaipeiDateTime,
     /// 最後更新時間
-    pub updated_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
 }
 
 impl Default for MoneyFlowDetailMore {
     fn default() -> Self {
-        let ep = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        let ep = date(1970, 1, 1);
         MoneyFlowDetailMore {
             serial: 0,
             member_id: 0,
@@ -140,8 +142,8 @@ impl Default for MoneyFlowDetailMore {
             market_value: Decimal::ZERO,
             profit_and_loss: Decimal::ZERO,
             profit_and_loss_percentage: Decimal::ZERO,
-            created_time: Local::now(),
-            updated_time: Local::now(),
+            created_time: TaipeiDateTime::now(),
+            updated_time: TaipeiDateTime::now(),
         }
     }
 }
@@ -152,15 +154,15 @@ impl Default for MoneyFlowDetailMore {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoneyFlowMember {
     /// 交易日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 會員編號；0 代表全體總合
     pub member_id: i64,
     /// 當日收盤市值總額
     pub market_value: Decimal,
     /// 建立時間
-    pub created_at: DateTime<Local>,
+    pub created_at: TaipeiDateTime,
     /// 最後更新時間
-    pub updated_at: DateTime<Local>,
+    pub updated_at: TaipeiDateTime,
 }
 
 /// 會員當日與前一交易日市值對照領域實體。
@@ -168,10 +170,12 @@ pub struct MoneyFlowMember {
 /// 封裝會員在當前交易日與前一交易日的市值，以便發送通知時快速比較市值增減幅度。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoneyFlowMemberWithPreviousDay {
+    /// 所屬家庭，讓合計與前日比較維持相同家庭邊界。
+    pub household_id: i64,
     /// 當日資料日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 前一個交易日日期
-    pub previous_date: Option<NaiveDate>,
+    pub previous_date: Option<Date>,
     /// 會員編號；0 代表全體總合
     pub member_id: i64,
     /// 當日收盤市值總額

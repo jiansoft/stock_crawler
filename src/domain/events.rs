@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local};
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 
 /// <summary>
@@ -20,7 +20,7 @@ pub enum DomainEvent {
         /// 產業分類識別代碼
         industry_id: i32,
         /// 事件發生時間
-        occurred_at: DateTime<Local>,
+        occurred_at: TaipeiDateTime,
     },
 
     /// <summary>
@@ -42,7 +42,7 @@ pub enum DomainEvent {
         /// 變更後的新產業代碼
         new_industry_id: i32,
         /// 事件發生時間
-        occurred_at: DateTime<Local>,
+        occurred_at: TaipeiDateTime,
     },
 
     /// <summary>
@@ -56,7 +56,7 @@ pub enum DomainEvent {
         /// 變更後的新淨值
         new_nav: Decimal,
         /// 事件發生時間
-        occurred_at: DateTime<Local>,
+        occurred_at: TaipeiDateTime,
     },
 
     /// <summary>
@@ -64,13 +64,13 @@ pub enum DomainEvent {
     /// </summary>
     StockIndexUpdated {
         /// 指數日期
-        date: chrono::NaiveDate,
+        date: jiff::civil::Date,
         /// 收盤指數值
         index: Decimal,
         /// 漲跌點數
         change: Decimal,
         /// 事件發生時間
-        occurred_at: DateTime<Local>,
+        occurred_at: TaipeiDateTime,
     },
 
     /// <summary>
@@ -78,9 +78,9 @@ pub enum DomainEvent {
     /// </summary>
     MoneyFlowRecalculated {
         /// 市值重算的基準日期
-        date: chrono::NaiveDate,
+        date: jiff::civil::Date,
         /// 事件發生時間
-        occurred_at: DateTime<Local>,
+        occurred_at: TaipeiDateTime,
     },
 
     /// <summary>
@@ -88,11 +88,11 @@ pub enum DomainEvent {
     /// </summary>
     ExDividendReminderTriggered {
         /// 提醒基準日期 (今日交易日)
-        date: chrono::NaiveDate,
+        date: jiff::civil::Date,
         /// 下一個交易日日期
-        next_trading_date: chrono::NaiveDate,
+        next_trading_date: jiff::civil::Date,
         /// 事件發生時間
-        occurred_at: DateTime<Local>,
+        occurred_at: TaipeiDateTime,
     },
 
     /// <summary>
@@ -105,7 +105,7 @@ pub enum DomainEvent {
         /// 營收月份 (yyyyMM)
         date: i64,
         /// 事件發生時間
-        occurred_at: DateTime<Local>,
+        occurred_at: TaipeiDateTime,
     },
 
     /// <summary>
@@ -117,7 +117,7 @@ pub enum DomainEvent {
         /// 財報季度 (Q1, Q2, Q3, Q4)
         quarter: String,
         /// 事件發生時間
-        occurred_at: DateTime<Local>,
+        occurred_at: TaipeiDateTime,
     },
 
     /// <summary>
@@ -127,8 +127,8 @@ pub enum DomainEvent {
     /// 與月營收相同只帶日期，要通知哪些股票由 handler 依「目前持股」與趨勢門檻自行查詢。
     ForeignHoldingsUpdated {
         /// 趨勢基準日（外資持股資料日）
-        date: chrono::NaiveDate,
+        date: jiff::civil::Date,
         /// 事件發生時間
-        occurred_at: DateTime<Local>,
+        occurred_at: TaipeiDateTime,
     },
 }

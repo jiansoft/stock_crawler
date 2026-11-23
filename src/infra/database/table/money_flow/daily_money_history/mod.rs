@@ -1,5 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction, postgres::PgQueryResult};
 
@@ -9,11 +11,12 @@ use crate::infra::database;
 #[derive(sqlx::FromRow, Debug)]
 pub struct DailyMoneyHistory {
     /// 交易日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 建立時間。
-    pub created_at: DateTime<Local>,
+    pub created_at: TaipeiDateTime,
     /// 最後更新時間。
-    pub updated_at: DateTime<Local>,
+    pub updated_at: TaipeiDateTime,
     /// Unice 帳戶市值總額。
     pub unice: Decimal,
     /// Eddie 帳戶市值總額。
@@ -23,7 +26,7 @@ pub struct DailyMoneyHistory {
 }
 
 impl DailyMoneyHistory {
-    /* pub async fn fetch(date :NaiveDate) -> Result<> {
+    /* pub async fn fetch(date :Date) -> Result<> {
             let sql = format!("");
             sqlx::query_as::<_, DailyMoneyHistory>(&sql)
                 .bind(date.year())
@@ -39,13 +42,13 @@ impl DailyMoneyHistory {
     /// 依指定日期重算並寫入每日市值總覽。
     ///
     /// 會彙總 `stock_ownership_details` 與當日 `DailyQuotes` 的收盤價，
-    /// 寫入 `sum`、`eddie`（`member_id = 1`）與 `unice`（其餘 member）。
+    /// 僅彙總預設家庭中未刪除會員的持股，寫入 `sum`、`eddie`（`member_id = 1`）與 `unice`（其餘 member）。
     ///
     /// # Errors
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端傳入 transaction，
     /// 是否回滾由呼叫端決定。
     pub async fn upsert(
-        date: NaiveDate,
+        date: Date,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
@@ -56,6 +59,7 @@ WITH base_calc AS (
         od.member_id,
         (od.share_quantity * dq."ClosingPrice") AS market_value
     FROM stock_ownership_details od
+    INNER JOIN "Member" m ON m."Id" = od.member_id AND m.household_id = 1 AND m.deleted_at IS NULL
     INNER JOIN "DailyQuotes" dq ON od.security_code = dq."stock_symbol"
     WHERE od.is_sold = FALSE 
       AND od.date <= $1
@@ -75,7 +79,7 @@ ON CONFLICT (date) DO UPDATE SET
     updated_time = NOW();
 "#;
 
-        let query = sqlx::query(sql).bind(date);
+        let query = sqlx::query(sql).bind(date.to_sqlx());
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,

@@ -8,7 +8,7 @@
 //! [`visit_references`] 另外取每列的「開始交易基準價」，用來重算除權息日的漲跌。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
@@ -53,7 +53,7 @@ const THOUSAND: Decimal = Decimal::from_parts(1000, 0, 0, false, 0);
 /// # 錯誤
 ///
 /// HTTP 請求或 JSON 反序列化失敗、或回應沒有資料表時回傳錯誤。
-pub async fn visit(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExDividendAnnouncement>> {
+pub async fn visit(start: Date, end: Date) -> Result<Vec<ExDividendAnnouncement>> {
     parse_results(&fetch(start, end).await?)
 }
 
@@ -62,16 +62,16 @@ pub async fn visit(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExDividendAnn
 /// # 錯誤
 ///
 /// 與 [`visit`] 相同。
-pub async fn visit_references(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExRightReference>> {
+pub async fn visit_references(start: Date, end: Date) -> Result<Vec<ExRightReference>> {
     parse_references(&fetch(start, end).await?)
 }
 
-async fn fetch(start: NaiveDate, end: NaiveDate) -> Result<ExDailyQResponse> {
+async fn fetch(start: Date, end: Date) -> Result<ExDailyQResponse> {
     let url = format!(
         "https://{}/www/zh-tw/bulletin/exDailyQ?startDate={}&endDate={}&response=json",
         tpex::HOST,
-        start.format("%Y/%m/%d"),
-        end.format("%Y/%m/%d")
+        start.strftime("%Y/%m/%d"),
+        end.strftime("%Y/%m/%d")
     );
     http::get_json::<ExDailyQResponse>(&url)
         .await

@@ -1,5 +1,6 @@
 //! TWSE 上市除權除息預告表採集器的測試；連外的測試標 #[ignore]。
 
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -19,10 +20,7 @@ fn test_parse_announcements_with_fixture() {
 
     let first = &result[0];
     assert_eq!(first.stock_symbol, "00400A");
-    assert_eq!(
-        first.ex_date,
-        chrono::NaiveDate::from_ymd_opt(2026, 9, 7).unwrap()
-    );
+    assert_eq!(first.ex_date, date(2026, 9, 7));
     assert!(first.is_cash);
     assert!(!first.is_stock);
     assert_eq!(first.cash_dividend, Some(dec!(0.120000)));

@@ -1,5 +1,6 @@
 //! 國際證券識別碼回補的測試；連外的測試標 #[ignore]。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::infra::cache::SHARE;
 
 use super::*;
@@ -89,7 +90,6 @@ async fn test_execute() {
 
 /// 以本機 mock server 取代 TWSE ISIN 名冊頁（Big5），以固定日期跑排程入口與單一市場處理。
 mod mock_source {
-    use chrono::TimeZone;
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -99,18 +99,14 @@ mod mock_source {
     const ISIN: &str = "https://isin.twse.com.tw";
 
     /// 1999-03-10 是星期三。
-    fn wednesday() -> DateTime<Local> {
-        Local
-            .with_ymd_and_hms(1999, 3, 10, 5, 20, 0)
-            .single()
+    fn wednesday() -> TaipeiDateTime {
+        TaipeiDateTime::from_datetime(jiff::civil::date(1999, 3, 10).at(5, 20, 0, 0))
             .expect("合法時間")
     }
 
     /// 1999-03-13 是星期六。
-    fn saturday() -> DateTime<Local> {
-        Local
-            .with_ymd_and_hms(1999, 3, 13, 5, 20, 0)
-            .single()
+    fn saturday() -> TaipeiDateTime {
+        TaipeiDateTime::from_datetime(jiff::civil::date(1999, 3, 13).at(5, 20, 0, 0))
             .expect("合法時間")
     }
 

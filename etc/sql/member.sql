@@ -1,5 +1,7 @@
--- Member：舊版會員表（PascalCase 欄位；早期 stock_go 建立）。目前 stock_rust、stock_go、stock_api 皆未引用，保留結構以便重建正式庫。
--- 結構由 2026-10-19 正式庫 pg_dump --schema-only 導出。
+-- Member：會員表（PascalCase 欄位；早期 stock_go 建立）。stock_go 以 "Member" 取會員姓名
+-- （dividend_record_repository.go 的 LEFT JOIN "Member"），會員系統的認證欄位、家庭與群組
+-- 由 member_rbac_and_mcp_token.sql 以 ALTER TABLE 擴充（保留表名與既有欄位，零破壞）。
+-- 本檔是擴充前的原始結構，由 2026-10-19 正式庫 pg_dump --schema-only 導出；載入順序須在結構檔之前。
 
 CREATE TABLE public."Member" (
     "Id" bigint NOT NULL,

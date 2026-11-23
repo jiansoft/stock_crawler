@@ -93,7 +93,7 @@ pub async fn visit() -> Result<Vec<CorporateAction>> {
 ///
 /// 回傳結果依 `(代號, 生效日)` 排序，且每個鍵只會出現一次。
 fn parse_capital_reductions(response: RevivtResponse) -> Vec<CorporateAction> {
-    let mut latest: HashMap<(String, chrono::NaiveDate), CorporateAction> = HashMap::new();
+    let mut latest: HashMap<(String, jiff::civil::Date), CorporateAction> = HashMap::new();
 
     for table in response.tables {
         for row in table.data {

@@ -1,5 +1,7 @@
 //! 以本機 mock server 取代 TWSE、TPEx 與 Yahoo（G15）：除權息核對排程入口的完整流程。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -13,8 +15,8 @@ const YAHOO: &str = "https://tw.stock.yahoo.com";
 const POSTPONED: &str = "79979XR";
 const MISSING: &str = "79979XM";
 
-fn day(month: u32, day: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1991, month, day).expect("固定日期合法")
+fn day(month: u32, day: u32) -> Date {
+    ymd(1991, month, day).expect("固定日期合法")
 }
 
 /// TWT49U：兩檔 1991 年（民國 80 年）的純除息結果。

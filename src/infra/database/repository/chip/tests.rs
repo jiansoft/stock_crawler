@@ -1,5 +1,9 @@
 //! 籌碼倉儲的去重與各表寫入、連續天數重算測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -9,8 +13,8 @@ use crate::infra::database;
 /// 測試用的假代號；寫入後一律清除。
 const FAKE: &str = "79979CH";
 
-fn day() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 4, 30).expect("日期應合法")
+fn day() -> Date {
+    date(2026, 4, 30)
 }
 
 async fn cleanup() {
@@ -85,7 +89,7 @@ async fn saves_every_kind_of_chip_data() {
     let row: (Option<i64>, Option<i64>, Option<i64>) = sqlx::query_as(
         r#"SELECT foreign_net, trust_net, margin_balance FROM chip_daily WHERE "date" = $1 AND stock_symbol = $2"#,
     )
-    .bind(day())
+    .bind(day().to_sqlx())
     .bind(FAKE)
     .fetch_one(database::get_connection())
     .await
@@ -128,7 +132,7 @@ async fn saves_every_kind_of_chip_data() {
     let saved: (Option<i64>, Option<i64>, Option<rust_decimal::Decimal>) = sqlx::query_as(
         r#"SELECT holders_400, shares_400, percent_400 FROM holder_distribution WHERE "date" = $1 AND stock_symbol = $2"#,
     )
-    .bind(day())
+    .bind(day().to_sqlx())
     .bind(FAKE)
     .fetch_one(database::get_connection())
     .await
@@ -156,14 +160,14 @@ async fn saves_every_kind_of_chip_data() {
     let saved: Vec<(i16, i64, i64)> = sqlx::query_as(
         r#"SELECT level, holders, shares FROM holder_distribution_level WHERE "date" = $1 AND stock_symbol = $2 ORDER BY level"#,
     )
-    .bind(day())
+    .bind(day().to_sqlx())
     .bind(FAKE)
     .fetch_all(database::get_connection())
     .await
     .unwrap();
     assert_eq!(saved, [(12, 5, 2_500_000), (15, 50, 25_000_000)]);
 
-    let month = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
+    let month = date(2026, 4, 1);
     let insider = |name: &str, pledged| InsiderHoldingRecord {
         month,
         stock_symbol: FAKE.to_string(),
@@ -236,7 +240,7 @@ async fn refresh_streaks_counts_runs_and_resumes_from_previous_row() {
     }
     cleanup().await;
     let repo = PgChipRepository::new();
-    let d = |n: u32| NaiveDate::from_ymd_opt(2001, 1, n).expect("日期應合法");
+    let d = |n: u32| ymd(2001, 1, n).expect("日期應合法");
     let flow = |foreign, trust, dealer| InstitutionalNet {
         stock_symbol: FAKE.to_string(),
         foreign,
@@ -292,7 +296,7 @@ async fn refresh_streaks_counts_runs_and_resumes_from_previous_row() {
            WHERE stock_symbol = $1 AND "date" >= $2"#,
     )
     .bind(FAKE)
-    .bind(d(3))
+    .bind(d(3).to_sqlx())
     .execute(database::get_connection())
     .await
     .unwrap();
@@ -318,7 +322,7 @@ async fn reads_recent_holder_weeks() {
     }
     cleanup().await;
     let repo = PgChipRepository::new();
-    let friday = |month, day| NaiveDate::from_ymd_opt(2019, month, day).expect("日期應合法");
+    let friday = |month, day| ymd(2019, month, day).expect("日期應合法");
     let records: Vec<HolderDistributionRecord> = [
         (friday(3, 8), 10),
         (friday(3, 15), 11),

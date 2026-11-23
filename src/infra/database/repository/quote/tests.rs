@@ -1,6 +1,8 @@
 use super::*;
 use crate::domain::quote::entity::LastDailyQuote;
-use chrono::Datelike;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
 mod round_trip;
@@ -35,7 +37,7 @@ async fn test_cache_aside_flow() {
 
     // 建立測試用的最新收盤價領域對象
     let test_quote = LastDailyQuote {
-        date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+        date: date(2026, 6, 8),
         stock_symbol: test_symbol.to_string(),
         closing_price: dec!(99.9),
     };
@@ -108,8 +110,8 @@ async fn insert_missing_daily_quotes_maps_and_fills_gaps() {
 
     // 固定歷史日期 + 假代號，避免碰到任何真實資料。
     const SYMBOL: &str = "79978";
-    let day1 = NaiveDate::from_ymd_opt(1970, 1, 1).expect("測試日期應合法");
-    let day2 = NaiveDate::from_ymd_opt(1970, 1, 2).expect("測試日期應合法");
+    let day1 = date(1970, 1, 1);
+    let day2 = date(1970, 1, 2);
     let cleanup = || async {
         let _ = sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE "stock_symbol" = $1"#)
             .bind(SYMBOL)
@@ -118,10 +120,10 @@ async fn insert_missing_daily_quotes_maps_and_fills_gaps() {
     };
     cleanup().await;
 
-    let quote = |date: NaiveDate| DomainDailyQuote {
+    let quote = |date: Date| DomainDailyQuote {
         stock_symbol: SYMBOL.to_string(),
         date,
-        year: date.year(),
+        year: i32::from(date.year()),
         month: date.month() as i32,
         day: date.day() as i32,
         closing_price: dec!(10),
@@ -150,8 +152,8 @@ async fn insert_missing_daily_quotes_maps_and_fills_gaps() {
         r#"SELECT count(*) FROM "DailyQuotes" WHERE "stock_symbol" = $1 AND "Date" IN ($2, $3)"#,
     )
     .bind(SYMBOL)
-    .bind(day1)
-    .bind(day2)
+    .bind(day1.to_sqlx())
+    .bind(day2.to_sqlx())
     .fetch_one(database::get_connection())
     .await
     .expect("應查得到寫入的資料");

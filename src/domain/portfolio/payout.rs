@@ -3,7 +3,7 @@
 //! 已除權息的取除權息當天寫入的已領股利明細（除權息後才賣出、尚未發放的也算）；還沒除權息的以
 //! 目前未賣出持股推算並標 `estimated`。Data API `/portfolio/upcoming-payouts` 與入帳通知共用。
 
-use chrono::{Datelike, NaiveDate};
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
@@ -23,13 +23,13 @@ pub struct PayoutAllocation {
     /// 每股股票股利（元）。
     pub stock_dividend: Decimal,
     /// 現金股利發放日。
-    pub cash_payable: Option<NaiveDate>,
+    pub cash_payable: Option<Date>,
     /// 股票股利發放日。
-    pub stock_payable: Option<NaiveDate>,
+    pub stock_payable: Option<Date>,
     /// 除息日。
-    pub cash_ex: Option<NaiveDate>,
+    pub cash_ex: Option<Date>,
     /// 除權日。
-    pub stock_ex: Option<NaiveDate>,
+    pub stock_ex: Option<Date>,
     /// 參與分配的股數。
     pub shares: i64,
     /// 現金股利金額（元）。
@@ -46,7 +46,7 @@ pub struct DividendPayout {
     /// 會員編號；[`merge_members`] 合併後為 0。
     pub member_id: i64,
     /// 發放日。
-    pub payable_date: NaiveDate,
+    pub payable_date: Date,
     /// 股票代號。
     pub stock_symbol: String,
     /// 股票名稱。
@@ -54,7 +54,7 @@ pub struct DividendPayout {
     /// 季別（年度合計列為空字串）。
     pub quarter: String,
     /// 這次入帳對應的除權息日（現金取除息日、股票取除權日，缺的時候取另一個）。
-    pub ex_date: Option<NaiveDate>,
+    pub ex_date: Option<Date>,
     /// 參與分配的股數。
     pub shares: i64,
     /// 這天入帳的每股現金股利；這天沒有現金入帳時為 0。
@@ -74,10 +74,10 @@ pub struct DividendPayout {
 /// 金額為 0 或配股不足一股的部分不列。結果依發放日、代號、季別、會員排序。
 pub fn split_by_payable_date(
     allocations: &[PayoutAllocation],
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
 ) -> Vec<DividendPayout> {
-    let in_range = |date: Option<NaiveDate>| date.filter(|date| (from..=to).contains(date));
+    let in_range = |date: Option<Date>| date.filter(|date| (from..=to).contains(date));
     let mut payouts = Vec::with_capacity(allocations.len());
     for allocation in allocations {
         let cash =
@@ -153,11 +153,7 @@ pub struct MonthlyIncome {
 
 /// 把 `year` 年的入帳依發放月份加總成 1～12 月（沒有入帳的月份為 0）；發放日不晚於 `as_of` 的算已入帳，
 /// 其他年份的入帳不計。
-pub fn monthly_income(
-    payouts: &[DividendPayout],
-    year: i32,
-    as_of: NaiveDate,
-) -> Vec<MonthlyIncome> {
+pub fn monthly_income(payouts: &[DividendPayout], year: i32, as_of: Date) -> Vec<MonthlyIncome> {
     let mut months: Vec<MonthlyIncome> = (1..=12)
         .map(|month| MonthlyIncome {
             month,
@@ -166,9 +162,9 @@ pub fn monthly_income(
         .collect();
     for payout in payouts
         .iter()
-        .filter(|payout| payout.payable_date.year() == year)
+        .filter(|payout| i32::from(payout.payable_date.year()) == year)
     {
-        let month = &mut months[payout.payable_date.month0() as usize];
+        let month = &mut months[usize::from(payout.payable_date.month().unsigned_abs()) - 1];
         month.cash_amount += payout.cash_amount;
         if payout.payable_date <= as_of {
             month.received_cash_amount += payout.cash_amount;
@@ -185,8 +181,8 @@ pub fn monthly_income(
 /// 金額與股利都是 0 的入帳骨架，呼叫端再填這天入帳的部分。
 fn empty_payout(
     allocation: &PayoutAllocation,
-    payable_date: NaiveDate,
-    ex_date: Option<NaiveDate>,
+    payable_date: Date,
+    ex_date: Option<Date>,
 ) -> DividendPayout {
     DividendPayout {
         member_id: allocation.member_id,
@@ -214,7 +210,7 @@ fn same_payout(a: &DividendPayout, b: &DividendPayout) -> bool {
         && a.stock_dividend == b.stock_dividend
 }
 
-fn sort_key(payout: &DividendPayout) -> (NaiveDate, &str, &str, i64) {
+fn sort_key(payout: &DividendPayout) -> (Date, &str, &str, i64) {
     (
         payout.payable_date,
         payout.stock_symbol.as_str(),

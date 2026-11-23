@@ -4,7 +4,7 @@
 use anyhow::{Result, anyhow};
 use axum::Json;
 use axum::response::IntoResponse;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use crate::domain::performance::CagrPeriod;
 
@@ -31,8 +31,8 @@ pub(super) fn start_job_error_response(err: StartJobError) -> axum::response::Re
 
 /// 解析 HTTP request 的日期欄位，格式錯誤時回傳一致的 400 response。
 #[allow(clippy::result_large_err)]
-pub(super) fn parse_request_date(date: &str) -> Result<NaiveDate, axum::response::Response> {
-    NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").map_err(|why| {
+pub(super) fn parse_request_date(date: &str) -> Result<Date, axum::response::Response> {
+    Date::strptime("%Y-%m-%d", date.trim()).map_err(|why| {
         (
             axum::http::StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -45,9 +45,9 @@ pub(super) fn parse_request_date(date: &str) -> Result<NaiveDate, axum::response
 
 /// 解析 HTTP request 的月份欄位（`YYYY-MM`），回傳該月第一天。
 #[allow(clippy::result_large_err)]
-pub(super) fn parse_request_month(month: &str) -> Result<NaiveDate, axum::response::Response> {
+pub(super) fn parse_request_month(month: &str) -> Result<Date, axum::response::Response> {
     // `<input type="month">` 送出的是 `YYYY-MM`，補上第一天才能解析成日期。
-    NaiveDate::parse_from_str(&format!("{}-01", month.trim()), "%Y-%m-%d").map_err(|why| {
+    Date::strptime("%Y-%m-%d", format!("{}-01", month.trim())).map_err(|why| {
         (
             axum::http::StatusCode::BAD_REQUEST,
             Json(ErrorResponse {

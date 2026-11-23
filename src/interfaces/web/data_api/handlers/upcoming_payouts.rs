@@ -3,19 +3,22 @@
 //! 查詢與依發放日拆分在 [`crate::domain::portfolio::payout`] 與 `PgPortfolioRepository`
 //! （入帳通知共用）；這裡只驗證參數、合併會員並轉成 JSON。
 
+use crate::core::util::datetime::today;
 use axum::{
-    Json,
+    Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Days, Local, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
 use super::{error_response, repository_error};
 use crate::domain::portfolio::payout::{self, DividendPayout};
 use crate::domain::portfolio::repository::PortfolioRepository;
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database::repository::portfolio::PgPortfolioRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, UpcomingPayoutItem, UpcomingPayoutsParams, UpcomingPayoutsResponse,
@@ -31,20 +34,21 @@ use crate::interfaces::web::data_api::dto::{
 /// `member_id` 為負數或 `days` 不在 1–90 回 422、驗證失敗回 401；查詢失敗時記錄內部錯誤並回不含
 /// SQL 細節的 500。沒有入帳時回 200 與空清單。
 #[utoipa::path(get, path = "/api/v1/portfolio/upcoming-payouts", tag = "data-api", params(UpcomingPayoutsParams), responses((status = 200, body = UpcomingPayoutsResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn upcoming_payouts(Query(params): Query<UpcomingPayoutsParams>) -> Response {
-    let member_id = params.member_id.unwrap_or(0);
-    if member_id < 0 {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
-    }
+pub(crate) async fn upcoming_payouts(
+    Extension(view): Extension<HoldingView>,
+    Query(params): Query<UpcomingPayoutsParams>,
+) -> Response {
+    // 範圍由 scope middleware 驗證後放進 extension（家庭全體或單一成員，7.6 N2）。
+    let member_id = view.member_id_or_total();
     let days = params.days.unwrap_or(30);
     if !(1..=90).contains(&days) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "days 必須介於 1 至 90");
     }
-    let today = Local::now().date_naive();
-    let to = today + Days::new(u64::from(days) - 1);
+    let today = today();
+    let to = today + (i64::from(days) - 1).days();
 
     let allocations = match PgPortfolioRepository::new()
-        .fetch_payout_allocations(member_id, today, to, today)
+        .fetch_payout_allocations(&view, today, to, today)
         .await
     {
         Ok(allocations) => allocations,
@@ -57,8 +61,8 @@ pub(crate) async fn upcoming_payouts(Query(params): Query<UpcomingPayoutsParams>
 /// 組出回應：入帳已依發放日、代號排序並合併會員，金額轉成 JSON 用的小數。
 pub(super) fn build_response(
     member_id: i64,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
     payouts: &[DividendPayout],
 ) -> UpcomingPayoutsResponse {
     UpcomingPayoutsResponse {

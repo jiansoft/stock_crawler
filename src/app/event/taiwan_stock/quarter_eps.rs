@@ -9,6 +9,7 @@
 //! 上市/上櫃公司的季報申報截止日與「季末隔天起即可預抓」規則推導目標季度清單，
 //! 避免在截止日前過早切換主季度，同時也能提早收錄已公告的下一季資料。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::collections::HashSet;
 
 use crate::{
@@ -21,7 +22,6 @@ use crate::{
     infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::Result;
-use chrono::Local;
 use scopeguard::defer;
 
 /// <summary>
@@ -33,7 +33,8 @@ pub async fn execute() -> Result<()> {
        tracing::info!("更新台股季度財報結束");
     }
 
-    for target_report in util::datetime::eps_report_quarter_targets_for_listed_and_otc(Local::now())
+    for target_report in
+        util::datetime::eps_report_quarter_targets_for_listed_and_otc(TaipeiDateTime::now())
     {
         if let Err(why) = process_target_report(target_report).await {
             tracing::error!(

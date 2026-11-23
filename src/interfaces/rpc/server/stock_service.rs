@@ -95,7 +95,7 @@ impl StockService for StockServiceImpl {
             Ok(holidays) => holidays
                 .iter()
                 .map(|holiday| HolidaySchedule {
-                    date: holiday.date.format("%Y-%m-%d").to_string(),
+                    date: holiday.date.strftime("%Y-%m-%d").to_string(),
                     why: holiday.why.to_string(),
                 })
                 .collect(),

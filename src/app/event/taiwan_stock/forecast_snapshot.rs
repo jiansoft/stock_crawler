@@ -4,8 +4,9 @@
 //!
 //! 同一天重跑時整批替換；沒有持股的會員不記錄。
 
+use crate::core::util::datetime::today;
 use anyhow::Result;
-use chrono::{Local, NaiveDate};
+use jiff::civil::Date;
 
 use crate::{
     domain::portfolio::dividend_forecast, infra::database::repository::portfolio::forecast,
@@ -20,16 +21,17 @@ const MONTHS: u32 = 12;
 ///
 /// 查詢持股、配息或寫入快照失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let count = record(Local::now().date_naive()).await?;
+    let count = record(today()).await?;
     tracing::info!("股利預估快照寫入 {count} 筆");
     Ok(())
 }
 
 /// 以 `today` 為快照日，依各會員目前持股預估未來 [`MONTHS`] 個月並整批寫入，回傳寫入筆數。
-async fn record(today: NaiveDate) -> Result<u64> {
+async fn record(today: Date) -> Result<u64> {
     let mut items = Vec::new();
-    for member_id in forecast::fetch_member_ids().await? {
-        let inputs = forecast::load_inputs(member_id, today, MONTHS).await?;
+    for view in forecast::fetch_member_views().await? {
+        let inputs = forecast::load_inputs(&view, today, MONTHS).await?;
+        let member_id = view.member_id_or_total();
         let result = dividend_forecast::forecast(
             &inputs.holdings,
             &inputs.events,

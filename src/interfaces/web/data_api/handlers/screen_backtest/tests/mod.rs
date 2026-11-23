@@ -6,6 +6,8 @@ use super::sql::{BACKTEST_SQL, BACKTEST_WITH_CHIP_SQL};
 use super::summary::{compound, risk};
 use super::validate::{parse_excluded_industries, resolve_backtest_period, validate_fundamentals};
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 
 mod costs;
 mod holdings;
@@ -16,8 +18,8 @@ mod summary;
 mod validation;
 mod weights;
 
-fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("有效日期")
+fn day(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("有效日期")
 }
 
 fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
@@ -47,7 +49,7 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
 }
 
 /// 指定年月日與 0050 報酬的一期。
-fn dated(date: NaiveDate, avg: Option<f64>, benchmark: f64, etf: Option<f64>) -> PeriodRow {
+fn dated(date: Date, avg: Option<f64>, benchmark: f64, etf: Option<f64>) -> PeriodRow {
     PeriodRow {
         entry_date: None,
         date,

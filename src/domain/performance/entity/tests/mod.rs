@@ -8,8 +8,10 @@ mod periods;
 mod records;
 
 use super::*;
+use crate::core::util::datetime::ymd;
 use crate::core::util::map::Keyable;
+use jiff::civil::Date;
 
-pub(super) fn date(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
+pub(super) fn date(y: i32, m: u32, d: u32) -> Date {
+    ymd(y, m, d).expect("測試日期應合法")
 }

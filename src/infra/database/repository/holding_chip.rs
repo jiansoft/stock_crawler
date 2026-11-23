@@ -4,9 +4,12 @@
 //! 介面與持股推算規則見 [`crate::domain::portfolio::chip::HoldingChipQuery`]；stock_go 的持股籌碼頁用的是
 //! 同一段 SQL。
 
+use crate::domain::portfolio::view::HoldingView;
+use crate::infra::database::repository::holding_view;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 use sqlx::types::Json;
 
@@ -46,7 +49,7 @@ SELECT d.d,
 FROM d
 "#;
 
-/// `$1` 交易日：當天收盤時仍持有的普通股（只有數字、不是 00 開頭）與當天籌碼。
+/// `$1` 交易日、`$2` 範圍內的會員編號：當天收盤時仍持有的普通股（只有數字、不是 00 開頭）與當天籌碼。
 ///
 /// 已賣出批次的 `sell_history_serial` 多半沒有回填，賣出日取同會員、同代號、買進日之後最早一筆
 /// 未撤銷的賣出紀錄；找不到時視為買進當天就不再持有。
@@ -55,6 +58,7 @@ WITH held AS (
     SELECT DISTINCT s.security_code AS stock_symbol
     FROM stock_ownership_details s
     WHERE s.date <= $1::date
+      AND s.member_id = ANY($2)
       AND s.security_code ~ '^[0-9]+$' AND s.security_code NOT LIKE '00%'
       AND (NOT s.is_sold OR COALESCE((
             SELECT MIN(h.date) FROM sell_history h
@@ -132,13 +136,26 @@ impl From<HoldingChipRow> for HoldingChip {
 
 #[async_trait]
 impl HoldingChipQuery for PgPortfolioRepository {
-    async fn resolve_chip_day(&self, date: Option<NaiveDate>) -> Result<Option<ChipTradingDay>> {
-        let row: (Option<NaiveDate>, Option<NaiveDate>, Option<NaiveDate>) =
-            sqlx::query_as(RESOLVE_DAY_SQL)
-                .bind(date)
-                .fetch_one(database::get_connection())
-                .await
-                .context("Failed to resolve chip trading day")?;
+    async fn resolve_chip_day(&self, date: Option<Date>) -> Result<Option<ChipTradingDay>> {
+        let row: (Option<Date>, Option<Date>, Option<Date>) = sqlx::query_as::<
+            _,
+            (
+                Option<jiff_sqlx::Date>,
+                Option<jiff_sqlx::Date>,
+                Option<jiff_sqlx::Date>,
+            ),
+        >(RESOLVE_DAY_SQL)
+        .bind(date.map(ToSqlx::to_sqlx))
+        .fetch_one(database::get_connection())
+        .await
+        .map(|(c0, c1, c2)| {
+            (
+                crate::infra::database::jiff_types::from_wire(c0),
+                crate::infra::database::jiff_types::from_wire(c1),
+                crate::infra::database::jiff_types::from_wire(c2),
+            )
+        })
+        .context("Failed to resolve chip trading day")?;
         Ok(row.0.map(|date| ChipTradingDay {
             date,
             previous: row.1,
@@ -146,9 +163,15 @@ impl HoldingChipQuery for PgPortfolioRepository {
         }))
     }
 
-    async fn fetch_holding_chips(&self, date: NaiveDate) -> Result<Vec<HoldingChip>> {
+    async fn fetch_holding_chips(
+        &self,
+        date: Date,
+        view: &HoldingView,
+    ) -> Result<Vec<HoldingChip>> {
+        let members = holding_view::member_ids(view).await?;
         let rows: Vec<HoldingChipRow> = sqlx::query_as(HOLDING_CHIP_SQL)
-            .bind(date)
+            .bind(date.to_sqlx())
+            .bind(&members)
             .fetch_all(database::get_connection())
             .await
             .context("Failed to fetch holding chips")?;
@@ -158,24 +181,29 @@ impl HoldingChipQuery for PgPortfolioRepository {
 
 #[async_trait]
 impl HoldingBrokerQuery for PgPortfolioRepository {
-    async fn fetch_broker_dates(&self, until: NaiveDate, limit: usize) -> Result<Vec<NaiveDate>> {
-        sqlx::query_scalar(BROKER_DATES_SQL)
-            .bind(until)
+    async fn fetch_broker_dates(&self, until: Date, limit: usize) -> Result<Vec<Date>> {
+        sqlx::query_scalar::<_, jiff_sqlx::Date>(BROKER_DATES_SQL)
+            .bind(until.to_sqlx())
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .fetch_all(database::get_connection())
             .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(crate::infra::database::jiff_types::from_wire)
+                    .collect::<Vec<_>>()
+            })
             .context("Failed to fetch broker flow dates")
     }
 
     async fn fetch_broker_period(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         symbols: &[String],
     ) -> Result<Vec<BrokerPeriodNet>> {
         let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(BROKER_PERIOD_SQL)
-            .bind(from)
-            .bind(to)
+            .bind(from.to_sqlx())
+            .bind(to.to_sqlx())
             .bind(symbols)
             .fetch_all(database::get_connection())
             .await

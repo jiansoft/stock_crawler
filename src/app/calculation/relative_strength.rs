@@ -4,10 +4,11 @@
 //! `daily_relative_strength`（見 [`crate::domain::quote::relative_strength`]）。當天報酬還沒齊
 //! （全體計分退回前一個交易日）或不是交易日時不寫入。
 
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use chrono::{Days, NaiveDate};
 
 use crate::domain::quote::relative_strength::{
     RelativeStrengthQuery, RelativeStrengthRepository, ScoredUniverseQuery, crossing_signals,
@@ -19,7 +20,7 @@ use crate::infra::database::repository::quote::PgQuoteRepository;
 /// # Errors
 ///
 /// 查詢或寫入失敗時回傳錯誤。
-pub async fn calculate_relative_strength(date: NaiveDate) -> Result<u64> {
+pub async fn calculate_relative_strength(date: Date) -> Result<u64> {
     run(&PgQuoteRepository::new(), date).await
 }
 
@@ -29,7 +30,7 @@ pub async fn calculate_relative_strength(date: NaiveDate) -> Result<u64> {
 /// [`crossing_signals`]），供訊號選股與訊號績效使用。
 pub(crate) async fn run(
     repo: &(impl ScoredUniverseQuery + RelativeStrengthQuery + RelativeStrengthRepository),
-    date: NaiveDate,
+    date: Date,
 ) -> Result<u64> {
     let Some((data_date, scored)) = repo
         .fetch_scored_universe(date)
@@ -46,7 +47,7 @@ pub(crate) async fn run(
         .map(|stock| stock.row.stock_symbol.clone())
         .collect();
     let previous: HashMap<String, u8> = repo
-        .fetch_relative_strength(date - Days::new(1), 1, &symbols)
+        .fetch_relative_strength(date - 1.days(), 1, &symbols)
         .await
         .context("讀取前一個交易日的相對強度失敗")?
         .into_iter()

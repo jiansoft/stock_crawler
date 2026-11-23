@@ -5,9 +5,10 @@
 //!
 //! 只在 `cfg(test)` 下編譯，不會進入正式產物。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::ymd;
 use std::collections::HashMap;
 
-use chrono::{Local, NaiveDate, TimeZone};
 use rust_decimal::Decimal;
 
 use crate::{
@@ -32,7 +33,7 @@ pub(super) fn announcement(
     ExDividendAnnouncement {
         stock_symbol: symbol.to_string(),
         name: symbol.to_string(),
-        ex_date: NaiveDate::from_ymd_opt(ex_date.0, ex_date.1, ex_date.2).unwrap(),
+        ex_date: ymd(ex_date.0, ex_date.1, ex_date.2).unwrap(),
         is_cash,
         is_stock,
         cash_dividend: cash,
@@ -84,7 +85,8 @@ pub(super) fn existing_row(
     ex_cash: &str,
     payable_cash: &str,
 ) -> Dividend {
-    let created = Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    let created = TaipeiDateTime::from_datetime(jiff::civil::date(2026, 1, 1).at(0, 0, 0, 0))
+        .expect("合法時間");
     Dividend {
         serial,
         year,
@@ -148,11 +150,11 @@ pub(super) fn schedule(
     DividendSchedule {
         stock_symbol: symbol.to_string(),
         name: symbol.to_string(),
-        ex_date: NaiveDate::from_ymd_opt(ex_date.0, ex_date.1, ex_date.2).unwrap(),
+        ex_date: ymd(ex_date.0, ex_date.1, ex_date.2).unwrap(),
         is_cash: true,
         is_stock: false,
         cash_dividend: None,
         stock_dividend: None,
-        cash_payable_date: NaiveDate::from_ymd_opt(payable.0, payable.1, payable.2),
+        cash_payable_date: ymd(payable.0, payable.1, payable.2),
     }
 }

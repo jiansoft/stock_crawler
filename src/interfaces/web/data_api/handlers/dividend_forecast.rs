@@ -4,15 +4,16 @@
 //! [`crate::infra::database::repository::portfolio::forecast::load_inputs`] 讀取（每月快照排程共用），
 //! 預估規則在 [`crate::domain::portfolio::dividend_forecast`]。
 
+use crate::core::util::datetime::today;
+use jiff::civil::Date;
 use std::collections::HashMap;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::dividend_fill::summary_dto;
@@ -20,6 +21,7 @@ use super::market_dividend_fill::bucket_dto;
 use super::{error_response, repository_error};
 use crate::app::calculation::dividend_fill_hints::FillHints;
 use crate::domain::portfolio::dividend_forecast;
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database::repository::portfolio::forecast::{self, ForecastInputs};
 use crate::interfaces::web::data_api::dto::{
     DividendForecastItem, DividendForecastParams, DividendForecastResponse, ErrorBody,
@@ -36,17 +38,18 @@ use crate::interfaces::web::data_api::dto::{
 /// `member_id` 為負數或 `months` 不在 1–24 回 422、驗證失敗回 401；資料庫查詢失敗時
 /// 記錄內部錯誤並回不含 SQL 細節的 500。沒有持股時回 200 與 0。
 #[utoipa::path(get, path = "/api/v1/portfolio/dividend-forecast", tag = "data-api", params(DividendForecastParams), responses((status = 200, body = DividendForecastResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn dividend_forecast(Query(params): Query<DividendForecastParams>) -> Response {
-    let member_id = params.member_id.unwrap_or(0);
-    if member_id < 0 {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
-    }
+pub(crate) async fn dividend_forecast(
+    Extension(view): Extension<HoldingView>,
+    Query(params): Query<DividendForecastParams>,
+) -> Response {
+    // 範圍由 scope middleware 驗證後放進 extension（家庭全體或單一成員，7.6 N2）。
+    let member_id = view.member_id_or_total();
     let months = params.months.unwrap_or(12);
     if !(1..=24).contains(&months) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "months 必須介於 1 至 24");
     }
-    let today = Local::now().date_naive();
-    let inputs = match forecast::load_inputs(member_id, today, u32::from(months)).await {
+    let today = today();
+    let inputs = match forecast::load_inputs(&view, today, u32::from(months)).await {
         Ok(inputs) => inputs,
         Err(error) => return repository_error(error),
     };
@@ -90,7 +93,7 @@ fn attach_fill_hints(
 fn build_response(
     member_id: i64,
     inputs: &ForecastInputs,
-    today: NaiveDate,
+    today: Date,
     months: u8,
 ) -> DividendForecastResponse {
     let result = dividend_forecast::forecast(

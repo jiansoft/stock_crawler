@@ -7,7 +7,8 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use crate::domain::dividend::fill::{DailyClose, DividendFillQuery, ExRightEvent};
@@ -173,12 +174,15 @@ impl PgDividendFillRepository {
 
 #[async_trait]
 impl DividendFillQuery for PgDividendFillRepository {
-    async fn fetch_latest_quote_date(&self, symbol: &str) -> Result<Option<NaiveDate>> {
-        sqlx::query_scalar(r#"SELECT max("Date") FROM "DailyQuotes" WHERE stock_symbol = $1"#)
-            .bind(symbol)
-            .fetch_one(database::get_connection())
-            .await
-            .context("Failed to fetch latest quote date")
+    async fn fetch_latest_quote_date(&self, symbol: &str) -> Result<Option<Date>> {
+        sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(
+            r#"SELECT max("Date") FROM "DailyQuotes" WHERE stock_symbol = $1"#,
+        )
+        .bind(symbol)
+        .fetch_one(database::get_connection())
+        .await
+        .map(crate::infra::database::jiff_types::from_wire)
+        .context("Failed to fetch latest quote date")
     }
 
     async fn fetch_ex_right_events(&self, symbol: &str) -> Result<Vec<ExRightEvent>> {
@@ -191,7 +195,7 @@ impl DividendFillQuery for PgDividendFillRepository {
             .into_iter()
             .filter_map(|(ex_date, cash_dividend, stock_dividend)| {
                 Some(ExRightEvent {
-                    ex_date: NaiveDate::parse_from_str(&ex_date, "%Y-%m-%d").ok()?,
+                    ex_date: Date::strptime("%Y-%m-%d", &ex_date).ok()?,
                     cash_dividend,
                     stock_dividend,
                 })
@@ -199,14 +203,14 @@ impl DividendFillQuery for PgDividendFillRepository {
             .collect())
     }
 
-    async fn fetch_daily_closes(&self, symbol: &str, since: NaiveDate) -> Result<Vec<DailyClose>> {
-        let rows: Vec<(NaiveDate, Decimal)> = sqlx::query_as(
+    async fn fetch_daily_closes(&self, symbol: &str, since: Date) -> Result<Vec<DailyClose>> {
+        let rows: Vec<(Date, Decimal)> = sqlx::query_as::<_, (jiff_sqlx::Date, Decimal)>(
             r#"SELECT "Date", "ClosingPrice" FROM "DailyQuotes" WHERE stock_symbol = $1 AND "Date" >= $2 ORDER BY "Date""#,
         )
         .bind(symbol)
-        .bind(since)
+        .bind(since.to_sqlx())
         .fetch_all(database::get_connection())
-        .await
+        .await.map(|rows| rows.into_iter().map(|(c0, c1)| (crate::infra::database::jiff_types::from_wire(c0), c1)).collect::<Vec<_>>())
         .context("Failed to fetch daily closes")?;
         Ok(rows
             .into_iter()
@@ -217,15 +221,11 @@ impl DividendFillQuery for PgDividendFillRepository {
 
 #[async_trait]
 impl MarketFillQuery for PgDividendFillRepository {
-    async fn fetch_market_fill_samples(
-        &self,
-        since: NaiveDate,
-        until: NaiveDate,
-    ) -> Result<Vec<FillSample>> {
+    async fn fetch_market_fill_samples(&self, since: Date, until: Date) -> Result<Vec<FillSample>> {
         let rows: Vec<(Decimal, Decimal, i32, Option<i32>)> =
             sqlx::query_as(MARKET_FILL_SAMPLES_SQL)
-                .bind(since)
-                .bind(until)
+                .bind(since.to_sqlx())
+                .bind(until.to_sqlx())
                 .bind(i64::from(MATURE_TRADING_DAYS))
                 // 近 5 年約 7,400 次除權息、每次讀 120 個交易日，正式庫固定要 1.0～1.1 s（11-07
                 // EXPLAIN：八成花在之後 120 日的索引掃描），走批次連線池以免每次快取更新都觸發 1 秒慢查詢警告。

@@ -12,14 +12,14 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 /// 單日的收盤價與估值倍數。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DailyRatio {
     /// 交易日。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 收盤價。
     pub close: Decimal,
     /// 本益比；虧損或未提供時為 0。

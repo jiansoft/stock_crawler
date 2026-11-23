@@ -1,5 +1,7 @@
 //! `/portfolio/dividend-forecast` handler：以目前持股預估未來幾個月的現金股利入帳的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -8,7 +10,7 @@ use crate::domain::portfolio::dividend_forecast::{DividendEvent, Holding};
 /// 輸入原樣轉入領域預估，依據轉成 snake_case 字串。
 #[test]
 fn build_response_maps_rows() {
-    let today = NaiveDate::from_ymd_opt(2026, 10, 12).expect("有效日期");
+    let today = date(2026, 10, 12);
     let inputs = ForecastInputs {
         holdings: vec![Holding {
             stock_symbol: "2330".to_owned(),
@@ -21,8 +23,8 @@ fn build_response_maps_rows() {
             year_of_dividend: 2026,
             quarter: "Q2".to_owned(),
             cash_per_share: dec!(7),
-            ex_date: NaiveDate::from_ymd_opt(2026, 12, 10),
-            payable_date: NaiveDate::from_ymd_opt(2027, 1, 7),
+            ex_date: ymd(2026, 12, 10),
+            payable_date: ymd(2027, 1, 7),
         }],
         entitlements: Vec::new(),
     };

@@ -9,7 +9,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::{database_error, decimal_to_f64, ensure_stock_exists, error_response};
@@ -25,7 +25,8 @@ const HOLDER_WEEKS: i64 = 8;
 /// `chip_daily` 的一列，附當天 `broker_flow` 的主力買賣超（沒有為 `None`）。
 #[derive(sqlx::FromRow)]
 struct ChipDailyRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     foreign_net: Option<i64>,
     trust_net: Option<i64>,
     dealer_net: Option<i64>,
@@ -68,7 +69,8 @@ impl ChipDailyRow {
 /// `holder_distribution` 的一列。
 #[derive(sqlx::FromRow)]
 struct HolderRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     major_holders: i64,
     major_percent: Decimal,
     total_holders: i64,
@@ -79,7 +81,8 @@ struct HolderRow {
 /// `insider_holding` 最新月份的合計。
 #[derive(sqlx::FromRow)]
 struct InsiderRow {
-    month: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    month: Date,
     insiders: i64,
     shares: Decimal,
     pledged: Decimal,
@@ -89,7 +92,8 @@ struct InsiderRow {
 /// `broker_flow` 的一列；分點清單以 JSON 文字取出。
 #[derive(sqlx::FromRow)]
 struct BrokerFlowRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     buy_total: i64,
     sell_total: i64,
     main_share: Decimal,
@@ -237,7 +241,7 @@ fn insider_summary(row: InsiderRow) -> InsiderSummary {
         ))
     };
     InsiderSummary {
-        month: row.month.format("%Y-%m").to_string(),
+        month: row.month.strftime("%Y-%m").to_string(),
         insiders: row.insiders,
         shares: to_i64(row.shares),
         pledged: to_i64(row.pledged),

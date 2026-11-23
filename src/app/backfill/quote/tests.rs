@@ -14,7 +14,7 @@ fn ensure_both_markets_rejects_a_single_market() {
 /// 來源成功時原樣回傳；失敗時錯誤訊息帶來源名稱，原始錯誤留在 source chain。
 #[tokio::test]
 async fn get_quotes_from_source_names_the_failed_source() {
-    let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 12).expect("有效日期");
+    let date = date(2026, 10, 12);
     let quotes = super::get_quotes_from_source(
         async move { Ok(vec![super::DailyQuoteDto::new("2330", date)]) },
         "上市",
@@ -44,12 +44,12 @@ async fn process_quotes_replaces_the_whole_day() {
         println!("跳過 process_quotes_replaces_the_whole_day：無資料庫連接");
         return;
     }
-    let date = chrono::NaiveDate::from_ymd_opt(2001, 4, 1).expect("有效日期");
+    let date = date(2001, 4, 1);
     let cleanup = || async {
         let _ = sqlx::query(
             r#"DELETE FROM "DailyQuotes" WHERE "Date" = $1 AND stock_symbol LIKE '79979Q%'"#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .execute(pool)
         .await;
     };
@@ -67,7 +67,7 @@ async fn process_quotes_replaces_the_whole_day() {
         sqlx::query_as::<_, (String, rust_decimal::Decimal)>(
             r#"SELECT stock_symbol, "ClosingPrice" FROM "DailyQuotes" WHERE "Date" = $1 ORDER BY stock_symbol"#,
         )
-        .bind(date)
+        .bind(date.to_sqlx())
         .fetch_all(pool)
         .await
         .expect("查詢")
@@ -91,7 +91,8 @@ async fn process_quotes_replaces_the_whole_day() {
     cleanup().await;
 }
 
-use chrono::NaiveDate;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -113,8 +114,8 @@ async fn test_execute() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
     tracing::debug!("開始 execute");
-    //let date = Local::now().date_naive();
-    let date = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+    //let date = today();
+    let date = date(2026, 4, 30);
     // execute 內部已改為「先抓取、後於單一 transaction 原子替換」，
     // 不需要（也不應該）在呼叫前先手動刪除當日資料。
 

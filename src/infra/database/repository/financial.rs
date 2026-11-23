@@ -16,7 +16,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// PostgreSQL 實作之財報與營收倉儲。
@@ -247,7 +247,7 @@ impl FinancialRepository for PgFinancialRepository {
 
     // === 價格估值 (PriceEstimate) ===
 
-    async fn rebuild_price_estimates(&self, date: NaiveDate, years: String) -> Result<()> {
+    async fn rebuild_price_estimates(&self, date: Date, years: String) -> Result<()> {
         // 依據指定條件批次重建價格估值。
         TableEstimate::upsert_all(date, years).await?;
         Ok(())

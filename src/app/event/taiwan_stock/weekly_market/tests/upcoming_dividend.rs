@@ -2,6 +2,9 @@
 //!
 //! 逐日查詢、只留持股與金額換算由 `app::calculation::upcoming_dividends` 的測試驗證。
 
+use crate::domain::portfolio::view::HoldingView;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -237,9 +240,15 @@ async fn load_upcoming_lists_payouts_and_degrades_on_failure() {
     let dividends = crate::infra::database::repository::dividend::PgDividendRepository::new();
     let no_holdings = std::collections::BTreeMap::new();
     let repo = FakePayoutRepository::with_allocations(vec![allocation(1, 1000)]);
-    let section = load_upcoming(&dividends, &repo, &no_holdings, day(17))
-        .await
-        .expect("有入帳");
+    let section = load_upcoming(
+        &dividends,
+        &repo,
+        &HoldingView::default_household(),
+        &no_holdings,
+        day(17),
+    )
+    .await
+    .expect("有入帳");
     assert!(section.items.is_empty());
     assert_eq!(section.payouts.len(), 1);
 
@@ -248,9 +257,15 @@ async fn load_upcoming_lists_payouts_and_degrades_on_failure() {
         ..FakePayoutRepository::default()
     };
     assert!(
-        load_upcoming(&dividends, &failing, &no_holdings, day(17))
-            .await
-            .is_none()
+        load_upcoming(
+            &dividends,
+            &failing,
+            &HoldingView::default_household(),
+            &no_holdings,
+            day(17)
+        )
+        .await
+        .is_none()
     );
 }
 
@@ -259,9 +274,14 @@ async fn load_upcoming_lists_payouts_and_degrades_on_failure() {
 async fn next_week_payouts_queries_next_monday_to_friday() {
     let repo =
         FakePayoutRepository::with_allocations(vec![allocation(1, 1000), allocation(2, 2000)]);
-    let payouts = next_week_payouts(&repo, day(17)).await.expect("查詢入帳");
+    let payouts = next_week_payouts(&repo, &HoldingView::default_household(), day(17))
+        .await
+        .expect("查詢入帳");
 
-    assert_eq!(repo.queries(), [(0, day(19), day(23), day(17))]);
+    assert_eq!(
+        repo.queries(),
+        [(HoldingView::default_household(), day(19), day(23), day(17))]
+    );
     assert_eq!(payouts.len(), 1, "兩位會員同一筆合併");
     assert_eq!(
         (payouts[0].shares, payouts[0].cash_amount),
@@ -299,7 +319,7 @@ fn lines_show_month_income() {
 }
 
 /// 指定發放日的入帳明細。
-fn paid_on(date: NaiveDate, shares: i64) -> PayoutAllocation {
+fn paid_on(date: Date, shares: i64) -> PayoutAllocation {
     PayoutAllocation {
         cash_payable: Some(date),
         ..allocation(1, shares)
@@ -309,8 +329,8 @@ fn paid_on(date: NaiveDate, shares: i64) -> PayoutAllocation {
 /// 本月入帳：發放日不晚於今天算已入帳、之後算待入帳；去年同月另查一次；其他月份不計。
 #[tokio::test]
 async fn month_income_splits_received_pending_and_last_year() {
-    let last_year = NaiveDate::from_ymd_opt(2025, 10, 15).expect("有效日期");
-    let next_month = NaiveDate::from_ymd_opt(2026, 11, 2).expect("有效日期");
+    let last_year = date(2025, 10, 15);
+    let next_month = date(2026, 11, 2);
     let repo = FakePayoutRepository::with_allocations(vec![
         paid_on(day(5), 1000),
         paid_on(day(17), 500),
@@ -319,7 +339,9 @@ async fn month_income_splits_received_pending_and_last_year() {
         paid_on(next_month, 9000),
     ]);
 
-    let income = month_income(&repo, day(17)).await.expect("查詢入帳");
+    let income = month_income(&repo, &HoldingView::default_household(), day(17))
+        .await
+        .expect("查詢入帳");
 
     assert_eq!(
         income,
@@ -330,13 +352,18 @@ async fn month_income_splits_received_pending_and_last_year() {
             last_year: dec!(3000),
         })
     );
-    let october_2025 = NaiveDate::from_ymd_opt(2025, 10, 1).expect("有效日期");
-    let end_2025 = NaiveDate::from_ymd_opt(2025, 10, 31).expect("有效日期");
+    let october_2025 = date(2025, 10, 1);
+    let end_2025 = date(2025, 10, 31);
     assert_eq!(
         repo.queries(),
         [
-            (0, day(1), day(31), day(17)),
-            (0, october_2025, end_2025, day(17))
+            (HoldingView::default_household(), day(1), day(31), day(17)),
+            (
+                HoldingView::default_household(),
+                october_2025,
+                end_2025,
+                day(17)
+            )
         ]
     );
 }
@@ -344,13 +371,22 @@ async fn month_income_splits_received_pending_and_last_year() {
 /// 兩個月都沒有現金入帳時不列；查詢失敗回傳錯誤。
 #[tokio::test]
 async fn month_income_is_none_without_cash_and_errors_on_failure() {
-    let next_month = NaiveDate::from_ymd_opt(2026, 11, 2).expect("有效日期");
+    let next_month = date(2026, 11, 2);
     let repo = FakePayoutRepository::with_allocations(vec![paid_on(next_month, 1000)]);
-    assert_eq!(month_income(&repo, day(17)).await.expect("查詢入帳"), None);
+    assert_eq!(
+        month_income(&repo, &HoldingView::default_household(), day(17))
+            .await
+            .expect("查詢入帳"),
+        None
+    );
 
     let failing = FakePayoutRepository {
         fail: true,
         ..FakePayoutRepository::default()
     };
-    assert!(month_income(&failing, day(17)).await.is_err());
+    assert!(
+        month_income(&failing, &HoldingView::default_household(), day(17))
+            .await
+            .is_err()
+    );
 }

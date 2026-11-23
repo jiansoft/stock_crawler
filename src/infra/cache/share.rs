@@ -64,7 +64,7 @@ pub struct Share {
     pub(super) ex_rights_reference_prices: RwLock<HashMap<String, rust_decimal::Decimal>>,
     /// 各股票的漲跌幅限制與取得日期（台北時間）；只採用當天的值，前一天的漲跌停價不適用。
     pub(super) price_limits:
-        RwLock<HashMap<String, (chrono::NaiveDate, super::realtime::PriceLimit)>>,
+        RwLock<HashMap<String, (jiff::civil::Date, super::realtime::PriceLimit)>>,
 }
 
 impl Share {

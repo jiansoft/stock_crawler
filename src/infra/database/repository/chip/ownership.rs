@@ -2,7 +2,8 @@
 //! 與 `insider_holding`（董監持股與設質）。
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::dedup_by_key;
@@ -30,7 +31,7 @@ ORDER BY stock_symbol, "date" DESC
 "#;
 
 type HolderRow = (
-    NaiveDate,
+    jiff_sqlx::Date,
     String,
     i64,
     Decimal,
@@ -42,14 +43,19 @@ type HolderRow = (
 
 pub(super) async fn recent_holder_weeks(
     symbols: &[String],
-    as_of: NaiveDate,
+    as_of: Date,
     weeks: i64,
 ) -> Result<RecentHolderWeeks> {
-    let dates: Vec<NaiveDate> = sqlx::query_scalar(RECENT_WEEKS_SQL)
-        .bind(as_of)
+    let dates: Vec<Date> = sqlx::query_scalar::<_, jiff_sqlx::Date>(RECENT_WEEKS_SQL)
+        .bind(as_of.to_sqlx())
         .bind(weeks)
         .fetch_all(database::get_connection())
         .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(crate::infra::database::jiff_types::from_wire)
+                .collect::<Vec<_>>()
+        })
         .context("Failed to fetch recent holder distribution weeks")?;
     if dates.is_empty() || symbols.is_empty() {
         return Ok(RecentHolderWeeks {
@@ -59,7 +65,12 @@ pub(super) async fn recent_holder_weeks(
     }
     let rows: Vec<HolderRow> = sqlx::query_as(RECENT_RECORDS_SQL)
         .bind(symbols)
-        .bind(&dates)
+        .bind(
+            dates
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .fetch_all(database::get_connection())
         .await
         .context("Failed to fetch recent holder distributions")?;
@@ -76,7 +87,7 @@ pub(super) async fn recent_holder_weeks(
                 shares_400,
                 percent_400,
             )| HolderDistributionRecord {
-                date,
+                date: date.to_jiff(),
                 stock_symbol,
                 major_holders,
                 major_percent,
@@ -95,7 +106,7 @@ pub(super) async fn save_holder_distributions(records: &[HolderDistributionRecor
     if records.is_empty() {
         return Ok(0);
     }
-    let dates: Vec<NaiveDate> = records.iter().map(|r| r.date).collect();
+    let dates: Vec<Date> = records.iter().map(|r| r.date).collect();
     let symbols: Vec<&str> = records.iter().map(|r| r.stock_symbol.as_str()).collect();
     let major_holders: Vec<i64> = records.iter().map(|r| r.major_holders).collect();
     let major_percent: Vec<Decimal> = records.iter().map(|r| r.major_percent).collect();
@@ -123,7 +134,12 @@ WHERE (holder_distribution.major_holders, holder_distribution.major_percent, hol
        EXCLUDED.holders_400, EXCLUDED.shares_400, EXCLUDED.percent_400)
 "#;
     let result = sqlx::query(sql)
-        .bind(&dates)
+        .bind(
+            dates
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(&symbols)
         .bind(&major_holders)
         .bind(&major_percent)
@@ -142,7 +158,7 @@ pub(super) async fn save_holder_levels(records: &[HolderLevelRecord]) -> Result<
     if records.is_empty() {
         return Ok(0);
     }
-    let dates: Vec<NaiveDate> = records.iter().map(|r| r.date).collect();
+    let dates: Vec<Date> = records.iter().map(|r| r.date).collect();
     let symbols: Vec<&str> = records.iter().map(|r| r.stock_symbol.as_str()).collect();
     let levels: Vec<i16> = records.iter().map(|r| r.level).collect();
     let holders: Vec<i64> = records.iter().map(|r| r.holders).collect();
@@ -161,7 +177,12 @@ WHERE (holder_distribution_level.holders, holder_distribution_level.shares, hold
   IS DISTINCT FROM (EXCLUDED.holders, EXCLUDED.shares, EXCLUDED.percent)
 "#;
     let result = sqlx::query(sql)
-        .bind(&dates)
+        .bind(
+            dates
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(&symbols)
         .bind(&levels)
         .bind(&holders)
@@ -185,7 +206,7 @@ pub(super) async fn replace_insider_holdings(records: &[InsiderHoldingRecord]) -
     if records.is_empty() {
         return Ok(0);
     }
-    let months: Vec<NaiveDate> = records.iter().map(|r| r.month).collect();
+    let months: Vec<Date> = records.iter().map(|r| r.month).collect();
     let symbols: Vec<&str> = records.iter().map(|r| r.stock_symbol.as_str()).collect();
     let titles: Vec<&str> = records.iter().map(|r| r.title.as_str()).collect();
     let names: Vec<&str> = records.iter().map(|r| r.name.as_str()).collect();
@@ -215,7 +236,12 @@ WHERE (insider_holding.shares, insider_holding.pledged, insider_holding.related_
 "#;
     let mut tx = database::get_tx().await?;
     let removed = sqlx::query(delete)
-        .bind(&months)
+        .bind(
+            months
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(&symbols)
         .bind(&titles)
         .bind(&names)
@@ -224,7 +250,12 @@ WHERE (insider_holding.shares, insider_holding.pledged, insider_holding.related_
         .context("Failed to remove stale insider holdings")?
         .rows_affected();
     let written = sqlx::query(upsert)
-        .bind(&months)
+        .bind(
+            months
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .bind(&symbols)
         .bind(&titles)
         .bind(&names)

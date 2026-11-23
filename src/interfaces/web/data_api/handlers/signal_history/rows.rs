@@ -1,6 +1,6 @@
 //! 訊號績效、大盤基準與個股訊號歷史 SQL 的查詢列。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 #[cfg(doc)]
@@ -145,7 +145,8 @@ pub(in crate::interfaces::web::data_api::handlers) struct BenchmarkMonthRow {
 /// [`STOCK_SIGNALS_SQL`] 的一列。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub(super) struct StockSignalRow {
-    pub(super) date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub(super) date: Date,
     pub(super) indicator: String,
     pub(super) kind: String,
     pub(super) description: String,

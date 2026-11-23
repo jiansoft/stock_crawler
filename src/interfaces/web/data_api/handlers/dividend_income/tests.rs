@@ -1,12 +1,13 @@
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+fn ymd(y: i32, m: u32, d: u32) -> Date {
+    crate::core::util::datetime::ymd(y, m, d).expect("合法日期")
 }
 
-fn payout(payable: NaiveDate, cash: Decimal, stock_shares: i64, estimated: bool) -> DividendPayout {
+fn payout(payable: Date, cash: Decimal, stock_shares: i64, estimated: bool) -> DividendPayout {
     DividendPayout {
         member_id: 0,
         payable_date: payable,

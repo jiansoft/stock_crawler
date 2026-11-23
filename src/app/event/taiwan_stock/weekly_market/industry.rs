@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::{TOP, WEEK_DAYS, signed};
 use crate::domain::quote::{
@@ -26,14 +26,14 @@ pub(super) struct IndustryScore {
 /// 產業 RS 一段：資料日與各產業，由強到弱。
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct IndustrySection {
-    pub(super) data_date: NaiveDate,
+    pub(super) data_date: Date,
     pub(super) industries: Vec<IndustryScore>,
 }
 
 /// 最新資料日與 [`WEEK_DAYS`] 個交易日前的產業 RS 中位數；沒有分數回 `None`。
 pub(super) async fn industry_section(
     quote: &(impl ScoredUniverseQuery + ForwardReturnRepository),
-    date: NaiveDate,
+    date: Date,
 ) -> Result<Option<IndustrySection>> {
     let Some((data_date, current)) = quote.fetch_scored_universe(date).await? else {
         return Ok(None);

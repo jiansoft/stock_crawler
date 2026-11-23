@@ -2,7 +2,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use crate::{
     domain::quote::{
@@ -159,9 +160,14 @@ SET n5 = EXCLUDED.n5, sum5 = EXCLUDED.sum5, win5 = EXCLUDED.win5,
 "#;
 
 /// 重算一批基準日的大盤未來報酬彙總（見 [`REFRESH_MARKET_SQL`]），回傳寫入的列數。
-pub async fn refresh_market_forward_returns(dates: &[NaiveDate]) -> Result<u64> {
+pub async fn refresh_market_forward_returns(dates: &[Date]) -> Result<u64> {
     let result = sqlx::query(REFRESH_MARKET_SQL)
-        .bind(dates)
+        .bind(
+            dates
+                .iter()
+                .map(|value| value.to_sqlx())
+                .collect::<Vec<_>>(),
+        )
         .execute(database::get_connection())
         .await?;
     Ok(result.rows_affected())
@@ -169,20 +175,22 @@ pub async fn refresh_market_forward_returns(dates: &[NaiveDate]) -> Result<u64> 
 
 /// 重算 `from`～`to` 期間內出現在未來報酬或彙總表的每個基準日（彙總表多出來的日期會被刪掉），
 /// 一次 [`MARKET_REFRESH_CHUNK`] 天；回傳處理的天數。歷史回補與測試種完資料後使用。
-pub async fn refresh_market_forward_returns_between(
-    from: NaiveDate,
-    to: NaiveDate,
-) -> Result<usize> {
-    let dates: Vec<NaiveDate> = sqlx::query_scalar(
+pub async fn refresh_market_forward_returns_between(from: Date, to: Date) -> Result<usize> {
+    let dates: Vec<Date> = sqlx::query_scalar::<_, jiff_sqlx::Date>(
         r#"SELECT date FROM daily_forward_return WHERE date BETWEEN $1 AND $2
            UNION
            SELECT date FROM daily_market_forward_return WHERE date BETWEEN $1 AND $2
            ORDER BY 1"#,
     )
-    .bind(from)
-    .bind(to)
+    .bind(from.to_sqlx())
+    .bind(to.to_sqlx())
     .fetch_all(database::get_connection())
-    .await?;
+    .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(crate::infra::database::jiff_types::from_wire)
+            .collect::<Vec<_>>()
+    })?;
     for chunk in dates.chunks(MARKET_REFRESH_CHUNK) {
         refresh_market_forward_returns(chunk).await?;
     }
@@ -210,13 +218,13 @@ impl MarketSeasonalityQuery for PgQuoteRepository {
     async fn fetch_month_seasonality(
         &self,
         month: u32,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
     ) -> Result<MonthSeasonality> {
         let (years, samples, avg_return, win_rate): (i64, i64, Option<f64>, Option<f64>) =
             sqlx::query_as(MONTH_SEASONALITY_SQL)
-                .bind(from)
-                .bind(to)
+                .bind(from.to_sqlx())
+                .bind(to.to_sqlx())
                 .bind(i32::try_from(month).unwrap_or(i32::MAX))
                 .fetch_one(database::get_connection())
                 .await?;
@@ -239,11 +247,11 @@ SELECT (SELECT COUNT(*) FROM daily_technical_signal WHERE date = $1 AND indicato
 
 #[async_trait]
 impl DerivedDataQuery for PgQuoteRepository {
-    async fn count_derived(&self, date: NaiveDate, base: NaiveDate) -> Result<DerivedCounts> {
+    async fn count_derived(&self, date: Date, base: Date) -> Result<DerivedCounts> {
         let (signals, forward_returns, relative_strength): (i64, i64, i64) =
             sqlx::query_as(DERIVED_COUNTS_SQL)
-                .bind(date)
-                .bind(base)
+                .bind(date.to_sqlx())
+                .bind(base.to_sqlx())
                 .bind(&CROSSING_INDICATORS[..])
                 .fetch_one(database::get_connection())
                 .await?;
@@ -257,24 +265,24 @@ impl DerivedDataQuery for PgQuoteRepository {
 
 #[async_trait]
 impl ForwardReturnRepository for PgQuoteRepository {
-    async fn fetch_trading_dates(&self, until: NaiveDate, count: usize) -> Result<Vec<NaiveDate>> {
-        let rows: Vec<(NaiveDate,)> = sqlx::query_as(TRADING_DATES_SQL)
-            .bind(until)
+    async fn fetch_trading_dates(&self, until: Date, count: usize) -> Result<Vec<Date>> {
+        let rows: Vec<(Date,)> = sqlx::query_as::<_, (jiff_sqlx::Date,)>(TRADING_DATES_SQL)
+            .bind(until.to_sqlx())
             .bind(i64::try_from(count).unwrap_or(i64::MAX))
             .fetch_all(database::get_connection())
-            .await?;
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|(c0,)| (crate::infra::database::jiff_types::from_wire(c0),))
+                    .collect::<Vec<_>>()
+            })?;
         Ok(rows.into_iter().map(|(date,)| date).collect())
     }
 
-    async fn upsert_forward_returns(
-        &self,
-        base: NaiveDate,
-        end: NaiveDate,
-        horizon: usize,
-    ) -> Result<u64> {
+    async fn upsert_forward_returns(&self, base: Date, end: Date, horizon: usize) -> Result<u64> {
         let result = sqlx::query(UPSERT_SQL)
-            .bind(base)
-            .bind(end)
+            .bind(base.to_sqlx())
+            .bind(end.to_sqlx())
             .bind(i32::try_from(horizon).unwrap_or(i32::MAX))
             .execute(database::get_connection())
             .await?;

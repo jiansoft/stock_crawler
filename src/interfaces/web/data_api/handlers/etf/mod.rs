@@ -9,7 +9,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 use super::{error_response, market_id_for_stocks, repository_error, round2};
 use crate::domain::etf::query::{
@@ -46,7 +46,7 @@ pub(super) fn valid_symbol(symbol: &str) -> bool {
     !symbol.is_empty() && symbol.len() <= 12 && symbol.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-fn date(value: Option<NaiveDate>) -> Option<String> {
+fn date(value: Option<Date>) -> Option<String> {
     value.map(|date| date.to_string())
 }
 

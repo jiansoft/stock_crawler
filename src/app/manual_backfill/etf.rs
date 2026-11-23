@@ -9,7 +9,7 @@
 //! - `test_backfill_etf_nav_history_since_2019`：同上，起日改為 2019-01-01（約 15～20 分鐘）；重跑安全。
 //! - `test_refresh_etf_snapshot`：只重建清單頁快照。
 
-use chrono::NaiveDate;
+use jiff::civil::date;
 
 use crate::app::backfill::etf_zone;
 
@@ -46,7 +46,7 @@ async fn test_backfill_etf_nav_history() {
 #[ignore]
 async fn test_backfill_etf_nav_history_since_2019() {
     dotenvy::dotenv().ok();
-    let from = NaiveDate::from_ymd_opt(2019, 1, 1).expect("日期應合法");
+    let from = date(2019, 1, 1);
     etf_zone::backfill_nav_history_since(from)
         .await
         .expect("ETF 歷史淨值回補失敗");

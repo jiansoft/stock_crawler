@@ -1,6 +1,7 @@
 //! 策略換股紀錄（[`StrategyRebalanceRepository`]）的 PostgreSQL 實作的測試。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 
 /// 寫入後依日期由舊到新讀回；同策略同一天再寫不覆蓋；其他策略的紀錄不混入。
 #[tokio::test]
@@ -23,7 +24,7 @@ async fn save_keeps_first_record_and_lists_by_date() {
             .expect("清除測試資料");
     };
     cleanup().await;
-    let day = |d| NaiveDate::from_ymd_opt(1995, 3, d).expect("有效日期");
+    let day = |d| ymd(1995, 3, d).expect("有效日期");
     let record = |d, symbol: &str| StrategyRebalanceRecord {
         preset_name: name.to_owned(),
         date: day(d),

@@ -1,11 +1,11 @@
 //! 再平衡端點的隔離資料庫語意：三維度、設定覆蓋、缺價與有限值驗證。
-use super::support::{get, pool_or_skip};
+use super::support::{api_key, get, pool_or_skip};
 use super::*;
 use serde_json::{Value, json};
 
 /// 帶同一組測試 Bearer 金鑰呼叫目標配置的 PUT。
 async fn put(body: Value) -> (StatusCode, Value) {
-    let key = std::env::var("DATA_API_KEY").expect("先以 get 建立測試金鑰");
+    let key = api_key();
     let response = router()
         .oneshot(
             Request::put("/api/v1/portfolio/targets")

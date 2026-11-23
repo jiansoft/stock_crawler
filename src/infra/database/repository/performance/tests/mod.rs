@@ -1,8 +1,11 @@
 //! 年化報酬倉儲的測試：共用的假資料與寫入、讀回；排行榜相關在 `ranking`。
 
 use super::*;
+use crate::core::util::datetime::ymd;
 use crate::domain::performance::entity::SimulationOutcome;
 use crate::infra::database;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -20,8 +23,8 @@ const FAKE_SYMBOL_D: &str = "79979D";
 /// 刻意選 1990-01-02 這種遠早於本功能上線的日期：`fetch_coverage`／
 /// `fetch_ranking` 是以 (date, period) 為範圍的整體統計，若沿用近期日期，
 /// 正式資料會混進計數而讓斷言時好時壞。
-fn test_date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(1990, 1, 2).unwrap()
+fn test_date() -> Date {
+    date(1990, 1, 2)
 }
 
 /// 建立一筆資料齊全的測試資料。
@@ -38,7 +41,7 @@ fn complete_record(symbol: &str, period: CagrPeriod, cagr: Decimal) -> DomainSto
         date: test_date(),
         stock_symbol: symbol.to_string(),
         period,
-        base_date: NaiveDate::from_ymd_opt(1989, 1, 3),
+        base_date: ymd(1989, 1, 3),
         base_price: Some(dec!(100.0)),
         end_price: Some(dec!(119.4)),
         years: Some(dec!(1.0)),
@@ -53,7 +56,7 @@ fn complete_record(symbol: &str, period: CagrPeriod, cagr: Decimal) -> DomainSto
             cagr_pct: cagr + dec!(1),
             ..outcome
         }),
-        first_quote_date: NaiveDate::from_ymd_opt(1988, 1, 4),
+        first_quote_date: ymd(1988, 1, 4),
         shortfall_days: Some(0),
         data_complete: true,
         has_anomaly: false,
@@ -74,7 +77,7 @@ fn incomplete_record(symbol: &str, period: CagrPeriod) -> DomainStockCagr {
         price: None,
         total: None,
         reinvested: None,
-        first_quote_date: NaiveDate::from_ymd_opt(1989, 6, 1),
+        first_quote_date: ymd(1989, 6, 1),
         shortfall_days: None,
         data_complete: false,
         has_anomaly: true,

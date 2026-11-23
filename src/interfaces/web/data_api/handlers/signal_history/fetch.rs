@@ -5,8 +5,9 @@
 //! 依年度三年 12.3 秒（GroupAggregate 佔 8.6 秒）；拆成 24 組後最慢的一組（kd／oversold）1.8 秒，
 //! 加總 20 秒（每組都要重算大盤基準 CTE），同時跑 [`PARALLELISM`] 組。
 
-use chrono::NaiveDate;
 use futures::{StreamExt, TryStreamExt};
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 
 use super::rows::PerformanceRow;
 use super::sql::SIGNAL_COMBOS_SQL;
@@ -18,8 +19,8 @@ const PARALLELISM: usize = 6;
 /// 訊號績效 SQL 的篩選參數（`$1`～`$8`，有籌碼條件時再加 `$9`／`$10`）。
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PerformanceFilter<'a> {
-    pub(super) from: NaiveDate,
-    pub(super) to: NaiveDate,
+    pub(super) from: Date,
+    pub(super) to: Date,
     pub(super) market_id: i32,
     pub(super) indicator: Option<&'a str>,
     pub(super) kind: Option<&'a str>,
@@ -36,8 +37,8 @@ pub(super) async fn fetch_performance_rows(
     filter: PerformanceFilter<'_>,
 ) -> Result<Vec<PerformanceRow>, sqlx::Error> {
     let combos: Vec<(String, String)> = sqlx::query_as(SIGNAL_COMBOS_SQL)
-        .bind(filter.from)
-        .bind(filter.to)
+        .bind(filter.from.to_sqlx())
+        .bind(filter.to.to_sqlx())
         .bind(filter.indicator)
         .bind(filter.kind)
         .fetch_all(database::get_connection())
@@ -58,8 +59,8 @@ async fn fetch_combo(
     kind: String,
 ) -> Result<Vec<PerformanceRow>, sqlx::Error> {
     let mut query = sqlx::query_as(sql)
-        .bind(filter.from)
-        .bind(filter.to)
+        .bind(filter.from.to_sqlx())
+        .bind(filter.to.to_sqlx())
         .bind(filter.market_id)
         .bind(indicator)
         .bind(kind)

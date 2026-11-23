@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use crate::{core::util, infra::crawler::twse};
@@ -21,12 +21,12 @@ pub struct TaiwanStockIndexDto {
 }
 
 /// 取得台股指數
-pub async fn visit(date: DateTime<Local>) -> Result<TaiwanStockIndexDto> {
+pub async fn visit(date: TaipeiDateTime) -> Result<TaiwanStockIndexDto> {
     let url = format!(
         "https://www.{}/exchangeReport/FMTQIK?response=json&date={}&_={}",
         twse::HOST,
-        date.format("%Y%m%d"),
-        date.timestamp_millis()
+        date.strftime("%Y%m%d"),
+        date.timestamp().as_millisecond()
     );
 
     util::http::get_json::<TaiwanStockIndexDto>(&url).await

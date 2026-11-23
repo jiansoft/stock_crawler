@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// 換股當天策略部位的一檔持股。
 #[derive(Debug, Clone, PartialEq)]
@@ -24,7 +24,7 @@ pub struct StrategyRebalanceRecord {
     /// 策略名稱。
     pub preset_name: String,
     /// 換股日（收盤買進）。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 當時的回測條件（query string）。
     pub query: String,
     /// 持有天數（交易日）。

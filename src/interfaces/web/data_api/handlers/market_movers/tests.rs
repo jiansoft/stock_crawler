@@ -1,9 +1,12 @@
 //! 排序白名單、市場過濾與即時排行的 deterministic tests；收盤來源的
 //! 執行計畫量測需要 PostgreSQL，以 `integration-tests` feature 控制。
 
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::{
@@ -89,7 +92,7 @@ fn stock(symbol: &str, market_id: i32, suspend_listing: bool) -> Stock {
         Decimal::ZERO,
         Decimal::ZERO,
         Decimal::ZERO,
-        chrono::Local::now(),
+        TaipeiDateTime::now(),
         market_id,
         24,
         0,
@@ -313,14 +316,15 @@ async fn movers_closing_query_plan_uses_date_index() {
     // 第二步：實際排行查詢，三種排序鍵各跑一次。綁定的日期必須是資料庫
     // 真正的最新交易日——若隨手綁「今天」，遇到收盤資料尚未寫入的時段
     // 會掃到零列，量出來的執行計畫沒有參考價值。
-    let latest_date: Option<NaiveDate> =
-        sqlx::query_scalar(r#"SELECT MAX("Date") FROM "DailyQuotes""#)
-            .fetch_one(pool)
-            .await
-            .expect("latest date");
+    let latest_date: Option<Date> = sqlx::query_scalar::<_, Option<jiff_sqlx::Date>>(
+        r#"SELECT MAX("Date") FROM "DailyQuotes""#,
+    )
+    .fetch_one(pool)
+    .await
+    .map(crate::infra::database::jiff_types::from_wire)
+    .expect("latest date");
     // 空表時改綁固定歷史日期，仍可驗證三種排序的 SQL 都能規劃與執行。
-    let latest_date =
-        latest_date.unwrap_or_else(|| NaiveDate::from_ymd_opt(2026, 4, 30).expect("固定日期合法"));
+    let latest_date = latest_date.unwrap_or_else(|| date(2026, 4, 30));
     println!("使用交易日 {latest_date} 量測排行查詢");
     for rank_by in [
         MoversRankBy::TopGainers,
@@ -333,7 +337,7 @@ async fn movers_closing_query_plan_uses_date_index() {
             rank_by.closing_order_by()
         );
         let plan: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()))
-            .bind(latest_date)
+            .bind(latest_date.to_sqlx())
             .bind(0_i32)
             .bind(20_i64)
             .fetch_all(pool)

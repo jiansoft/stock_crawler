@@ -4,7 +4,11 @@ mod industry;
 mod universe;
 
 use axum::http::StatusCode;
-use chrono::{Datelike, NaiveDate, Weekday};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::Weekday;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
@@ -20,11 +24,10 @@ const STOCKS: [(&str, i32, i32); 5] = [
 ];
 
 /// 1992 年起的前 `count` 個平日，由舊到新。
-fn weekdays(count: usize) -> Vec<NaiveDate> {
-    NaiveDate::from_ymd_opt(1992, 1, 6)
-        .expect("固定日期合法")
-        .iter_days()
-        .filter(|day| !matches!(day.weekday(), Weekday::Sat | Weekday::Sun))
+fn weekdays(count: usize) -> Vec<Date> {
+    date(1992, 1, 6)
+        .series(1.day())
+        .filter(|day| !matches!(day.weekday(), Weekday::Saturday | Weekday::Sunday))
         .take(count)
         .collect()
 }
@@ -45,7 +48,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
 /// RA 每個平日都有日線（構成交易日曆），RB 只有資料日有收盤；RC 沒有 240 日報酬，不計分；
 /// RE 是 ETF、Z9 是特別股，報酬最高但都不列入母體。
 /// 資料日之後再加一個交易日但不回填報酬，用來驗證退回前一個交易日。
-async fn seed(pool: &sqlx::PgPool, dates: &[NaiveDate]) {
+async fn seed(pool: &sqlx::PgPool, dates: &[Date]) {
     for (symbol, market_id, industry) in STOCKS {
         sqlx::query(
             r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
@@ -62,7 +65,12 @@ async fn seed(pool: &sqlx::PgPool, dates: &[NaiveDate]) {
         r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice")
            SELECT d, '79979RA', 50 FROM UNNEST($1::date[]) AS d"#,
     )
-    .bind(dates)
+    .bind(
+        dates
+            .iter()
+            .map(|value| value.to_sqlx())
+            .collect::<Vec<_>>(),
+    )
     .execute(pool)
     .await
     .expect("種入 RA 日線");
@@ -70,7 +78,7 @@ async fn seed(pool: &sqlx::PgPool, dates: &[NaiveDate]) {
     sqlx::query(
         r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice") VALUES ($1, '79979RB', 12.5)"#,
     )
-    .bind(end)
+    .bind(end.to_sqlx())
     .execute(pool)
     .await
     .expect("種入 RB 日線");
@@ -105,7 +113,7 @@ async fn seed(pool: &sqlx::PgPool, dates: &[NaiveDate]) {
                  return_120d = COALESCE(EXCLUDED.return_120d, t.return_120d),
                  return_240d = COALESCE(EXCLUDED.return_240d, t.return_240d)",
         )
-        .bind(base(horizon))
+        .bind(base(horizon).to_sqlx())
         .bind(symbol)
         .bind(Decimal::from(value))
         .bind(i32::try_from(horizon).expect("天期很小"))
@@ -260,7 +268,7 @@ async fn relative_strength_history_matches_ranking() {
         "INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
          VALUES ($1, '79979RB', 0, 60, 1, 1)",
     )
-    .bind(dates[dates.len() - 3])
+    .bind((dates[dates.len() - 3]).to_sqlx())
     .execute(pool)
     .await
     .expect("種入前一天分數");
@@ -275,7 +283,7 @@ async fn relative_strength_history_matches_ranking() {
         "SELECT stock_symbol, indicator, kind, description FROM daily_technical_signal
          WHERE date = $1 AND stock_symbol LIKE '79979R_'",
     )
-    .bind(end)
+    .bind(end.to_sqlx())
     .fetch_all(pool)
     .await
     .expect("讀回穿越訊號");

@@ -1,5 +1,6 @@
 //! over_the_counter的測試；連外的測試標 #[ignore]。
 
+use jiff::civil::date;
 use std::result::Result::Ok;
 
 use crate::infra::cache::SHARE;
@@ -19,7 +20,7 @@ fn parse_tpex_qfii_parses_fixture_rows() {
 
     let snapshot = parse(FIXTURE).unwrap();
 
-    assert_eq!(snapshot.date, NaiveDate::from_ymd_opt(2026, 9, 30).unwrap());
+    assert_eq!(snapshot.date, date(2026, 9, 30));
     assert_eq!(snapshot.rows.len(), 3);
     let yuan_tai = snapshot
         .rows
@@ -60,7 +61,7 @@ fn parse_tpex_qfii_returns_empty_rows_on_market_holiday() {
         parse(r#"{"stat":"ok","date":"20260829","tables":[{"fields":["代號"],"data":[]}]}"#)
             .unwrap();
 
-    assert_eq!(snapshot.date, NaiveDate::from_ymd_opt(2026, 8, 29).unwrap());
+    assert_eq!(snapshot.date, date(2026, 8, 29));
     assert!(snapshot.rows.is_empty());
 }
 

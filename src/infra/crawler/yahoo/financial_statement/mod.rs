@@ -36,7 +36,6 @@ pub mod income_statement;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, anyhow};
-use chrono::{DateTime, Datelike};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 
@@ -192,9 +191,10 @@ fn parse_statements<T>(
 ///
 /// 單季與累計的月份必須是 3／6／9／12，年度必須是 1 月，其餘一律視為異常。
 fn parse_fiscal_period(date: &str, period: ReportPeriod) -> Result<FiscalPeriod> {
-    let date = DateTime::parse_from_rfc3339(date)
+    // 取字串本身偏移下的日期（與 chrono 的 parse_from_rfc3339(...).date_naive() 相同）
+    let date = jiff::fmt::temporal::Pieces::parse(date)
         .with_context(|| format!("Invalid date: {date}"))?
-        .date_naive();
+        .date();
     let month = date.month();
 
     let quarter = match period {
@@ -206,7 +206,7 @@ fn parse_fiscal_period(date: &str, period: ReportPeriod) -> Result<FiscalPeriod>
     };
 
     Ok(FiscalPeriod {
-        year: date.year(),
+        year: i32::from(date.year()),
         quarter,
     })
 }

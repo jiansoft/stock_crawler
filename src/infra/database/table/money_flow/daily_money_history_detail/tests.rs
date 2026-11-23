@@ -1,6 +1,7 @@
 //! 每日市值明細表的測試。
 
 use super::*;
+use jiff::civil::Date;
 
 #[tokio::test]
 #[cfg_attr(
@@ -14,7 +15,7 @@ async fn test_delete_and_upsert() {
         return;
     }
     tracing::debug!("開始 DailyMoneyHistoryDetail::delete_and_upsert");
-    let current_date = NaiveDate::parse_from_str("2023-08-05", "%Y-%m-%d").unwrap();
+    let current_date = Date::strptime("%Y-%m-%d", "2023-08-05").unwrap();
     let mut tx = database::get_tx().await.ok();
 
     DailyMoneyHistoryDetail::delete(current_date, &mut tx)

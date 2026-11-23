@@ -1,6 +1,9 @@
 //! 條件選股：籌碼集中（400 張以上大戶持股比例變化、融資餘額變化）。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 /// 兩個條件的範圍邊界，且單獨即可成立篩選。
 #[test]
@@ -91,13 +94,12 @@ async fn screen_at_filters_chip_concentration() {
         }
         // 02-04 為基期，02-05～02-24 為之後的 20 筆。
         for offset in 0..21 {
-            let date = NaiveDate::from_ymd_opt(1988, 2, 4).expect("固定日期合法")
-                + chrono::Duration::days(offset);
+            let date = date(1988, 2, 4) + (offset).days();
             let balance = if offset == 0 { margins.0 } else { margins.1 };
             sqlx::query(
                 r#"INSERT INTO chip_daily ("date", stock_symbol, margin_balance) VALUES ($1, $2, $3)"#,
             )
-            .bind(date)
+            .bind(date.to_sqlx())
             .bind(symbol)
             .bind(i64::from(balance))
             .execute(pool)
@@ -106,7 +108,7 @@ async fn screen_at_filters_chip_concentration() {
         }
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let query_date = date(1988, 3, 5);
     let screen = |configure: fn(&mut StockScreeningParams)| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

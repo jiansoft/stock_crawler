@@ -1,5 +1,5 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::Result;
-use chrono::Local;
 use serde::Deserialize;
 
 // 匯入專案內部模組
@@ -21,7 +21,7 @@ struct TpexEtfRaw {
 /// 調用 TPEx OpenAPI 取得上櫃市場最新的 ETF 資訊。
 pub async fn visit() -> Result<Vec<EtfInfo>> {
     // 週末不處理
-    if Local::now().is_weekend() {
+    if TaipeiDateTime::now().is_weekend() {
         return Ok(Vec::new());
     }
 

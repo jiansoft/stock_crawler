@@ -73,32 +73,20 @@ fn test_split_message_into_chunks_falls_back_to_char_split_for_oversized_line() 
 
 // MarkdownV2 跳脫規則的測試已隨函式本體移至 `core::util::text::tests`。
 
-/// 驗證節拍器：第一則不等待，之後每則都要等滿 `MIN_SEND_INTERVAL`。
-///
-/// 以 `start_paused` 的虛擬時鐘執行，因此不會真的花掉數秒。
-/// `LAST_SENT_AT` 是程序層級的全域狀態，送信流程測試也會寫入（真實時鐘），
-/// 因此先取得 [`SEND_SLOT_TEST_LOCK`] 並清掉上次送出時間。
+/// 同一聊天室的每次發送都等滿一秒；已過間隔時不再等待。
 #[tokio::test(start_paused = true)]
 async fn test_acquire_send_slot_enforces_min_interval() {
-    let _serial = SEND_SLOT_TEST_LOCK.lock().await;
-    *LAST_SENT_AT.lock().await = None;
-    let start = Instant::now();
-
-    // 尚未送過任何訊息，第一則不該被延遲。
-    acquire_send_slot().await;
+    let queue = SendQueue::default();
+    let start = tokio::time::Instant::now();
+    queue.acquire(1).await;
     assert_eq!(start.elapsed(), Duration::ZERO);
-
-    // 緊接著的第二、三則各自要等滿一個間隔。
-    acquire_send_slot().await;
-    assert_eq!(start.elapsed(), MIN_SEND_INTERVAL);
-
-    acquire_send_slot().await;
-    assert_eq!(start.elapsed(), MIN_SEND_INTERVAL * 2);
-
-    // 距離上次已超過間隔時不該再等。
-    time::sleep(MIN_SEND_INTERVAL * 2).await;
-    let before = Instant::now();
-    acquire_send_slot().await;
+    queue.acquire(1).await;
+    assert_eq!(start.elapsed(), Duration::from_secs(1));
+    queue.acquire(1).await;
+    assert_eq!(start.elapsed(), Duration::from_secs(2));
+    time::sleep(Duration::from_secs(2)).await;
+    let before = tokio::time::Instant::now();
+    queue.acquire(1).await;
     assert_eq!(before.elapsed(), Duration::ZERO);
 }
 
@@ -139,7 +127,7 @@ fn test_deserialize_success_response_without_parameters() {
     assert!(resp.result.is_some());
 }
 
-/// 會經過 [`acquire_send_slot`] 的測試共用這把鎖，避免並行時互相改到 `LAST_SENT_AT`。
+/// 經過全域發送佇列的測試共用這把鎖，避免真實時鐘測試相互排隊。
 static SEND_SLOT_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// 本機假 Telegram API：依序回應預先排好的 `(HTTP 狀態, JSON)`，並記錄每次請求。
@@ -278,4 +266,53 @@ async fn send_gives_up_after_each_remedy_once() {
     assert!(error.to_string().contains("plain-text fallback"), "{error}");
     let modes: Vec<String> = fake.calls().into_iter().map(|call| call.1).collect();
     assert_eq!(modes, [MARKDOWN_V2, MARKDOWN_V2, PLAIN_TEXT]);
+}
+
+/// 路由發送保留 403／chat not found，且不對已失效的管道做無效降級重送。
+#[tokio::test]
+async fn checked_send_preserves_permanent_channel_errors() {
+    let _serial = SEND_SLOT_TEST_LOCK.lock().await;
+    for (body, code, reason) in [
+        (
+            r#"{"ok":false,"error_code":403,"description":"Forbidden: bot blocked"}"#,
+            403,
+            "blocked_by_user",
+        ),
+        (
+            r#"{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}"#,
+            400,
+            "chat_not_found",
+        ),
+    ] {
+        let fake = fake_telegram(vec![1], vec![(200, body)]).await;
+        let error = fake
+            .client
+            .send_checked(1, "通知")
+            .await
+            .expect_err("管道失效");
+        assert_eq!(error.error_code, Some(code));
+        assert_eq!(error.disabled_reason, Some(reason));
+        assert_eq!(fake.calls().len(), 1);
+    }
+}
+
+/// 可回報結果的路徑仍保留 429 原樣重送與 Markdown 失敗的純文字降級。
+#[tokio::test]
+async fn checked_send_retains_retry_and_plaintext_fallback() {
+    let _serial = SEND_SLOT_TEST_LOCK.lock().await;
+    let fake = fake_telegram(
+        vec![1],
+        vec![(429, RATE_LIMITED), (400, BAD_REQUEST), (200, OK_REPLY)],
+    )
+    .await;
+    fake.client
+        .send_checked(1, r"價格 12\.5")
+        .await
+        .expect("降級成功");
+    let calls = fake.calls();
+    assert_eq!(
+        calls.iter().map(|call| call.1.as_str()).collect::<Vec<_>>(),
+        [MARKDOWN_V2, MARKDOWN_V2, PLAIN_TEXT]
+    );
+    assert_eq!(calls[2].2, "價格 12.5");
 }

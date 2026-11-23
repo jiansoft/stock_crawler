@@ -1,4 +1,6 @@
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 use tokio::sync::Semaphore;
 
 /// job 失敗時狀態轉為 failed，且 message 保留完整的 anyhow 錯誤鏈。
@@ -268,7 +270,7 @@ async fn database_only_jobs_run_to_completion() {
         println!("跳過 database_only_jobs_run_to_completion：無資料庫連接");
         return;
     }
-    let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("合法日期");
+    let date = |y, m, d| ymd(y, m, d).expect("合法日期");
 
     let received = start_received_dividend_records_job("79979RJ".to_string())
         .await
@@ -339,7 +341,7 @@ async fn database_only_jobs_run_to_completion() {
 /// 確認各入口組出的 kind 與 input（查重鍵）正確，測試本身不會發出任何請求。
 #[tokio::test]
 async fn network_jobs_reject_duplicate_of_running_job() {
-    let date = NaiveDate::from_ymd_opt(1990, 1, 3).expect("合法日期");
+    let date = date(1990, 1, 3);
     let blockers = [
         ("daily_quotes", "1990-01-03"),
         ("closing_aggregate", "1990-01-03"),

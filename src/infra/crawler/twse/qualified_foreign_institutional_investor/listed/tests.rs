@@ -1,5 +1,6 @@
 //! listed的測試；連外的測試標 #[ignore]。
 
+use crate::core::util::datetime::TaipeiDateTime;
 use std::result::Result::Ok;
 
 use crate::infra::cache::SHARE;
@@ -66,14 +67,14 @@ async fn test_visit() {
     SHARE.load().await;
     tracing::debug!("開始 visit");
     //let date =  DateTime::parse_from_str("2023-09-14 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
-    let datetime_local: DateTime<FixedOffset> =
-        match DateTime::parse_from_str("2023-09-15 12:00:00 +0800", "%Y-%m-%d %H:%M:%S %z") {
-            Ok(dt) => dt,
-            Err(why) => {
-                tracing::debug!("error:{:#?}", why);
-                return;
-            }
-        };
+    let datetime_local: TaipeiDateTime = match "2023-09-15T12:00:00+08:00".parse::<TaipeiDateTime>()
+    {
+        Ok(dt) => dt,
+        Err(why) => {
+            tracing::debug!("error:{:#?}", why);
+            return;
+        }
+    };
     match visit(datetime_local).await {
         Err(why) => {
             tracing::debug!("Failed to visit because: {:?}", why);

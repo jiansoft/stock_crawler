@@ -1,18 +1,17 @@
 //! `/market/valuation` 的資料庫語意整合測試：由日線重算 `daily_market_valuation` 再查詢。
 
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 
 use super::support::{get, pool_or_skip};
 use crate::domain::market_index::valuation::MarketValuationRepository;
 use crate::infra::database::repository::market_valuation::PgMarketValuationRepository;
 
 /// 測試資料的日期範圍（重算與清除都只碰這段期間）。
-fn window() -> (NaiveDate, NaiveDate) {
-    (
-        NaiveDate::from_ymd_opt(1986, 12, 1).expect("合法日期"),
-        NaiveDate::from_ymd_opt(1987, 3, 31).expect("合法日期"),
-    )
+fn window() -> (Date, Date) {
+    (date(1986, 12, 1), date(1987, 3, 31))
 }
 
 /// 測試用假代號：VA、VB 上市，VC 上櫃。
@@ -28,8 +27,8 @@ async fn cleanup(pool: &sqlx::PgPool) {
     }
     let (from, to) = window();
     let _ = sqlx::query("DELETE FROM daily_market_valuation WHERE date BETWEEN $1 AND $2")
-        .bind(from)
-        .bind(to)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
         .execute(pool)
         .await;
 }

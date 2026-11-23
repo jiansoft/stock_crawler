@@ -1,10 +1,12 @@
 //! 資料健康週報的各項規則檢核：交易日缺漏、衍生表落後、定期表、股利、估值比率、未來報酬缺口、ETF 與落後檢查。
 
 use super::*;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 /// 有成交紀錄的交易日，由新到舊。
-pub(super) fn trading_days_desc(snapshot: &DataHealthSnapshot) -> Vec<NaiveDate> {
-    let mut days: Vec<NaiveDate> = snapshot
+pub(super) fn trading_days_desc(snapshot: &DataHealthSnapshot) -> Vec<Date> {
+    let mut days: Vec<Date> = snapshot
         .market_counts
         .iter()
         .filter(|count| count.traded > 0)
@@ -18,15 +20,15 @@ pub(super) fn trading_days_desc(snapshot: &DataHealthSnapshot) -> Vec<NaiveDate>
 /// 檢查期間內每個應有交易日：整天沒有日報價，或某個市場有成交的檔數明顯偏少。
 pub(super) fn trading_day_problems(
     snapshot: &DataHealthSnapshot,
-    from: NaiveDate,
-    today: NaiveDate,
-    holidays: Option<&[NaiveDate]>,
+    from: Date,
+    today: Date,
+    holidays: Option<&[Date]>,
 ) -> Vec<String> {
     let mut problems = Vec::new();
-    for date in from.iter_days().take_while(|date| *date < today) {
+    for date in from.series(1.day()).take_while(|date| *date < today) {
         let quoted = snapshot.quoted_dates.contains(&date);
         if !quoted {
-            let expected = !matches!(date.weekday(), Weekday::Sat | Weekday::Sun)
+            let expected = !matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday)
                 && holidays.is_some_and(|holidays| !holidays.contains(&date));
             if expected {
                 problems.push(format!("{date} 整天沒有日報價"));
@@ -61,7 +63,7 @@ pub(super) fn allowed_lag(table: &str) -> usize {
 /// 衍生資料表沒有更新到應有的交易日。
 pub(super) fn derived_table_problems(
     snapshot: &DataHealthSnapshot,
-    trading_days: &[NaiveDate],
+    trading_days: &[Date],
 ) -> Vec<String> {
     snapshot
         .derived_tables
@@ -83,13 +85,14 @@ pub(super) fn derived_table_problems(
 }
 
 /// 每月 15 日之後仍沒有上個月的營收。
-pub(super) fn revenue_problems(latest_month: Option<i64>, today: NaiveDate) -> Vec<String> {
+pub(super) fn revenue_problems(latest_month: Option<i64>, today: Date) -> Vec<String> {
     if today.day() <= REVENUE_DUE_DAY {
         return Vec::new();
     }
     let previous = today
-        .with_day(1)
-        .and_then(|first| first.pred_opt())
+        .first_of_month()
+        .yesterday()
+        .ok()
         .map(|date| i64::from(date.year()) * 100 + i64::from(date.month()));
     match (latest_month, previous) {
         (Some(latest), Some(expected)) if latest >= expected => Vec::new(),
@@ -103,12 +106,9 @@ pub(super) fn revenue_problems(latest_month: Option<i64>, today: NaiveDate) -> V
 
 /// 千張大戶與董監持股是否停更；沒有任何資料也列出。千張大戶有資料時再看集保級距與 400 張欄位
 /// （[`holder_level_problems`]）。
-pub(super) fn periodic_table_problems(
-    snapshot: &DataHealthSnapshot,
-    today: NaiveDate,
-) -> Vec<String> {
+pub(super) fn periodic_table_problems(snapshot: &DataHealthSnapshot, today: Date) -> Vec<String> {
     let mut problems = Vec::new();
-    let holder_due = today.checked_sub_days(Days::new(HOLDER_MAX_AGE_DAYS));
+    let holder_due = today.checked_sub(HOLDER_MAX_AGE_DAYS.days()).ok();
     match (snapshot.latest_holder_week, holder_due) {
         (None, _) => problems.push("holder_distribution 沒有任何資料".to_string()),
         (Some(latest), Some(due)) if latest < due => problems.push(format!(
@@ -120,14 +120,15 @@ pub(super) fn periodic_table_problems(
         problems.extend(holder_level_problems(snapshot, holder_week));
     }
     let insider_due = today
-        .checked_sub_days(Days::new(INSIDER_MAX_AGE_DAYS))
-        .and_then(|date| date.with_day(1));
+        .checked_sub(INSIDER_MAX_AGE_DAYS.days())
+        .ok()
+        .map(|date| date.first_of_month());
     match (snapshot.latest_insider_month, insider_due) {
         (None, _) => problems.push("insider_holding 沒有任何資料".to_string()),
         (Some(latest), Some(due)) if latest < due => problems.push(format!(
             "insider_holding 最新 {}，應已有 {}",
-            latest.format("%Y-%m"),
-            due.format("%Y-%m")
+            latest.strftime("%Y-%m"),
+            due.strftime("%Y-%m")
         )),
         _ => {}
     }
@@ -137,7 +138,7 @@ pub(super) fn periodic_table_problems(
 /// 集保全部持股分級與 400 張欄位：兩者和千張大戶由同一個週六排程寫入，千張大戶照常更新時
 /// 這兩項沒寫進去也不會報錯。級距最新週落後千張大戶、最新週列數少於 [`HOLDER_LEVEL_MIN_ROWS`]、
 /// 千張大戶最新週有 400 張空值（集保來源每檔都有第 12～15 級），都列出。
-fn holder_level_problems(snapshot: &DataHealthSnapshot, holder_week: NaiveDate) -> Vec<String> {
+fn holder_level_problems(snapshot: &DataHealthSnapshot, holder_week: Date) -> Vec<String> {
     let mut problems = Vec::new();
     match snapshot.latest_holder_level_week {
         None => problems.push("holder_distribution_level 沒有任何資料".to_string()),
@@ -196,7 +197,7 @@ pub(super) fn dividend_problems(snapshot: &DataHealthSnapshot) -> Vec<String> {
 /// 本益比或淨值比為 0 的比例超過門檻的交易日與市場；`today` 還沒補值，不列入。
 pub(super) fn valuation_ratio_problems(
     zeros: &[ValuationRatioZeroCount],
-    today: NaiveDate,
+    today: Date,
 ) -> Vec<String> {
     let mut problems = Vec::new();
     for zero in zeros
@@ -224,14 +225,14 @@ pub(super) fn valuation_ratio_problems(
 }
 
 /// 大盤未來報酬彙總與明細對不上的基準日：列出最早的幾天與總天數，並提示重算的期間。
-pub(super) fn market_forward_return_drift_problems(dates: &[NaiveDate]) -> Vec<String> {
+pub(super) fn market_forward_return_drift_problems(dates: &[Date]) -> Vec<String> {
     let (Some(first), Some(last)) = (dates.first(), dates.last()) else {
         return Vec::new();
     };
     let listed = dates
         .iter()
         .take(FORWARD_RETURN_GAP_LISTED)
-        .map(NaiveDate::to_string)
+        .map(Date::to_string)
         .collect::<Vec<_>>()
         .join("、");
     let more = if dates.len() > FORWARD_RETURN_GAP_LISTED {
@@ -279,11 +280,11 @@ pub(super) fn forward_return_gap_problems(gaps: &[ForwardReturnGap]) -> Vec<Stri
 /// 才回填，不列入。
 pub(super) fn etf_problems(
     snapshot: &DataHealthSnapshot,
-    from: NaiveDate,
-    today: NaiveDate,
-    trading_days: &[NaiveDate],
+    from: Date,
+    today: Date,
+    trading_days: &[Date],
 ) -> Vec<String> {
-    let rows_on = |date: NaiveDate| {
+    let rows_on = |date: Date| {
         snapshot
             .etf_nav_counts
             .iter()
@@ -374,7 +375,7 @@ pub(super) fn lagging_problems(lagging: Option<&[LaggingStatement]>) -> Vec<Stri
                 statement.stock_symbol,
                 statement.fiscal_year,
                 statement.quarter,
-                statement.published_on.format("%m-%d")
+                statement.published_on.strftime("%m-%d")
             )
         })
         .collect();

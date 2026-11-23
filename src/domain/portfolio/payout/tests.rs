@@ -1,15 +1,17 @@
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use rust_decimal_macros::dec;
 
 use super::*;
 
-fn date(m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, m, d).expect("合法日期")
+fn date(m: u32, d: u32) -> Date {
+    ymd(2026, m, d).expect("合法日期")
 }
 
 fn allocation(
     symbol: &str,
-    cash_payable: Option<NaiveDate>,
-    stock_payable: Option<NaiveDate>,
+    cash_payable: Option<Date>,
+    stock_payable: Option<Date>,
 ) -> PayoutAllocation {
     PayoutAllocation {
         member_id: 1,
@@ -40,7 +42,7 @@ fn split_by_payable_date_splits_cash_and_stock() {
     ];
     let payouts = split_by_payable_date(&allocations, date(11, 2), date(12, 1));
 
-    let summary: Vec<(NaiveDate, &str, Option<NaiveDate>, Decimal, i64)> = payouts
+    let summary: Vec<(Date, &str, Option<Date>, Decimal, i64)> = payouts
         .iter()
         .map(|p| {
             (
@@ -132,7 +134,7 @@ fn merge_members_sums_the_same_payout() {
     );
 }
 
-fn payout(payable: NaiveDate, cash: Decimal, stock_shares: i64, estimated: bool) -> DividendPayout {
+fn payout(payable: Date, cash: Decimal, stock_shares: i64, estimated: bool) -> DividendPayout {
     DividendPayout {
         member_id: 0,
         payable_date: payable,
@@ -157,12 +159,7 @@ fn monthly_income_buckets_by_payable_month() {
         payout(date(1, 20), dec!(50), 10, false),
         payout(date(11, 5), dec!(300), 0, false),
         payout(date(11, 25), dec!(200), 0, true),
-        payout(
-            NaiveDate::from_ymd_opt(2025, 1, 10).expect("合法日期"),
-            dec!(999),
-            0,
-            false,
-        ),
+        payout(jiff::civil::date(2025, 1, 10), dec!(999), 0, false),
     ];
     let months = monthly_income(&payouts, 2026, date(11, 10));
 

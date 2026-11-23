@@ -46,7 +46,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -59,7 +59,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingEvent {
     /// 事件發生日（價格跳動當天，等同減資的恢復買賣日）。
-    pub event_date: NaiveDate,
+    pub event_date: Date,
     /// 當日收盤價相對前一交易日的變動率（%）。
     ///
     /// 正值代表價格上跳，減資通常如此（股數變少、每股價格變高）；
@@ -82,9 +82,9 @@ pub struct PendingSymbol {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PendingReport {
     /// 掃描區間的起日。
-    pub from: NaiveDate,
+    pub from: Date,
     /// 掃描區間的迄日。
-    pub to: NaiveDate,
+    pub to: Date,
     /// 收斂前的原始事件數。
     pub total_events: usize,
     /// 因非上櫃而被濾掉的事件數。
@@ -110,7 +110,7 @@ impl PendingReport {
 /// 只讀不寫。建議在跑完
 /// [`crate::app::backfill::capital_reduction::backfill_listed_full`] 之後執行，
 /// 此時清單裡才不會混入上市的部分。
-pub async fn scan(from: NaiveDate, to: NaiveDate) -> Result<PendingReport> {
+pub async fn scan(from: Date, to: Date) -> Result<PendingReport> {
     let repository = PgCagrSourceRepository::new();
     let events = repository
         .fetch_anomaly_events(from, to)
@@ -119,7 +119,7 @@ pub async fn scan(from: NaiveDate, to: NaiveDate) -> Result<PendingReport> {
 
     let total_events = events.len();
     let mut skipped_non_otc = 0_usize;
-    let mut grouped: BTreeMap<String, (String, Vec<NaiveDate>)> = BTreeMap::new();
+    let mut grouped: BTreeMap<String, (String, Vec<Date>)> = BTreeMap::new();
 
     for (stock_symbol, event_date) in events {
         // 快取查不到的代號（例如已下市很久、或權證之類的非股票代號）一併略過：

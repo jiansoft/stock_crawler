@@ -1,6 +1,8 @@
 //! 每日股價淨值比分位重算的整合測試（臨時庫、假代號、固定 1983 年起的資料）。
-
-use chrono::{Days, NaiveDate};
+use crate::core::util::datetime::ymd;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -9,9 +11,9 @@ use crate::infra::database;
 
 const SYMBOLS: [&str; 4] = ["79979PA", "79979PB", "79979PC", "79979PD"];
 
-fn day(n: u64) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1983, 1, 1)
-        .and_then(|first| first.checked_add_days(Days::new(n)))
+fn day(n: u64) -> Date {
+    ymd(1983, 1, 1)
+        .and_then(|first| first.checked_add((n as i64).days()).ok())
         .expect("固定日期合法")
 }
 
@@ -60,7 +62,7 @@ async fn calculate_pb_percentiles_between_ranks_against_five_years() {
            UNION ALL SELECT $1::date + n, '79979PD', 1 + n % 10 FROM generate_series(0, 599) AS n
            UNION ALL SELECT $1::date + 600, '79979PD', 0"#,
     )
-    .bind(day(0))
+    .bind(day(0).to_sqlx())
     .execute(pool)
     .await
     .expect("種入日線");
@@ -69,7 +71,7 @@ async fn calculate_pb_percentiles_between_ranks_against_five_years() {
         "INSERT INTO daily_pb_percentile (date, stock_symbol, pb, pb_percentile, samples)
          VALUES ($1, '79979PA', 1, 55, 480)",
     )
-    .bind(day(0))
+    .bind(day(0).to_sqlx())
     .execute(pool)
     .await
     .expect("種入舊資料");
@@ -77,14 +79,28 @@ async fn calculate_pb_percentiles_between_ranks_against_five_years() {
     let written = calculate_pb_percentiles_between(day(595), day(600))
         .await
         .expect("重算淨值比分位");
-    let rows: Vec<(NaiveDate, String, Decimal, Decimal, i16)> = sqlx::query_as(
-        "SELECT date, stock_symbol, pb, pb_percentile, samples FROM daily_pb_percentile
+    let rows: Vec<(Date, String, Decimal, Decimal, i16)> =
+        sqlx::query_as::<_, (jiff_sqlx::Date, String, Decimal, Decimal, i16)>(
+            "SELECT date, stock_symbol, pb, pb_percentile, samples FROM daily_pb_percentile
          WHERE stock_symbol = ANY($1) ORDER BY stock_symbol, date",
-    )
-    .bind(SYMBOLS)
-    .fetch_all(pool)
-    .await
-    .expect("讀取淨值比分位");
+        )
+        .bind(SYMBOLS)
+        .fetch_all(pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(c0, c1, c2, c3, c4)| {
+                    (
+                        crate::infra::database::jiff_types::from_wire(c0),
+                        c1,
+                        c2,
+                        c3,
+                        c4,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .expect("讀取淨值比分位");
     let same_day = calculate_pb_percentiles(day(599)).await.expect("重算單日");
     cleanup(pool).await;
 

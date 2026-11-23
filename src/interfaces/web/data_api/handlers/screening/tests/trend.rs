@@ -1,5 +1,6 @@
 //! 條件選股：Minervini 趨勢模板（`trend_template`）。
 
+use jiff::civil::date;
 use serde_json::json;
 
 use super::*;
@@ -78,7 +79,7 @@ async fn screen_at_applies_trend_template() {
         .expect("種入日線");
     }
 
-    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let query_date = date(1988, 6, 10);
     let screen = |trend_template: Option<bool>| async move {
         let mut params = screening_params();
         params.industry_id = Some(1);

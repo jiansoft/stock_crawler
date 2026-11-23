@@ -52,14 +52,23 @@ pub mod weekly_market;
 use rust_decimal::Decimal;
 
 /// 將內部 `member_id` 轉成訊息內可讀的成員名稱。
-pub(crate) fn member_label(member_id: i64) -> String {
-    match member_id {
-        1 => "Eddie".to_string(),
-        2 => "Unice".to_string(),
-        3 => "Hugo".to_string(),
-        4 => "Aiden".to_string(),
-        _ => format!("Member {}", member_id),
-    }
+pub(crate) fn member_label(
+    names: &std::collections::BTreeMap<i64, String>,
+    member_id: i64,
+) -> String {
+    names
+        .get(&member_id)
+        .cloned()
+        .unwrap_or_else(|| format!("Member {member_id}"))
+}
+
+/// 格式測試明確提供會員名稱，正式訊息一律從資料庫批次載入。
+#[cfg(test)]
+pub(crate) fn test_member_names() -> std::collections::BTreeMap<i64, String> {
+    [(1, "Eddie"), (2, "Unice"), (3, "Hugo"), (4, "Aiden")]
+        .into_iter()
+        .map(|(id, name)| (id, name.to_owned()))
+        .collect()
 }
 
 /// 將數字字串的整數部分補上千位分隔符。

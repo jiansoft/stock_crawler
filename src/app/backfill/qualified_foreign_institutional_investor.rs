@@ -1,3 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::Weekday;
 use std::{future::Future, time::Duration};
 
 use crate::{
@@ -12,7 +16,6 @@ use crate::{
     },
 };
 use anyhow::{Context, Result, anyhow};
-use chrono::{DateTime, Datelike, Days, FixedOffset, Local, NaiveDate, Weekday};
 use scopeguard::defer;
 
 /// 回補歷史時每個交易日之間的間隔：證交所對短時間大量請求會暫時封鎖。
@@ -23,11 +26,11 @@ const HISTORY_BACKFILL_INTERVAL: Duration = Duration::from_secs(3);
 /// 更新股票主檔的最新持股後，再把當天快照寫進 `qfii_history`、重算 `qfii_trend`，
 /// 最後派發 [`DomainEvent::ForeignHoldingsUpdated`] 讓持股通知檢查外資明顯增減持的股票。
 pub async fn execute() -> Result<()> {
-    execute_at(Local::now()).await
+    execute_at(TaipeiDateTime::now()).await
 }
 
 /// [`execute`] 的本體；`now` 可注入，讓測試以固定的歷史日期跑完整流程。
-pub(crate) async fn execute_at(now: DateTime<Local>) -> Result<()> {
+pub(crate) async fn execute_at(now: TaipeiDateTime) -> Result<()> {
     if now.is_weekend() {
         return Ok(());
     }
@@ -36,8 +39,8 @@ pub(crate) async fn execute_at(now: DateTime<Local>) -> Result<()> {
        tracing::info!("更新台股外資持股狀態結束");
     }
 
-    let today = now.date_naive();
-    let (listed_rows, otc) = tokio::try_join!(listed(now.fixed_offset()), otc())?;
+    let today = now.date();
+    let (listed_rows, otc) = tokio::try_join!(listed(now), otc())?;
 
     // 上市以查詢日為資料日；休市日沒有資料（空清單）。上櫃以櫃買回應的日期為準，
     // 休市日會回最近一個交易日的資料，重寫一次不會有變更。
@@ -63,14 +66,14 @@ pub(crate) async fn execute_at(now: DateTime<Local>) -> Result<()> {
     crate::app::event::get_global_dispatcher()
         .dispatch_async(vec![DomainEvent::ForeignHoldingsUpdated {
             date: as_of,
-            occurred_at: Local::now(),
+            occurred_at: TaipeiDateTime::now(),
         }])
         .await;
 
     Ok(())
 }
 
-async fn listed(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
+async fn listed(date_time: TaipeiDateTime) -> Result<Vec<QfiiDto>> {
     let listed = twse::qualified_foreign_institutional_investor::listed::visit(date_time).await?;
     // 記下筆數：上櫃曾因來源頁 404 而默默更新 0 筆，日誌裡看不出任何異狀。
     tracing::info!("上市外資持股取得 {} 筆", listed.len());
@@ -95,7 +98,7 @@ async fn otc()
 }
 
 /// 將爬蟲資料轉成指定資料日的外資持股快照。
-fn to_history(rows: &[QfiiDto], date: NaiveDate) -> Vec<ForeignHolding> {
+fn to_history(rows: &[QfiiDto], date: Date) -> Vec<ForeignHolding> {
     rows.iter()
         .map(|row| ForeignHolding {
             stock_symbol: row.stock_symbol.clone(),
@@ -123,22 +126,19 @@ pub struct ForeignHoldingHistoryBackfillSummary {
 /// 逐日抓證交所 `MI_QFIIS` 與櫃買 QFII API；週末直接略過，平日休市時兩邊都沒有資料。
 /// 回補不派發通知事件——歷史資料不是「剛發生的變化」，推播只會造成一次大量洗版。
 pub async fn backfill_history(
-    start: NaiveDate,
-    end: NaiveDate,
+    start: Date,
+    end: Date,
 ) -> Result<ForeignHoldingHistoryBackfillSummary> {
     if start > end {
         return Err(anyhow!("backfill start {start} is after end {end}"));
     }
 
     let repo = PgForeignHoldingRepository::new();
-    let offset = FixedOffset::east_opt(8 * 3600).context("invalid Taipei offset")?;
     let (mut summary, last_trading_day) = run_history(
         start,
         end,
         |day| async move {
-            let date_time = day
-                .and_hms_opt(15, 0, 0)
-                .and_then(|naive| naive.and_local_timezone(offset).single())
+            let date_time = TaipeiDateTime::from_datetime(day.at(15, 0, 0, 0))
                 .with_context(|| format!("invalid date {day}"))?;
             let listed =
                 twse::qualified_foreign_institutional_investor::listed::visit(date_time).await?;
@@ -165,14 +165,14 @@ pub async fn backfill_history(
 /// 歷史回補的逐日迴圈：週末略過、平日抓資料，有資料才寫入；回傳統計與最後一個交易日。
 /// `fetch_day`、`save`、`pause` 可注入，測試時換成假資料與不等待。
 async fn run_history<F, FF, S, SF, P, PF>(
-    start: NaiveDate,
-    end: NaiveDate,
+    start: Date,
+    end: Date,
     fetch_day: F,
     save: S,
     pause: P,
-) -> Result<(ForeignHoldingHistoryBackfillSummary, Option<NaiveDate>)>
+) -> Result<(ForeignHoldingHistoryBackfillSummary, Option<Date>)>
 where
-    F: Fn(NaiveDate) -> FF,
+    F: Fn(Date) -> FF,
     FF: Future<Output = Result<Vec<ForeignHolding>>>,
     S: Fn(Vec<ForeignHolding>) -> SF,
     SF: Future<Output = Result<u64>>,
@@ -196,15 +196,16 @@ where
 }
 
 /// `[start, end]` 間的平日（週一至週五），依日期由舊到新。
-fn weekdays_between(start: NaiveDate, end: NaiveDate) -> Result<Vec<NaiveDate>> {
+fn weekdays_between(start: Date, end: Date) -> Result<Vec<Date>> {
     let mut days = Vec::new();
     let mut day = start;
     while day <= end {
-        if !matches!(day.weekday(), Weekday::Sat | Weekday::Sun) {
+        if !matches!(day.weekday(), Weekday::Saturday | Weekday::Sunday) {
             days.push(day);
         }
         day = day
-            .checked_add_days(Days::new(1))
+            .checked_add(1.days())
+            .ok()
             .with_context(|| format!("date overflow after {day}"))?;
     }
     Ok(days)
@@ -214,7 +215,7 @@ fn weekdays_between(start: NaiveDate, end: NaiveDate) -> Result<Vec<NaiveDate>> 
 fn day_history(
     listed: &[QfiiDto],
     otc: &twse::qualified_foreign_institutional_investor::over_the_counter::OtcQfiiSnapshot,
-    day: NaiveDate,
+    day: Date,
 ) -> Vec<ForeignHolding> {
     let mut history = to_history(listed, day);
     if otc.date == day {
@@ -224,7 +225,7 @@ fn day_history(
 }
 
 /// 趨勢重算的基準日：上市有資料時取今天與上櫃資料日較晚者；上市沒有資料（休市）時用上櫃資料日。
-fn trend_as_of(listed_is_empty: bool, today: NaiveDate, otc_date: NaiveDate) -> NaiveDate {
+fn trend_as_of(listed_is_empty: bool, today: Date, otc_date: Date) -> Date {
     if listed_is_empty {
         otc_date
     } else {

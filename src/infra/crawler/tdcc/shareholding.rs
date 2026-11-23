@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::core::util::{self, text};
@@ -33,7 +33,7 @@ const LEVEL_TOTAL: i16 = 17;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HolderDistribution {
     /// 資料日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 千張大戶人數。
     pub major_holders: i64,
     /// 千張大戶持股佔集保庫存比例（%）。
@@ -52,7 +52,7 @@ pub struct HolderDistribution {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HolderLevel {
     /// 資料日期。
-    pub date: NaiveDate,
+    pub date: Date,
     /// 證券代號。
     pub stock_symbol: String,
     /// 持股分級（1～15 依持股數由小到大，16 差異數調整，17 合計）。
@@ -97,7 +97,7 @@ pub async fn visit_levels() -> Result<Vec<HolderLevel>> {
 pub fn summarize(levels: &[HolderLevel]) -> HashMap<String, HolderDistribution> {
     #[derive(Default)]
     struct Partial {
-        date: Option<NaiveDate>,
+        date: Option<Date>,
         major: Option<(i64, Decimal)>,
         total: Option<(i64, i64)>,
         holders_400: i64,
@@ -154,9 +154,9 @@ fn parse(body: &str) -> Vec<HolderLevel> {
 /// 解析一列 `資料日期,代號,分級,人數,股數,比例`。
 fn parse_line(line: &str) -> Option<HolderLevel> {
     let mut fields = line.split(',');
-    let date = NaiveDate::parse_from_str(
-        fields.next()?.trim_start_matches('\u{feff}').trim(),
+    let date = Date::strptime(
         "%Y%m%d",
+        fields.next()?.trim_start_matches('\u{feff}').trim(),
     )
     .ok()?;
     let stock_symbol = fields.next()?.trim().to_string();

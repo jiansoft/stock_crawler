@@ -2,13 +2,14 @@
 //!
 //! 子模組：[`market`]（市場除權息清單訊息，每檔附歷年填息）、[`holding`]（持股預估股利訊息）。
 
+use crate::core::util::datetime::today;
 use anyhow::Result;
-use chrono::{Datelike, Local};
 use rust_decimal::Decimal;
 
 use crate::app::event::taiwan_stock::format_decimal_with_commas as format_decimal_flexible_commas;
 // 通知走 core::alert（port）——app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向；
 // 訊息內容的 MarkdownV2 跳脫在子模組用 core::util::text。
+use crate::app::notify;
 use crate::core::alert;
 use crate::domain::dividend::entity::StockDividendInfo;
 use crate::domain::dividend::repository::DividendRepository;
@@ -23,8 +24,8 @@ mod holding;
 mod market;
 
 /// 這天除權息的股利可能屬於的發放年度（`dividend.year`）：當年，以及 12 月除息、隔年發放的下一年。
-fn payout_years(ex_date: chrono::NaiveDate) -> [i32; 2] {
-    [ex_date.year(), ex_date.year() + 1]
+fn payout_years(ex_date: jiff::civil::Date) -> [i32; 2] {
+    [i32::from(ex_date.year()), i32::from(ex_date.year() + 1)]
 }
 
 /// 一年多次配息時附加在殖利率後面的「 年化殖利率:8.47%（月配）」；年配時為空字串。
@@ -44,8 +45,8 @@ fn annualized_suffix(
 impl EventDispatcher {
     /// 處理 `ExDividendReminderTriggered` 事件：發送除權息提醒、重新計算持股股利並發送通知。
     pub(super) async fn handle_ex_dividend_reminder_triggered(
-        date: chrono::NaiveDate,
-        next_trading_date: chrono::NaiveDate,
+        date: jiff::civil::Date,
+        next_trading_date: jiff::civil::Date,
     ) -> Result<()> {
         let dividend_repo = PgDividendRepository::new();
         // 取得本日市場除權息資料
@@ -88,17 +89,24 @@ impl EventDispatcher {
                 .await;
         }
 
-        // 重新讀取持股後，組「分人分股」的預估股利通知
-        let portfolio_repo = PgPortfolioRepository::new();
-        let holdings = portfolio_repo
-            .fetch_active_holdings(Some(stock_symbols))
-            .await?;
-
-        if let Some(holding_msg) =
-            Self::build_holding_dividend_message(date, &stocks_dividend_info, &holdings)
-        {
-            alert::send_message(&holding_msg).await;
-        }
+        // 重新讀取持股後，依收件者範圍組「分人分股」的預估股利通知（會員系統計畫 7.6）
+        let dedup_key = format!("{}:{date}", alert::Topic::HoldingsExDividend.code());
+        notify::notify_holdings(alert::Topic::HoldingsExDividend, &dedup_key, |view| {
+            let (stock_symbols, stocks_dividend_info) = (&stock_symbols, &stocks_dividend_info);
+            async move {
+                let holdings = PgPortfolioRepository::new()
+                    .fetch_active_holdings_in(&view, Some(stock_symbols.clone()))
+                    .await?;
+                let names = crate::infra::database::repository::member::fetch_names(&view).await?;
+                Ok(Self::build_holding_dividend_message(
+                    date,
+                    stocks_dividend_info,
+                    &holdings,
+                    &names,
+                ))
+            }
+        })
+        .await;
 
         // 最後發送下一交易日的預訂除權息公告
         let mut next_stocks = dividend_repo
@@ -118,7 +126,7 @@ impl EventDispatcher {
     /// 發送指定日期的市場除權息提醒，每檔附歷年填息；今天與下一交易日的清單都以今天為準查近 5 年，
     /// 全市場基準因此共用同一份快取。
     async fn send_market_dividend_message(
-        date: chrono::NaiveDate,
+        date: jiff::civil::Date,
         title: &str,
         stocks_dividend_info: &[StockDividendInfo],
     ) {
@@ -130,9 +138,9 @@ impl EventDispatcher {
             .iter()
             .map(|stock| stock.stock_symbol.clone())
             .collect();
-        let hints = FillHints::load(&symbols, Local::now().date_naive()).await;
+        let hints = FillHints::load(&symbols, today()).await;
         let msg = Self::build_market_dividend_message(date, title, stocks_dividend_info, &hints);
-        alert::send_message(&msg).await;
+        alert::notify_market(alert::Topic::MarketExDividend, &msg).await;
     }
 }
 

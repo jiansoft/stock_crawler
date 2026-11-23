@@ -1,14 +1,18 @@
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::Weekday;
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 
 use crate::infra::crawler::twse;
 
 mod preview;
 
 /// 載入休市日要涵蓋今天之後幾天：下一交易日與持股預告窗口跨年時一併載入明年。
-const HOLIDAY_HORIZON_DAYS: u64 = 14;
+const HOLIDAY_HORIZON_DAYS: i64 = 14;
 
 /// 取得指定年份的交易所休市日集合。
 ///
@@ -19,7 +23,7 @@ const HOLIDAY_HORIZON_DAYS: u64 = 14;
 /// # 參數
 ///
 /// * `year` - 要查詢的西元年份。
-async fn get_holidays_set(year: i32) -> HashSet<NaiveDate> {
+async fn get_holidays_set(year: i32) -> HashSet<Date> {
     // 呼叫 TWSE 的休市日 API 取得資料
     match twse::holiday_schedule::visit(year).await {
         Ok(holidays) => {
@@ -46,9 +50,9 @@ async fn get_holidays_set(year: i32) -> HashSet<NaiveDate> {
 ///
 /// * `date` - 要判定的日期。
 /// * `holidays` - 已載入的休市日 `HashSet`。
-fn is_trading_day(date: NaiveDate, holidays: &HashSet<NaiveDate>) -> bool {
+fn is_trading_day(date: Date, holidays: &HashSet<Date>) -> bool {
     // 1. 如果是星期六或星期日，則不是交易日
-    if matches!(date.weekday(), Weekday::Sat | Weekday::Sun) {
+    if matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday) {
         return false;
     }
     // 2. 如果該日期在交易所公告的休市日名單中，則不是交易日
@@ -63,12 +67,10 @@ fn is_trading_day(date: NaiveDate, holidays: &HashSet<NaiveDate>) -> bool {
 ///
 /// * `date` - 起始日期。
 /// * `holidays` - 已載入的休市日 `HashSet`。
-fn find_next_trading_day(mut date: NaiveDate, holidays: &HashSet<NaiveDate>) -> NaiveDate {
+fn find_next_trading_day(mut date: Date, holidays: &HashSet<Date>) -> Date {
     loop {
         // 遞增一天，若加天數溢出則回退使用一般的加法運算
-        date = date
-            .checked_add_days(Days::new(1))
-            .unwrap_or(date + Days::new(1));
+        date = date.checked_add(1.days()).ok().unwrap_or(date + 1.days());
         // 判斷遞增後的日期是否為交易日
         if is_trading_day(date, holidays) {
             return date;
@@ -83,21 +85,22 @@ fn find_next_trading_day(mut date: NaiveDate, holidays: &HashSet<NaiveDate>) -> 
 /// 2. 若今天為交易日，則除原本今日提醒與持股計算外，會預報「下一個交易日」而非「曆法明天」的除權息名單。
 /// 3. 持股在今天之後 3 個交易日內除權息的，另發一則預告（見 [`preview`]），每檔只預告一次。
 pub async fn execute() -> Result<()> {
-    run(Local::now().date_naive()).await
+    run(today()).await
 }
 
 /// [`execute`] 的本體：`today` 決定要載入的休市日年度與是否為交易日。
-async fn run(today: NaiveDate) -> Result<()> {
+async fn run(today: Date) -> Result<()> {
     // 載入今年度的休市日清單
     let current_year = today.year();
-    let mut holidays = get_holidays_set(current_year).await;
+    let mut holidays = get_holidays_set(i32::from(current_year)).await;
 
     // 下一交易日與持股預告窗口可能跨年，跨年則需一併載入明年度的休市清單
     let horizon = today
-        .checked_add_days(Days::new(HOLIDAY_HORIZON_DAYS))
+        .checked_add(HOLIDAY_HORIZON_DAYS.days())
+        .ok()
         .context("Failed to calculate holiday horizon for ex-dividend reminder")?;
     if horizon.year() != current_year {
-        let next_year_holidays = get_holidays_set(horizon.year()).await;
+        let next_year_holidays = get_holidays_set(i32::from(horizon.year())).await;
         holidays.extend(next_year_holidays);
     }
 
@@ -116,7 +119,7 @@ async fn run(today: NaiveDate) -> Result<()> {
             crate::domain::events::DomainEvent::ExDividendReminderTriggered {
                 date: today,
                 next_trading_date: next_trading,
-                occurred_at: Local::now(),
+                occurred_at: TaipeiDateTime::now(),
             },
         ])
         .await;

@@ -3,6 +3,7 @@
 //! 期別用 2099 年、代號用 79979 系列，測完刪除寫入的去重鍵。
 
 use super::*;
+use jiff::civil::date;
 
 /// 每個測試開頭檢查 Redis，沒有就略過。
 async fn redis_available(test: &str) -> bool {
@@ -82,7 +83,7 @@ async fn notify_foreign_holdings_dedups_each_direction_and_symbol() {
     for key in &keys {
         let _ = CLIENT.delete(key).await;
     }
-    let date = NaiveDate::from_ymd_opt(2099, 1, 5).expect("日期應合法");
+    let date = date(2099, 1, 5);
     let alerts = [
         foreign_alert("79979FH1", "增持", Some(dec!(5)), 4),
         foreign_alert("79979FH2", "減持", Some(dec!(-5)), -4),
@@ -122,9 +123,7 @@ async fn handlers_query_then_notify_nothing_for_future_periods() {
     EventDispatcher::handle_quarterly_financials_updated(2099, "Q1")
         .await
         .expect("季報查詢");
-    EventDispatcher::handle_foreign_holdings_updated(
-        NaiveDate::from_ymd_opt(2099, 1, 5).expect("日期應合法"),
-    )
-    .await
-    .expect("外資持股查詢");
+    EventDispatcher::handle_foreign_holdings_updated(date(2099, 1, 5))
+        .await
+        .expect("外資持股查詢");
 }

@@ -1,6 +1,7 @@
 //! Phase 4 endpoints 的資料庫語意整合測試。
 
 use super::*;
+use jiff::ToSpan;
 
 /// Phase 4 三個 endpoints 的真實資料庫語意整合測試（§4.8–§4.10）。
 ///
@@ -108,8 +109,8 @@ async fn phase4_endpoints_db_semantics() {
     .await
     .expect("anchor query should work");
     if let Some(anchor) = anchor {
-        let to = chrono::NaiveDate::parse_from_str(&anchor, "%Y-%m-%d").expect("anchor date");
-        let from = to - chrono::Days::new(30);
+        let to = jiff::civil::Date::strptime("%Y-%m-%d", &anchor).expect("anchor date");
+        let from = to - 30.days();
         let (status, json) = get(format!(
             "/api/v1/market/dividend-calendar?from={from}&to={to}&limit=200"
         ))
@@ -120,9 +121,9 @@ async fn phase4_endpoints_db_semantics() {
         for event in events {
             // 每筆事件日期都必須是合法日期且落在查詢區間內——這同時
             // 證明 `-`、`尚未公布` 等無效標記不會產生事件。
-            let date = chrono::NaiveDate::parse_from_str(
-                event["event_date"].as_str().expect("event_date string"),
+            let date = jiff::civil::Date::strptime(
                 "%Y-%m-%d",
+                event["event_date"].as_str().expect("event_date string"),
             )
             .expect("event_date 必須是合法日期");
             assert!((from..=to).contains(&date), "事件日期必須落在查詢區間");

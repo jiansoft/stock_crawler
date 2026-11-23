@@ -3,7 +3,7 @@
 mod mutation;
 mod query;
 
-use chrono::{DateTime, Local};
+use crate::core::util::datetime::TaipeiDateTime;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, postgres::PgRow};
@@ -19,8 +19,8 @@ use crate::{
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]
 /// 財務報表
 pub struct FinancialStatement {
-    pub updated_time: DateTime<Local>,
-    pub created_time: DateTime<Local>,
+    pub updated_time: TaipeiDateTime,
+    pub created_time: TaipeiDateTime,
     /// 季度 Q4 Q3 Q2 Q1
     pub quarter: String,
     /// 股票代號。
@@ -109,8 +109,8 @@ impl FinancialStatement {
 impl From<yahoo::profile::Profile> for FinancialStatement {
     fn from(fs: yahoo::profile::Profile) -> Self {
         let mut e = FinancialStatement::new(fs.stock_symbol);
-        e.updated_time = Local::now();
-        e.created_time = Local::now();
+        e.updated_time = TaipeiDateTime::now();
+        e.created_time = TaipeiDateTime::now();
         e.quarter = fs.quarter;
         e.gross_profit = fs.gross_profit;
         e.operating_profit_margin = fs.operating_profit_margin;
@@ -131,8 +131,8 @@ impl From<yahoo::profile::Profile> for FinancialStatement {
 impl From<wespai::profit::Profit> for FinancialStatement {
     fn from(fs: wespai::profit::Profit) -> Self {
         let mut e = FinancialStatement::new(fs.security_code);
-        e.updated_time = Local::now();
-        e.created_time = Local::now();
+        e.updated_time = TaipeiDateTime::now();
+        e.created_time = TaipeiDateTime::now();
         e.quarter = fs.quarter;
         e.gross_profit = fs.gross_profit;
         e.operating_profit_margin = fs.operating_profit_margin;
@@ -152,8 +152,8 @@ impl From<wespai::profit::Profit> for FinancialStatement {
 impl From<twse::eps::Eps> for FinancialStatement {
     fn from(fs: twse::eps::Eps) -> Self {
         let mut e = FinancialStatement::new(fs.stock_symbol);
-        e.updated_time = Local::now();
-        e.created_time = Local::now();
+        e.updated_time = TaipeiDateTime::now();
+        e.created_time = TaipeiDateTime::now();
         e.quarter = fs.quarter.to_string();
         e.gross_profit = Default::default();
         e.operating_profit_margin = Default::default();
@@ -173,8 +173,8 @@ impl From<twse::eps::Eps> for FinancialStatement {
 impl From<crawler::share::AnnualProfit> for FinancialStatement {
     fn from(fs: crate::infra::crawler::share::AnnualProfit) -> Self {
         let mut e = FinancialStatement::new(fs.stock_symbol);
-        e.updated_time = Local::now();
-        e.created_time = Local::now();
+        e.updated_time = TaipeiDateTime::now();
+        e.created_time = TaipeiDateTime::now();
         e.quarter = String::from("");
         e.gross_profit = Default::default();
         e.operating_profit_margin = Default::default();

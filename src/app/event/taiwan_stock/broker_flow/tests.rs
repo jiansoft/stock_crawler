@@ -1,5 +1,8 @@
 //! 持股主力分點通知的單元測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -19,7 +22,7 @@ fn broker(name: &str, net: i64, share: Decimal) -> BrokerNet {
 fn flow(stock_symbol: &str, buy: (i64, Decimal), sell: (i64, Decimal)) -> BrokerFlow {
     BrokerFlow {
         stock_symbol: stock_symbol.to_string(),
-        date: NaiveDate::from_ymd_opt(2026, 10, 5).unwrap(),
+        date: date(2026, 10, 5),
         buyers: vec![broker("買方", buy.0, buy.1)],
         sellers: vec![broker("賣方", sell.0, sell.1)],
         buy_total: buy.0,
@@ -82,7 +85,7 @@ fn top_brokers_lists_up_to_three_with_volume() {
 /// 訊息含日期、門檻說明與每檔的主力方向、張數、比重及前幾名分點，特殊字元依 MarkdownV2 跳脫。
 #[test]
 fn build_message_lists_each_stock() {
-    let date = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+    let date = date(2026, 10, 5);
     let flows = vec![
         flow("2330", (8_109, dec!(30.72)), (0, dec!(0))),
         flow("1101", (0, dec!(0)), (11_926, dec!(33.37))),
@@ -133,13 +136,13 @@ fn history_line_shows_direction_and_days() {
 
 /// 回傳固定主力交易日與期間合計的假倉儲；`fail` 時查交易日失敗。
 struct FakeBrokers {
-    dates: Vec<NaiveDate>,
+    dates: Vec<Date>,
     fail: bool,
 }
 
 #[async_trait::async_trait]
 impl HoldingBrokerQuery for FakeBrokers {
-    async fn fetch_broker_dates(&self, until: NaiveDate, limit: usize) -> Result<Vec<NaiveDate>> {
+    async fn fetch_broker_dates(&self, until: Date, limit: usize) -> Result<Vec<Date>> {
         assert_eq!(limit, HISTORY_DAYS);
         if self.fail {
             anyhow::bail!("db down");
@@ -149,19 +152,24 @@ impl HoldingBrokerQuery for FakeBrokers {
 
     async fn fetch_broker_period(
         &self,
-        from: NaiveDate,
-        to: NaiveDate,
+        from: Date,
+        to: Date,
         symbols: &[String],
     ) -> Result<Vec<BrokerPeriodNet>> {
         assert_eq!(symbols, ["2330"]);
-        Ok(vec![period_net("2330", (to - from).num_days(), 1, 0)])
+        Ok(vec![period_net(
+            "2330",
+            i64::from((to - from).get_days()),
+            1,
+            0,
+        )])
     }
 }
 
 /// 期間從最舊的主力交易日到今天；只有今天一天或查詢失敗時不附累計。
 #[tokio::test]
 async fn load_history_spans_recent_broker_days() {
-    let day = |d| NaiveDate::from_ymd_opt(2026, 10, d).unwrap();
+    let day = |d| ymd(2026, 10, d).unwrap();
     let symbols = ["2330".to_string()];
     let repository = FakeBrokers {
         dates: vec![day(20), day(17), day(16)],
@@ -183,6 +191,53 @@ async fn load_history_spans_recent_broker_days() {
         fail: true,
     };
     assert!(load_history(&failing, day(20), &symbols).await.is_none());
+}
+
+/// 收件者範圍的主力通知以資料庫的持股為準：持有 2330 的會員收到（近期累計讀得到時附上），沒有持股不產生訊息。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn view_message_uses_holdings_in_scope() {
+    dotenvy::dotenv().ok();
+    let pool = crate::infra::database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 view_message_uses_holdings_in_scope：無資料庫連接");
+        return;
+    }
+    const MEMBER: i64 = 979_906;
+    let cleanup = || async {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(pool)
+            .await
+            .expect("清除測試持股");
+    };
+    cleanup().await;
+    sqlx::query(
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, created_time, date) \
+         VALUES ($1, '2330', 1000, '1999-03-10 00:00:00+08', '1999-03-10')",
+    )
+    .bind(MEMBER)
+    .execute(pool)
+    .await
+    .expect("插入測試持股");
+    let notable = vec![flow("2330", (2_000_000, dec!(20)), (100_000, dec!(1)))];
+    let fetched = BTreeSet::from(["2330".to_string()]);
+    let today = date(2026, 10, 5);
+    let held = view_message(&HoldingView::member(1, MEMBER), today, &notable, &fetched).await;
+    let empty = view_message(
+        &HoldingView::member(1, MEMBER + 1),
+        today,
+        &notable,
+        &fetched,
+    )
+    .await;
+    cleanup().await;
+    let message = held.expect("查詢持股").expect("持有 2330 應收到主力通知");
+    assert!(message.contains("買方"), "{message}");
+    assert_eq!(empty.expect("查詢持股"), None);
 }
 
 /// 以本機 mock server 取代富邦（MoneyDJ）主力進出頁，測逐檔抓取的三種分類。
@@ -222,7 +277,7 @@ mod collect {
         // 79979 沒有掛路由：mock server 回 404 空頁，解析失敗。
         let uri = server.uri();
         let symbols: BTreeSet<String> = ["2884", "2885", "79979"].map(String::from).into();
-        let today = NaiveDate::from_ymd_opt(2026, 10, 5).expect("合法日期");
+        let today = date(2026, 10, 5);
         let mut summary = RunSummary {
             holdings: symbols.len(),
             ..Default::default()

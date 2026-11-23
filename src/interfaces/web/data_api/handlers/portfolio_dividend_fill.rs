@@ -4,16 +4,18 @@
 //! [`PgDividendFillRepository`]。每列附同殖利率組的全市場基準（與 `/market/dividend-fill-stats`
 //! 共用快取）；基準查詢失敗只記警告、`peer` 為 `null`，不影響持股資料。屬個人持股資料。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::cmp::Reverse;
 
 use anyhow::Result;
 use axum::{
-    Json,
+    Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Days, Local, NaiveDate};
 use sqlx::PgPool;
 
 use super::dividend_fill::{into_dto, summary_dto};
@@ -21,16 +23,18 @@ use super::market_dividend_fill::bucket_dto;
 use super::{database_error, error_response, repository_error};
 use crate::domain::dividend::fill::{self, DividendFillQuery, FillOutcome, FillSummary};
 use crate::domain::dividend::fill_stats::{self, BucketStats, YieldBucket, bucket_stats};
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::cache::dividend_fill_stats;
 use crate::infra::database;
 use crate::infra::database::repository::dividend_fill::PgDividendFillRepository;
+use crate::infra::database::repository::holding_view;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, PortfolioDividendFillItem, PortfolioDividendFillParams,
     PortfolioDividendFillResponse,
 };
 
 /// 歷年填息對照回看的天數（約 5 年）。
-const HISTORY_DAYS: u64 = 5 * 365 + 1;
+const HISTORY_DAYS: i64 = 5 * 365 + 1;
 
 /// 同組基準的統計年數；與 [`HISTORY_DAYS`] 一致（`stats_window` 同樣是 5 × 365 + 1 天）。
 const PEER_YEARS: u8 = fill_stats::MARKET_PEER_YEARS;
@@ -48,7 +52,7 @@ const HOLDINGS_SQL: &str = r#"
 SELECT o.security_code AS stock_symbol, COALESCE(s."Name", '') AS name
 FROM stock_ownership_details o
 LEFT JOIN stocks s ON s.stock_symbol = o.security_code
-WHERE NOT o.is_sold AND ($1::bigint = 0 OR o.member_id = $1)
+WHERE NOT o.is_sold AND o.member_id = ANY($1)
 GROUP BY o.security_code, s."Name"
 HAVING SUM(o.share_quantity) > 0
 ORDER BY o.security_code
@@ -62,21 +66,24 @@ ORDER BY o.security_code
 /// 細節的 500。
 #[utoipa::path(get, path = "/api/v1/portfolio/dividend-fill", tag = "data-api", params(PortfolioDividendFillParams), responses((status = 200, body = PortfolioDividendFillResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn portfolio_dividend_fill(
+    Extension(view): Extension<HoldingView>,
     Query(params): Query<PortfolioDividendFillParams>,
 ) -> Response {
     let days = params.days.unwrap_or(365);
     if !(30..=730).contains(&days) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "days 必須介於 30 至 730");
     }
-    let member_id = params.member_id.unwrap_or(0);
-    if member_id < 0 {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
-    }
-    let holdings = match fetch_holdings(database::get_connection(), member_id).await {
+    // 範圍由 scope middleware 驗證後放進 extension（家庭全體或單一成員，7.6 N2）。
+    let member_id = view.member_id_or_total();
+    let members = match holding_view::member_ids(&view).await {
+        Ok(members) => members,
+        Err(error) => return repository_error(error),
+    };
+    let holdings = match fetch_holdings(database::get_connection(), &members).await {
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
-    let today = Local::now().date_naive();
+    let today = today();
     let repository = PgDividendFillRepository::new();
     let outcomes = match collect(&repository, &holdings, today, days).await {
         Ok(outcomes) => outcomes,
@@ -93,10 +100,10 @@ pub(crate) async fn portfolio_dividend_fill(
     Json(response(member_id, days, outcomes, &peers)).into_response()
 }
 
-/// 會員目前持股的代號與名稱（`member_id` 為 0 時是全部會員合計）。
-async fn fetch_holdings(pool: &PgPool, member_id: i64) -> sqlx::Result<Vec<(String, String)>> {
+/// `members` 目前持股的代號與名稱。
+async fn fetch_holdings(pool: &PgPool, members: &[i64]) -> sqlx::Result<Vec<(String, String)>> {
     sqlx::query_as(HOLDINGS_SQL)
-        .bind(member_id)
+        .bind(members)
         .fetch_all(pool)
         .await
 }
@@ -107,11 +114,11 @@ async fn fetch_holdings(pool: &PgPool, member_id: i64) -> sqlx::Result<Vec<(Stri
 async fn collect(
     repository: &impl DividendFillQuery,
     holdings: &[(String, String)],
-    today: NaiveDate,
+    today: Date,
     days: u16,
 ) -> Result<Vec<HoldingFill>> {
-    let since = today - Days::new(u64::from(days));
-    let history_since = today - Days::new(HISTORY_DAYS);
+    let since = today - i64::from(days).days();
+    let history_since = today - HISTORY_DAYS.days();
     let mut collected = Vec::with_capacity(holdings.len());
     for (symbol, name) in holdings {
         let outcomes = fill::recent_outcomes(repository, symbol, history_since, today).await?;

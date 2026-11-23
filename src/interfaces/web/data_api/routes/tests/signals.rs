@@ -1,7 +1,8 @@
 //! 技術訊號選股 endpoint 的資料庫語意整合測試。
 
 use axum::http::StatusCode;
-use chrono::NaiveDate;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
@@ -16,8 +17,8 @@ const SIGNALS: [(&str, &str, &str); 3] = [
     ("79979GB", "kd", "golden_cross"),
 ];
 
-fn date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(1991, 9, 3).expect("固定日期合法")
+fn date() -> Date {
+    jiff::civil::date(1991, 9, 3)
 }
 
 /// 刪除種入的訊號、日報價與股票主檔。
@@ -72,7 +73,7 @@ async fn market_signals_endpoint_db_semantics() {
             r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "ChangeRange", "TradeValue")
                VALUES ($1, $2, 50, 2.5, $3)"#,
         )
-        .bind(date())
+        .bind(date().to_sqlx())
         .bind(symbol)
         .bind(Decimal::from(value))
         .execute(pool)
@@ -84,7 +85,7 @@ async fn market_signals_endpoint_db_semantics() {
             "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
              VALUES ($1, $2, $3, $4, $2 || ' ' || $4)",
         )
-        .bind(date())
+        .bind(date().to_sqlx())
         .bind(symbol)
         .bind(indicator)
         .bind(kind)

@@ -1,8 +1,9 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::domain::dividend::entity::{Dividend, StockDividendInfo, StockDividendPayableDateInfo};
 use crate::domain::dividend::payout::{PayoutDividend, PayoutRatios, PeriodEarnings};
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::civil::Date;
 
 /// 股利領域之倉儲介面 (Repository Trait)。
 ///
@@ -47,7 +48,7 @@ pub trait DividendRepository: Send + Sync {
         &self,
         security_code: &str,
         year: i32,
-        created_time: DateTime<Local>,
+        created_time: TaipeiDateTime,
     ) -> Result<Vec<Dividend>>;
 
     /// 取得計算盈餘分配率所需的股利列（含目前寫入的結果）與各期財報每股盈餘。
@@ -62,13 +63,13 @@ pub trait DividendRepository: Send + Sync {
     /// 取得指定日期有除權或除息事件的股票資料與參考收盤價。
     async fn fetch_stocks_with_dividends_on_date(
         &self,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Vec<StockDividendInfo>>;
 
     /// 取得指定日期為股利發放日的股票與配發資訊。
     async fn fetch_payable_date_info_on_date(
         &self,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Vec<StockDividendPayableDateInfo>>;
 
     /// 儲存或更新單筆股利實體。

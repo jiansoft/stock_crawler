@@ -15,15 +15,19 @@
 //!
 //! 落後只是陳述事實：2026-10 研究（T14）顯示遲遲未填息的股票之後多半落後大盤，不是加碼理由。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use chrono::{Days, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::{format_decimal_with_commas, holdings};
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::dividend::{
         fill::{self, DividendFillQuery, FillOutcome, FillSummary},
         fill_stats::{self, BucketStats, YieldBucket, bucket_stats},
@@ -34,10 +38,10 @@ use crate::{
 };
 
 /// 只看除權息日在今天往前這麼多天內的事件；超過一年還沒填息的不再追蹤。
-const LOOKBACK_DAYS: u64 = 365;
+const LOOKBACK_DAYS: i64 = 365;
 
 /// 自身填息紀錄回看的天數（約 5 年），與 `/portfolio/dividend-fill` 的 history 相同。
-const HISTORY_DAYS: u64 = 5 * 365 + 1;
+const HISTORY_DAYS: i64 = 5 * 365 + 1;
 
 /// 全市場基準的統計年數；與 [`HISTORY_DAYS`] 一致。
 const PEER_YEARS: u8 = fill_stats::MARKET_PEER_YEARS;
@@ -101,18 +105,38 @@ struct Review {
     lagging: Vec<Lagging>,
 }
 
+impl Review {
+    /// 只留下範圍內持股的事件（依收件者範圍產生內容，會員系統計畫 7.6）。
+    fn within(&self, held: &BTreeSet<String>) -> Self {
+        Self {
+            filled: self
+                .filled
+                .iter()
+                .filter(|(symbol, _)| held.contains(symbol))
+                .cloned()
+                .collect(),
+            lagging: self
+                .lagging
+                .iter()
+                .filter(|lagging| held.contains(&lagging.symbol))
+                .cloned()
+                .collect(),
+        }
+    }
+}
+
 /// 排程入口：通知今天填息與今天第一次落後基準的持股。
 ///
 /// # Errors
 ///
 /// 查詢持股失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    run(Local::now().date_naive()).await
+    run(today()).await
 }
 
 /// [`execute`] 的本體：以 `today` 判斷今天填息與今天第一次落後。
-async fn run(today: NaiveDate) -> Result<()> {
-    let symbols = holdings::active_holding_symbols()
+async fn run(today: Date) -> Result<()> {
+    let symbols = holdings::crawl_holding_symbols()
         .await
         .context("fetch active holdings for dividend fill notification failed")?;
     let repository = PgDividendFillRepository::new();
@@ -131,10 +155,32 @@ async fn run(today: NaiveDate) -> Result<()> {
         review.filled.len(),
         review.lagging.len()
     );
-    if let Some(message) = build_message(today, &review, holdings::stock_name) {
-        alert::send_message(&message).await;
+    if !review.filled.is_empty() || !review.lagging.is_empty() {
+        let dedup_key = format!("{}:{today}", Topic::HoldingsPayableFill.code());
+        notify::notify_holdings(Topic::HoldingsPayableFill, &dedup_key, |view| {
+            view_message(today, &review, view)
+        })
+        .await;
     }
     Ok(())
+}
+
+/// 一個收件者範圍的填息通知：只列範圍內持股的事件，沒有事件時回 `None`。
+///
+/// # Errors
+///
+/// 查詢範圍內持股失敗時回傳錯誤。
+async fn view_message(
+    today: Date,
+    review: &Review,
+    view: crate::domain::portfolio::view::HoldingView,
+) -> Result<Option<String>> {
+    let held = holdings::active_holding_symbols(&view).await?;
+    Ok(build_message(
+        today,
+        &review.within(&held),
+        holdings::stock_name,
+    ))
 }
 
 /// 持股近 [`LOOKBACK_DAYS`] 天內今天填息與今天第一次落後的除權息，依代號、除權息日排序；
@@ -143,10 +189,10 @@ async fn review(
     repository: &impl DividendFillQuery,
     symbols: impl IntoIterator<Item = &String>,
     peers: &[BucketStats],
-    today: NaiveDate,
+    today: Date,
 ) -> Review {
-    let since = today - Days::new(LOOKBACK_DAYS);
-    let history_since = today - Days::new(HISTORY_DAYS);
+    let since = today - LOOKBACK_DAYS.days();
+    let history_since = today - HISTORY_DAYS.days();
     let mut review = Review::default();
     for symbol in symbols {
         let outcomes = match fill::recent_outcomes(repository, symbol, history_since, today).await {
@@ -184,7 +230,7 @@ fn lag_baseline(
     outcome: &FillOutcome,
     history: &FillSummary,
     peers: &[BucketStats],
-    today: NaiveDate,
+    today: Date,
 ) -> Option<Baseline> {
     if outcome.fill_date.is_some() || outcome.latest_date != today {
         return None;
@@ -232,7 +278,7 @@ fn target_text(outcome: &FillOutcome) -> String {
 
 /// 組出通知訊息（Telegram MarkdownV2）；沒有填息也沒有落後時回 `None`。
 fn build_message(
-    date: NaiveDate,
+    date: Date,
     review: &Review,
     stock_name: impl Fn(&str) -> String,
 ) -> Option<String> {

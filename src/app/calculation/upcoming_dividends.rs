@@ -4,11 +4,12 @@
 //! 08:00 除權息清單的依日期查詢（[`DividendRepository::fetch_stocks_with_dividends_on_date`](crate::domain::dividend::repository::DividendRepository::fetch_stocks_with_dividends_on_date)），
 //! 只含已公告除權息日的事件；不推估、不扣二代健保與稅。
 
+use jiff::ToSpan;
 use std::collections::BTreeMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use crate::domain::dividend::{entity::StockDividendInfo, repository::DividendRepository};
@@ -17,12 +18,12 @@ use crate::domain::dividend::{entity::StockDividendInfo, repository::DividendRep
 #[async_trait]
 pub trait ExDividendDayQuery: Send + Sync {
     /// 指定日期除權或除息的股票（含每股股利與參考收盤價）。
-    async fn fetch_on(&self, date: NaiveDate) -> Result<Vec<StockDividendInfo>>;
+    async fn fetch_on(&self, date: Date) -> Result<Vec<StockDividendInfo>>;
 }
 
 #[async_trait]
 impl<T: DividendRepository> ExDividendDayQuery for T {
-    async fn fetch_on(&self, date: NaiveDate) -> Result<Vec<StockDividendInfo>> {
+    async fn fetch_on(&self, date: Date) -> Result<Vec<StockDividendInfo>> {
         self.fetch_stocks_with_dividends_on_date(date).await
     }
 }
@@ -31,7 +32,7 @@ impl<T: DividendRepository> ExDividendDayQuery for T {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpcomingDividend {
     /// 除權息日（這一列只含這天除息或除權的部分）。
-    pub ex_date: NaiveDate,
+    pub ex_date: Date,
     /// 股票代號。
     pub stock_symbol: String,
     /// 股票名稱。
@@ -70,20 +71,38 @@ pub fn total_shares(holdings: impl IntoIterator<Item = (String, i64)>) -> BTreeM
     shares
 }
 
+/// 把以所有會員持股算出的除權息改成某個範圍的股數：只留 `shares` 裡的持股，股數換成範圍內的合計
+/// （持股類通知依收件者範圍產生內容，會員系統計畫 7.6）。
+pub fn rescope(
+    items: &[UpcomingDividend],
+    shares: &BTreeMap<String, i64>,
+) -> Vec<UpcomingDividend> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let held = *shares.get(&item.stock_symbol)?;
+            Some(UpcomingDividend {
+                shares: held,
+                ..item.clone()
+            })
+        })
+        .collect()
+}
+
 /// `from` 到 `to`（含）每天的除權息，只留 `shares` 裡的持股，依除權息日、代號排序。
 ///
 /// 沒有持股時不查詢；單日查詢失敗只記錄警告、少那一天。
 pub async fn upcoming_dividends(
     query: &impl ExDividendDayQuery,
     shares: &BTreeMap<String, i64>,
-    from: NaiveDate,
-    to: NaiveDate,
+    from: Date,
+    to: Date,
 ) -> Vec<UpcomingDividend> {
     let mut items = Vec::new();
     if shares.is_empty() {
         return items;
     }
-    let dates = from.iter_days().take_while(|date| *date <= to);
+    let dates = from.series(1.day()).take_while(|date| *date <= to);
     for date in dates {
         match query.fetch_on(date).await {
             Ok(stocks) => {
@@ -106,7 +125,7 @@ pub async fn upcoming_dividends(
 
 /// 持股在這天的除息與除權；不是持股、或這天既不除息也不除權時為 `None`。
 fn held_dividend(
-    ex_date: NaiveDate,
+    ex_date: Date,
     stock: StockDividendInfo,
     shares: &BTreeMap<String, i64>,
 ) -> Option<UpcomingDividend> {

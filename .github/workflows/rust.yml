@@ -286,6 +286,14 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_index.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/trace.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
+        # 會員系統結構檔（會員系統計畫 4.2）：會 ALTER 三張市值表、trace 與 portfolio_target*，
+        # 所以排在它們之後；連跑兩次，驗證可重複執行。只給正式庫的資料遷移檔不載入。
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member_rbac_and_mcp_token.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member_rbac_and_mcp_token.sql
+        # 收尾檔：移除給舊版程式的過渡索引與預設值，測試最終結構；同樣連跑兩次。
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member_rbac_finalize.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member_rbac_finalize.sql
         # 確認股利明細表由正確的腳本建立，且包含必要欄位。
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -c "SELECT stock_ownership_details_serial, dividend_record_detail_serial, dividend_serial, cash, stock_money, stock, total FROM public.dividend_record_detail_more LIMIT 0"
 
@@ -415,6 +423,14 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_index.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/trace.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
+        # 會員系統結構檔（會員系統計畫 4.2）：會 ALTER 三張市值表、trace 與 portfolio_target*，
+        # 所以排在它們之後；連跑兩次，驗證可重複執行。只給正式庫的資料遷移檔不載入。
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member_rbac_and_mcp_token.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member_rbac_and_mcp_token.sql
+        # 收尾檔：移除給舊版程式的過渡索引與預設值，測試最終結構；同樣連跑兩次。
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member_rbac_finalize.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/member_rbac_finalize.sql
         # 確認股利明細表由正確的腳本建立，且包含必要欄位。
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -c "SELECT stock_ownership_details_serial, dividend_record_detail_serial, dividend_serial, cash, stock_money, stock, total FROM public.dividend_record_detail_more LIMIT 0"
 

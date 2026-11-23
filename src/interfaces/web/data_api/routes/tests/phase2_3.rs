@@ -169,7 +169,7 @@ async fn phase3_screen_endpoint_db_semantics() {
         assert_eq!(stock["market_id"], 2, "twse 篩選不可混入其他市場");
         for field in ["valuation_date", "yield_date"] {
             if let Some(date) = stock[field].as_str() {
-                assert!(chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok());
+                assert!(jiff::civil::Date::strptime("%Y-%m-%d", date).is_ok());
             }
         }
         if let Some(month) = stock["revenue_month"].as_str() {

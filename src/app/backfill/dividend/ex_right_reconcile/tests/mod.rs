@@ -9,7 +9,10 @@ mod mock_sources;
 mod plan;
 mod yahoo_fill;
 
-use chrono::Local;
+use crate::core::util::datetime::TaipeiDateTime;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::plan::*;
@@ -47,8 +50,8 @@ pub(super) fn row(
         ex_dividend_date_stock: ex_stock.to_string(),
         payable_date_cash: "-".to_string(),
         payable_date_stock: "-".to_string(),
-        created_time: Local::now(),
-        updated_time: Local::now(),
+        created_time: TaipeiDateTime::now(),
+        updated_time: TaipeiDateTime::now(),
     }
 }
 
@@ -56,7 +59,7 @@ pub(super) fn cash_event(date: &str, cash: Decimal) -> ExDividendAnnouncement {
     ExDividendAnnouncement {
         stock_symbol: "1109".to_string(),
         name: "信大".to_string(),
-        ex_date: NaiveDate::parse_from_str(date, DATE_FORMAT).unwrap(),
+        ex_date: Date::strptime(DATE_FORMAT, date).unwrap(),
         is_cash: true,
         is_stock: false,
         cash_dividend: Some(cash),
@@ -70,11 +73,11 @@ pub(super) fn existing(rows: Vec<Dividend>) -> HashMap<String, Vec<Dividend>> {
 }
 
 /// 測試用的交易所資料截止日。
-pub(super) const AS_OF: NaiveDate = NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
+pub(super) const AS_OF: Date = date(2026, 10, 1);
 
 #[test]
 fn calendar_year_chunks_split_on_year_boundaries() {
-    let d = |y, m, day| NaiveDate::from_ymd_opt(y, m, day).unwrap();
+    let d = |y, m, day| ymd(y, m, day).unwrap();
     assert_eq!(
         calendar_year_chunks(d(2024, 11, 1), d(2026, 2, 3)),
         vec![

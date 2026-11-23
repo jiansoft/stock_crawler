@@ -1,6 +1,6 @@
 //! `/portfolio/history` handler：持股的時間加權報酬、月報酬、最大回撤與大盤比較。
 //!
-//! 每日市值來自 `daily_money_history_member`（收盤後計算，`member_id = 0` 為全體）；
+//! 每日市值來自 `daily_money_history_member`（收盤後計算，`member_id = 0` 為該家庭合計）；
 //! 買進成本取 `stock_ownership_details`、賣出所得取 `sell_history`（排除已撤銷）；
 //! 大盤取 `index` 的 TAIEX。計算規則在 [`crate::domain::portfolio::performance`]。
 //!
@@ -9,32 +9,36 @@
 //! 查全部會員時，會員中途開始記錄的那天視為投入（見 `FLOWS_SQL`）。
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Days, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 
-use super::{database_error, error_response};
+use super::{database_error, error_response, repository_error};
 use crate::domain::portfolio::performance::{self, IndexClose, ValuePoint};
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database;
+use crate::infra::database::repository::holding_view;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, PortfolioHistoryParams, PortfolioHistoryResponse,
 };
 
-/// 期間內每日市值，依日期由舊到新。
+/// 期間內每日市值，依日期由舊到新；`$1` 家庭、`$2` 會員（0 為該家庭合計）。
 const VALUES_SQL: &str = r#"
 SELECT date, market_value
 FROM daily_money_history_member
-WHERE member_id = $1
-  AND date >= (SELECT max(date) FROM daily_money_history_member WHERE member_id = $1)
-      - make_interval(months => $2)
+WHERE household_id = $1 AND member_id = $2
+  AND date >= (SELECT max(date) FROM daily_money_history_member WHERE household_id = $1 AND member_id = $2)
+      - make_interval(months => $3)
 ORDER BY date
 "#;
 
-/// `$2` 之後、`$3`（含）以前的買賣，依入帳日彙總；`$1 = 0` 為全部會員。
+/// `$2` 之後、`$3`（含）以前的買賣，依入帳日彙總；`$1` 為範圍內的會員編號，`$4` 為是否查家庭全體。
 ///
 /// 每位會員的買賣只計「該會員市值歷史第一天之後」的部分——更早的部位已包含在他第一天的
 /// 市值裡。查全部會員時，另把每位會員市值歷史的第一天當成一筆投入（金額＝當天市值）：
@@ -44,25 +48,25 @@ const FLOWS_SQL: &str = r#"
 WITH starts AS (
     SELECT member_id, min(date) AS first_date
     FROM daily_money_history_member
-    WHERE member_id > 0 AND ($1::bigint = 0 OR member_id = $1)
+    WHERE member_id > 0 AND member_id = ANY($1)
     GROUP BY member_id
 ), flows AS (
     SELECT member_id, false AS joined,
         GREATEST(date, (created_time AT TIME ZONE 'Asia/Taipei')::date) AS booked,
         -holding_cost AS buys, 0::numeric AS sells
     FROM stock_ownership_details
-    WHERE $1::bigint = 0 OR member_id = $1
+    WHERE member_id = ANY($1)
     UNION ALL
     SELECT member_id, false,
         GREATEST(date, (create_time AT TIME ZONE 'Asia/Taipei')::date),
         0::numeric, amount
     FROM sell_history
-    WHERE NOT is_reverted AND ($1::bigint = 0 OR member_id = $1)
+    WHERE NOT is_reverted AND member_id = ANY($1)
     UNION ALL
     SELECT h.member_id, true, h.date, h.market_value, 0::numeric
     FROM daily_money_history_member h
     JOIN starts s ON s.member_id = h.member_id AND s.first_date = h.date
-    WHERE $1::bigint = 0
+    WHERE $4::bool
 )
 SELECT f.booked AS date, SUM(f.buys) AS buys, SUM(f.sells) AS sells
 FROM flows f
@@ -82,24 +86,27 @@ ORDER BY date
 "#;
 
 /// 往基準日前多抓的指數天數，涵蓋長假。
-const INDEX_LOOKBACK_DAYS: u64 = 15;
+const INDEX_LOOKBACK_DAYS: i64 = 15;
 
 #[derive(sqlx::FromRow)]
 struct ValueRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     market_value: Decimal,
 }
 
 #[derive(sqlx::FromRow)]
 struct FlowRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     buys: Decimal,
     sells: Decimal,
 }
 
 #[derive(sqlx::FromRow)]
 struct IndexRow {
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     close: Decimal,
 }
 
@@ -112,11 +119,16 @@ struct IndexRow {
 /// `member_id` 為負數或 `months` 不在 1–120 回 422、驗證失敗回 401；資料庫查詢失敗時
 /// 記錄內部錯誤並回不含 SQL 細節的 500。市值歷史不足兩個交易日時回 200 與 `null` 欄位。
 #[utoipa::path(get, path = "/api/v1/portfolio/history", tag = "data-api", params(PortfolioHistoryParams), responses((status = 200, body = PortfolioHistoryResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn portfolio_history(Query(params): Query<PortfolioHistoryParams>) -> Response {
-    let member_id = params.member_id.unwrap_or(0);
-    if member_id < 0 {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
-    }
+pub(crate) async fn portfolio_history(
+    Extension(view): Extension<HoldingView>,
+    Query(params): Query<PortfolioHistoryParams>,
+) -> Response {
+    // 範圍由 scope middleware 驗證後放進 extension（家庭全體或單一成員，7.6 N2）。
+    let member_id = view.member_id_or_total();
+    let members = match holding_view::member_ids(&view).await {
+        Ok(members) => members,
+        Err(error) => return repository_error(error),
+    };
     let months = params.months.unwrap_or(12);
     if !(1..=120).contains(&months) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "months 必須介於 1 至 120");
@@ -124,6 +136,7 @@ pub(crate) async fn portfolio_history(Query(params): Query<PortfolioHistoryParam
     let pool = database::get_connection();
 
     let values: Vec<ValueRow> = match sqlx::query_as(VALUES_SQL)
+        .bind(view.household_id())
         .bind(member_id)
         .bind(i32::from(months))
         .fetch_all(pool)
@@ -138,9 +151,10 @@ pub(crate) async fn portfolio_history(Query(params): Query<PortfolioHistoryParam
     let (from, to) = (first.date, last.date);
 
     let flows: Vec<FlowRow> = match sqlx::query_as(FLOWS_SQL)
-        .bind(member_id)
-        .bind(from)
-        .bind(to)
+        .bind(&members)
+        .bind(from.to_sqlx())
+        .bind(to.to_sqlx())
+        .bind(view.member_id().is_none())
         .fetch_all(pool)
         .await
     {
@@ -148,8 +162,8 @@ pub(crate) async fn portfolio_history(Query(params): Query<PortfolioHistoryParam
         Err(error) => return database_error(error),
     };
     let index: Vec<IndexRow> = match sqlx::query_as(INDEX_SQL)
-        .bind(from - Days::new(INDEX_LOOKBACK_DAYS))
-        .bind(to)
+        .bind((from - INDEX_LOOKBACK_DAYS.days()).to_sqlx())
+        .bind(to.to_sqlx())
         .fetch_all(pool)
         .await
     {

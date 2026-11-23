@@ -1,5 +1,9 @@
 //! 持股估值週報的測試；連外的測試標 #[ignore]。
 
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
+use jiff::civil::date;
 use std::collections::HashMap;
 
 use anyhow::anyhow;
@@ -7,8 +11,8 @@ use async_trait::async_trait;
 
 use super::*;
 
-fn day(offset: i64) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 9).expect("有效日期") - chrono::Duration::days(offset)
+fn day(offset: i64) -> Date {
+    date(2026, 10, 9) - (offset).days()
 }
 
 /// `days` 天的每日倍數（由新到舊），最新一天本益比為 `latest_pe`，之前依序為 1..days 倍；
@@ -50,11 +54,11 @@ impl ValuationHistoryRepository for FakeRepo {
 async fn print_message() {
     dotenvy::dotenv().ok();
     crate::infra::cache::SHARE.load().await;
-    let symbols = holdings::common_stock_holdings().await.expect("取得持股");
+    let symbols = holdings::crawl_common_stocks().await.expect("取得持股");
     let flags = collect_flags(
         &PgQuoteRepository::new(),
         symbols.iter().map(String::as_str),
-        Local::now().date_naive(),
+        today(),
     )
     .await;
     println!("持股 {} 檔、標記 {} 筆", symbols.len(), flags.len());
@@ -131,4 +135,71 @@ async fn collect_flags_and_build_message() {
     let only_low: Vec<Flag> = flags.into_iter().filter(|flag| !flag.high).collect();
     let message = build_message(&only_low, |_| String::new()).expect("有低檔");
     assert!(!message.contains("偏高"), "{message}");
+}
+
+/// 收件者範圍的估值通知以資料庫的持股為準：只列範圍內持有的普通股，沒有持股時不產生訊息。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn view_message_uses_holdings_in_scope() {
+    use crate::domain::portfolio::view::HoldingView;
+    dotenvy::dotenv().ok();
+    let pool = crate::infra::database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 view_message_uses_holdings_in_scope：無資料庫連接");
+        return;
+    }
+    const MEMBER: i64 = 979_904;
+    let cleanup = || async {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(pool)
+            .await
+            .expect("清除測試持股");
+    };
+    cleanup().await;
+    sqlx::query(
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, created_time, date) \
+         VALUES ($1, '2330', 1000, '1999-03-10 00:00:00+08', '1999-03-10')",
+    )
+    .bind(MEMBER)
+    .execute(pool)
+    .await
+    .expect("插入測試持股");
+    let flag = |symbol: &str| Flag {
+        stock_symbol: symbol.to_string(),
+        ratio: Ratio::PriceEarning,
+        current: 30.0,
+        percentile: 95.0,
+        median: 20.0,
+        high: true,
+    };
+    let flags = [flag("2330"), flag("1101")];
+    let held = view_message(&flags, HoldingView::member(1, MEMBER)).await;
+    let empty = view_message(&flags, HoldingView::member(1, MEMBER + 1)).await;
+    cleanup().await;
+    let message = held.expect("查詢持股").expect("持有 2330 應收到估值通知");
+    assert!(!message.contains("1101"), "範圍外的持股不可出現：{message}");
+    assert_eq!(empty.expect("查詢持股"), None);
+}
+
+/// 排程入口：讀全部持股的估值；測試環境沒有 Telegram adapter，只驗證不出錯。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_reads_all_holdings() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_reads_all_holdings：無資料庫連接");
+        return;
+    }
+    execute().await.expect("估值通知不應失敗");
 }

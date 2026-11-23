@@ -3,7 +3,9 @@
 //! 全部不需要資料庫：參數解析、白名單驗證與 Decimal → 字串序列化都是
 //! 純運算，而這三者正是前端契約最容易在重構時被悄悄改掉的部分。
 
-use chrono::NaiveDate;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::{
@@ -15,9 +17,9 @@ use crate::domain::performance::entity::{CagrMetric, CagrPeriod, SimulationOutco
 use crate::domain::performance::query::CagrSortKey;
 
 /// 建立一筆資料齊全的領域結果。
-fn complete(symbol: &str, period: CagrPeriod, base_date: NaiveDate) -> DomainStockCagr {
+fn complete(symbol: &str, period: CagrPeriod, base_date: Date) -> DomainStockCagr {
     DomainStockCagr {
-        date: NaiveDate::from_ymd_opt(2026, 8, 6).unwrap(),
+        date: date(2026, 8, 6),
         stock_symbol: symbol.to_owned(),
         period,
         base_date: Some(base_date),
@@ -33,7 +35,7 @@ fn complete(symbol: &str, period: CagrPeriod, base_date: NaiveDate) -> DomainSto
             cagr_pct: dec!(23.4318),
         }),
         reinvested: None,
-        first_quote_date: NaiveDate::from_ymd_opt(2015, 3, 2),
+        first_quote_date: ymd(2015, 3, 2),
         shortfall_days: Some(0),
         data_complete: true,
         has_anomaly: false,
@@ -44,7 +46,7 @@ fn complete(symbol: &str, period: CagrPeriod, base_date: NaiveDate) -> DomainSto
 /// 建立一筆資料不足的領域結果（所有數值欄位皆為 None）。
 fn incomplete(symbol: &str, period: CagrPeriod) -> DomainStockCagr {
     DomainStockCagr {
-        date: NaiveDate::from_ymd_opt(2026, 8, 6).unwrap(),
+        date: date(2026, 8, 6),
         stock_symbol: symbol.to_owned(),
         period,
         base_date: None,
@@ -54,7 +56,7 @@ fn incomplete(symbol: &str, period: CagrPeriod) -> DomainStockCagr {
         price: None,
         total: None,
         reinvested: None,
-        first_quote_date: NaiveDate::from_ymd_opt(2024, 5, 1),
+        first_quote_date: ymd(2024, 5, 1),
         shortfall_days: None,
         data_complete: false,
         has_anomaly: false,
@@ -73,8 +75,8 @@ fn ranking_item(cagr: DomainStockCagr, rank: Option<i64>) -> DomainCagrRankingIt
 }
 
 /// 十年期範例使用的期初交易日。
-fn base_date() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2016, 8, 5).unwrap()
+fn base_date() -> Date {
+    date(2016, 8, 5)
 }
 
 /// `period` 與 `metric` 的預設值與白名單必須與前端契約一致。
@@ -267,7 +269,7 @@ fn test_period_item_carries_period_and_disclosure_flag() {
 #[test]
 fn test_representative_base_date_ignores_incomplete_rows() {
     let common = base_date();
-    let delayed = NaiveDate::from_ymd_opt(2016, 8, 22).unwrap();
+    let delayed = date(2016, 8, 22);
     let items = vec![
         ranking_item(complete("a", CagrPeriod::Y10, common), Some(1)),
         ranking_item(complete("b", CagrPeriod::Y10, delayed), Some(2)),

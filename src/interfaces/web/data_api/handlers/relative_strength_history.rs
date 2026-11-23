@@ -5,13 +5,13 @@
 //! ＋ 0.3 × 近 240 日，分數是比它弱的家數在上市櫃普通股（不含 ETF、特別股）中的百分位。每天都要以全體排名，
 //! 由 [`RelativeStrengthQuery`] 一次查詢在資料庫內以視窗函式算完，只回傳這檔股票的列。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Local;
 
 use super::{ensure_stock_exists, error_response, parse_optional_date, repository_error, round2};
 use crate::domain::quote::relative_strength::{self, RelativeStrengthDay, RelativeStrengthQuery};
@@ -36,7 +36,7 @@ pub(crate) async fn relative_strength_history(
     Query(params): Query<RelativeStrengthHistoryParams>,
 ) -> Response {
     let until = match parse_optional_date(params.date.as_deref()) {
-        Ok(value) => value.unwrap_or_else(|| Local::now().date_naive()),
+        Ok(value) => value.unwrap_or_else(today),
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let days = params.days.unwrap_or(60);

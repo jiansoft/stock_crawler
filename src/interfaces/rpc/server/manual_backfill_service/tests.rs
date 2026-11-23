@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use jiff::civil::date;
 use rust_decimal::Decimal;
 use tonic::Code;
 
@@ -93,7 +93,7 @@ fn start_job_errors_map_to_grpc_status_codes() {
 fn grpc_date_parsing_matches_the_http_rules() {
     assert_eq!(
         parse_grpc_date(" 2026-04-30 ").expect("合法日期"),
-        NaiveDate::from_ymd_opt(2026, 4, 30).expect("測試日期應合法")
+        date(2026, 4, 30)
     );
     for raw in ["", "2026-04", "2026/04/30", "2026-02-30"] {
         let err = parse_grpc_date(raw).expect_err("非法日期應被拒絕");
@@ -106,7 +106,7 @@ fn grpc_date_parsing_matches_the_http_rules() {
 fn grpc_month_parsing_resolves_to_the_first_day() {
     assert_eq!(
         parse_grpc_month(" 2015-01 ").expect("合法月份"),
-        NaiveDate::from_ymd_opt(2015, 1, 1).expect("測試日期應合法")
+        date(2015, 1, 1)
     );
     for raw in ["", "2015", "2015-13", "2015-01-01"] {
         let err = parse_grpc_month(raw).expect_err("非法月份應被拒絕");

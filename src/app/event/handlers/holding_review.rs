@@ -11,15 +11,18 @@
 //!
 //! 月營收與季報排程每天都會重抓整期資料並派發事件，因此以 Redis 記錄每一期已通知過的
 //! 持股代號：只有出現尚未通知過的持股（新公布或新買進）才送出，並在補發時標出新增的那幾檔。
+//!
+//! 內容依收件者範圍產生（會員系統計畫 7.6）：只列範圍內持有的股票，範圍內沒有新增的就不發。
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
-use crate::app::event::taiwan_stock::format_decimal_with_commas;
+use crate::app::event::taiwan_stock::{format_decimal_with_commas, holdings};
+use crate::app::notify;
 // 通知走 core::alert（port），跳脫工具走 core::util::text——
 // app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
 use crate::core::{alert, util::text};
@@ -56,6 +59,18 @@ const FOREIGN_HOLDING_STREAK_NOTE_DAYS: i32 = 3;
 /// 補發通知時標在新增持股前的記號。
 const NEW_HOLDING_MARK: &str = "🆕 ";
 
+/// 只留下範圍內持有的股票（依收件者範圍產生內容，會員系統計畫 7.6）。
+fn held_alerts<'a>(
+    group: &[&'a HoldingForeignHoldingAlert],
+    held: &BTreeSet<String>,
+) -> Vec<&'a HoldingForeignHoldingAlert> {
+    group
+        .iter()
+        .copied()
+        .filter(|alert| held.contains(&alert.stock_symbol))
+        .collect()
+}
+
 impl EventDispatcher {
     /// 處理 `MonthlyRevenueUpdated` 事件：推播全部持股的月營收。
     pub(super) async fn handle_monthly_revenue_updated(date: i64) -> Result<()> {
@@ -74,10 +89,12 @@ impl EventDispatcher {
         }
 
         let sent = Self::send_if_new_holdings(
+            alert::Topic::HoldingsRevenue,
             &format!("holding_review:revenue:{date}"),
             REVENUE_NOTIFIED_TTL_SECONDS,
-            alerts.iter().map(|alert| alert.stock_symbol.as_str()),
-            |new_symbols| Self::build_revenue_message(date, alerts, new_symbols),
+            alerts,
+            |alert| alert.stock_symbol.as_str(),
+            |mine, new_symbols| Self::build_revenue_message(date, mine, new_symbols),
         )
         .await;
         if !sent {
@@ -106,10 +123,12 @@ impl EventDispatcher {
         }
 
         let sent = Self::send_if_new_holdings(
+            alert::Topic::HoldingsFinancialReport,
             &format!("holding_review:financial:{year}{quarter}"),
             FINANCIAL_NOTIFIED_TTL_SECONDS,
-            alerts.iter().map(|alert| alert.stock_symbol.as_str()),
-            |new_symbols| Self::build_financial_message(year, quarter, alerts, new_symbols),
+            alerts,
+            |alert| alert.stock_symbol.as_str(),
+            |mine, new_symbols| Self::build_financial_message(year, quarter, mine, new_symbols),
         )
         .await;
         if !sent {
@@ -126,7 +145,7 @@ impl EventDispatcher {
     ///
     /// 每檔、每個方向各用一個會過期的 Redis 鍵去重（20 天），而不是像月營收那樣共用一個集合：
     /// 共用集合每次寫入都會延長 TTL，已通知過的股票就永遠不會再被提醒。
-    pub(super) async fn handle_foreign_holdings_updated(date: NaiveDate) -> Result<()> {
+    pub(super) async fn handle_foreign_holdings_updated(date: Date) -> Result<()> {
         let alerts = PgForeignHoldingRepository::new()
             .fetch_holding_alerts()
             .await?;
@@ -135,10 +154,7 @@ impl EventDispatcher {
     }
 
     /// 外資持股通知的本體：挑出達門檻且去重期間內沒通知過的持股送出一則，回傳這次通知的檔數。
-    async fn notify_foreign_holdings(
-        date: NaiveDate,
-        alerts: &[HoldingForeignHoldingAlert],
-    ) -> usize {
+    async fn notify_foreign_holdings(date: Date, alerts: &[HoldingForeignHoldingAlert]) -> usize {
         let mut increases = Vec::new();
         let mut decreases = Vec::new();
         let mut keys = Vec::new();
@@ -164,9 +180,17 @@ impl EventDispatcher {
             return 0;
         }
 
-        alert::send_message(&Self::build_foreign_holding_message(
-            date, &increases, &decreases,
-        ))
+        let dedup_key = format!("{}:{date}", alert::Topic::HoldingsForeignHolding.code());
+        notify::notify_holdings(alert::Topic::HoldingsForeignHolding, &dedup_key, |view| {
+            let (increases, decreases) = (&increases, &decreases);
+            async move {
+                let held = holdings::active_holding_symbols(&view).await?;
+                let (mine_up, mine_down) =
+                    (held_alerts(increases, &held), held_alerts(decreases, &held));
+                Ok((!mine_up.is_empty() || !mine_down.is_empty())
+                    .then(|| Self::build_foreign_holding_message(date, &mine_up, &mine_down)))
+            }
+        })
         .await;
 
         let notified = keys.len();
@@ -200,7 +224,7 @@ impl EventDispatcher {
 
     /// 組出外資持股變化通知：增持在前、減持在後，各自依 20 日變化幅度排序。
     fn build_foreign_holding_message(
-        date: NaiveDate,
+        date: Date,
         increases: &[&HoldingForeignHoldingAlert],
         decreases: &[&HoldingForeignHoldingAlert],
     ) -> String {
@@ -267,20 +291,37 @@ impl EventDispatcher {
     /// 第一次通知時全部都是新的，`build_message` 收到 `None`，不逐檔標記；
     /// 之後的補發才傳入新增代號，讓訊息標出這次多了哪幾檔。
     /// 已通知集合只增不減，賣出後再買回的持股不會在同一期被重複通知。
-    async fn send_if_new_holdings<'a>(
+    ///
+    /// 依收件者範圍只列範圍內持有的股票；範圍內沒有新增的收件者不發（會員系統計畫 7.6）。
+    async fn send_if_new_holdings<T: Clone + Sync>(
+        topic: alert::Topic,
         key: &str,
         ttl_in_seconds: usize,
-        symbols: impl IntoIterator<Item = &'a str>,
-        build_message: impl FnOnce(Option<&BTreeSet<String>>) -> String,
+        alerts: &[T],
+        symbol: impl Fn(&T) -> &str + Sync,
+        build_message: impl Fn(&[T], Option<&BTreeSet<String>>) -> String + Sync,
     ) -> bool {
         let mut notified = Self::load_notified_symbols(key).await;
-        let new_symbols = Self::find_new_symbols(&notified, symbols);
+        let new_symbols = Self::find_new_symbols(&notified, alerts.iter().map(&symbol));
         if new_symbols.is_empty() {
             return false;
         }
 
         let highlight = (!notified.is_empty()).then_some(&new_symbols);
-        alert::send_message(&build_message(highlight)).await;
+        notify::notify_holdings(topic, key, |view| {
+            let (symbol, build_message, new_symbols) = (&symbol, &build_message, &new_symbols);
+            async move {
+                let held = holdings::active_holding_symbols(&view).await?;
+                let mine: Vec<T> = alerts
+                    .iter()
+                    .filter(|alert| held.contains(symbol(alert)))
+                    .cloned()
+                    .collect();
+                let has_new = mine.iter().any(|alert| new_symbols.contains(symbol(alert)));
+                Ok(has_new.then(|| build_message(&mine, highlight)))
+            }
+        })
+        .await;
 
         notified.extend(new_symbols);
         let value = notified.into_iter().collect::<Vec<_>>().join(",");

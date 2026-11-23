@@ -1,5 +1,8 @@
 //! 官方本益比／股價淨值比回補的 PostgreSQL 實作（[`OfficialRatioRepository`]）的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -44,20 +47,17 @@ async fn fill_official_ratios_by_policy() {
         sqlx::query(sql).execute(pool).await.expect("種入測試資料");
     }
     let repo = PgQuoteRepository::new();
-    let from = NaiveDate::from_ymd_opt(2001, 3, 1).expect("有效日期");
-    let to = NaiveDate::from_ymd_opt(2001, 3, 31).expect("有效日期");
+    let from = date(2001, 3, 1);
+    let to = date(2001, 3, 31);
 
     // 上市：03-01、03-02 有缺；03-05 沒成交、ETF 不算。
     let listed = repo
         .fetch_dates_to_update(2, from, to, PePolicy::FillZeroOnly)
         .await
         .expect("查詢");
-    assert_eq!(
-        listed,
-        vec![from, NaiveDate::from_ymd_opt(2001, 3, 2).expect("有效日期")]
-    );
+    assert_eq!(listed, vec![from, date(2001, 3, 2)]);
 
-    let day = NaiveDate::from_ymd_opt(2001, 3, 2).expect("有效日期");
+    let day = date(2001, 3, 2);
     let ratios = [
         OfficialRatio {
             stock_symbol: "79979A".to_owned(),
@@ -80,7 +80,7 @@ async fn fill_official_ratios_by_policy() {
     let (pe, pb): (Decimal, Decimal) = sqlx::query_as(
         r#"SELECT "PriceEarningRatio", "price-to-book_ratio" FROM "DailyQuotes" WHERE stock_symbol = '79979A' AND "Date" = $1"#,
     )
-    .bind(day)
+    .bind(day.to_sqlx())
     .fetch_one(pool)
     .await
     .expect("查詢");
@@ -113,7 +113,7 @@ async fn fill_official_ratios_by_policy() {
             price_to_book_ratio: Some(dec!(9.9)),
         }]
     };
-    let date = |d| NaiveDate::from_ymd_opt(2001, 3, d).expect("有效日期");
+    let date = |d| ymd(2001, 3, d).expect("有效日期");
     let fill = |d, pe| {
         let repo = &repo;
         async move {

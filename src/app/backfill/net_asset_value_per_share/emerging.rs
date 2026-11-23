@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::{
     app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update,
     core::util::datetime::Weekend, domain::registry::repository::StockRepository,
@@ -5,16 +6,15 @@ use crate::{
     infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::Result;
-use chrono::{DateTime, Local};
 use scopeguard::defer;
 
 /// 更新興櫃股票的每股淨值
 pub async fn execute() -> Result<()> {
-    run(Local::now()).await
+    run(TaipeiDateTime::now()).await
 }
 
 /// 以 `now` 判斷是否為週末（來源週末不更新，直接結束），平日抓取興櫃名冊後寫回有變動的淨值。
-async fn run(now: DateTime<Local>) -> Result<()> {
+async fn run(now: TaipeiDateTime) -> Result<()> {
     if now.is_weekend() {
         return Ok(());
     }

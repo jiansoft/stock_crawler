@@ -8,7 +8,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{Days, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 /// 統計填息需要的觀察期（交易日）；未滿的事件不列入填息率與中位數。
@@ -151,9 +152,9 @@ fn stats_of(bucket: YieldBucket, samples: &[FillSample]) -> BucketStats {
 
 /// 統計期間 `(起日（不含）, 迄日（含）)`：`today` 往前 `years` 年（每年 365 天，多 1 天涵蓋閏年）。
 #[must_use]
-pub fn stats_window(today: NaiveDate, years: u8) -> (NaiveDate, NaiveDate) {
-    let days = u64::from(years) * 365 + 1;
-    (today - Days::new(days), today)
+pub fn stats_window(today: Date, years: u8) -> (Date, Date) {
+    let days = i64::from(years) * 365 + 1;
+    (today - days.days(), today)
 }
 
 /// 全市場填息樣本的資料來源。
@@ -161,11 +162,7 @@ pub fn stats_window(today: NaiveDate, years: u8) -> (NaiveDate, NaiveDate) {
 pub trait MarketFillQuery: Send + Sync {
     /// 除權息日在 `since`（不含）～`until`（含）之間、上市櫃普通股每次有現金股利的除權息樣本；
     /// 填息目標價依配股調整，與 [`super::fill::fill_target`] 相同。
-    async fn fetch_market_fill_samples(
-        &self,
-        since: NaiveDate,
-        until: NaiveDate,
-    ) -> Result<Vec<FillSample>>;
+    async fn fetch_market_fill_samples(&self, since: Date, until: Date) -> Result<Vec<FillSample>>;
 }
 
 #[cfg(test)]

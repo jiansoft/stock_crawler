@@ -3,13 +3,14 @@
 //! 資料來自 `chip_daily` 的融資融券餘額（張，每晚 21:50 入庫）。期間增減＝資料日餘額減期間第一天的
 //! 前日餘額；券資比＝融券餘額 ÷ 融資餘額。只列資料日有融資融券資料（可信用交易）的上市櫃股票。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Local;
+use jiff_sqlx::ToSqlx;
 
 use super::institutional_flow::{FlowPeriod, MAX_FLOW_DAYS, chip_dates, flow_period};
 use super::relative_strength::market_label;
@@ -120,7 +121,7 @@ pub(crate) async fn margin_ranking(Query(params): Query<MarginRankingParams>) ->
         return response;
     }
 
-    let until = date.unwrap_or_else(|| Local::now().date_naive());
+    let until = date.unwrap_or_else(today);
     let dates = match chip_dates(until).await {
         Ok(dates) => dates,
         Err(response) => return *response,
@@ -129,8 +130,8 @@ pub(crate) async fn margin_ranking(Query(params): Query<MarginRankingParams>) ->
         return error_response(StatusCode::NOT_FOUND, "查無籌碼資料");
     };
     let rows: Vec<MarginRow> = match sqlx::query_as(MARGIN_SQL)
-        .bind(period.data_date)
-        .bind(period.from)
+        .bind(period.data_date.to_sqlx())
+        .bind(period.from.to_sqlx())
         .fetch_all(database::get_connection())
         .await
     {

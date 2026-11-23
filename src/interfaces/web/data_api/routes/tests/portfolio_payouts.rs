@@ -1,9 +1,10 @@
 //! 持股近期股利入帳 endpoint 的資料庫語意整合測試。
 
-use chrono::{Days, NaiveDate};
-
 use super::support::{SEED_STOCK, SYMBOL, cleanup, get, pool_or_skip, seed};
 use super::*;
+use crate::core::util::datetime::today;
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 const MEMBER: i64 = 979_798;
 
@@ -26,10 +27,10 @@ async fn seed_dividend(
     quarter: &str,
     cash: i32,
     stock: i32,
-    ex: NaiveDate,
-    payable: Option<NaiveDate>,
+    ex: Date,
+    payable: Option<Date>,
 ) -> i64 {
-    let text = |date: Option<NaiveDate>| date.map_or_else(|| "-".to_owned(), |d| d.to_string());
+    let text = |date: Option<Date>| date.map_or_else(|| "-".to_owned(), |d| d.to_string());
     sqlx::query_scalar(r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2) VALUES ($1, 2099, 2099, $2, $3, $4, $3 + $4, $5, $6, $7, $8) RETURNING serial"#)
         .bind(SYMBOL)
         .bind(quarter)
@@ -64,12 +65,12 @@ async fn portfolio_upcoming_payouts_endpoint_db_semantics() {
     assert_eq!(json["items"], serde_json::json!([]), "沒有持股");
 
     seed(pool, &[SEED_STOCK]).await;
-    let today = chrono::Local::now().date_naive();
+    let today = today();
     let day = |offset: i64| {
         if offset >= 0 {
-            today + Days::new(offset.unsigned_abs())
+            today + ((offset.unsigned_abs()) as i64).days()
         } else {
-            today - Days::new(offset.unsigned_abs())
+            today - ((offset.unsigned_abs()) as i64).days()
         }
     };
     let holding = |shares: i64, sold: bool| async move {

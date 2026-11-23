@@ -2,6 +2,9 @@
 
 use super::fakes::*;
 use super::*;
+use crate::core::util::datetime::ymd;
+use crate::domain::portfolio::{chip::BrokerPeriodNet, health::HoldingFundamentals};
+use jiff::civil::Date;
 
 /// 完整訊息：三段內容、億元換算、持股上升下降、沒有變化或只有一筆的持股不列。
 #[tokio::test]
@@ -73,20 +76,16 @@ fn build_message_lists_holding_moves() {
             },
         ]
     );
-    let message = build_message(
+    let message = build_holdings_message(
         None,
-        None,
-        None,
-        &[],
         HoldingSection {
             moves: &moves,
             ..Default::default()
         },
-        None,
         name,
     )
     .expect("有持股變化");
-    assert!(message.starts_with(&esc("每週市場摘要\n")), "{message}");
+    assert!(message.starts_with(&esc("每週持股摘要\n")), "{message}");
     assert!(
         message.contains(&esc("• 上升：2317 鴻海 50 → 59（+9）")),
         "{message}"
@@ -96,7 +95,7 @@ fn build_message_lists_holding_moves() {
         "{message}"
     );
     assert!(!message.contains("1101"), "沒有變化的不列");
-    assert!(build_message(None, None, None, &[], HoldingSection::default(), None, name).is_none());
+    assert!(build_message(None, None, None, &[], MarketExtras::default(), None, name).is_none());
 }
 
 /// 各段查詢失敗只略過該段；全部失敗或沒有資料時不發送。
@@ -260,7 +259,7 @@ async fn run_appends_month_seasonality_to_regime() {
 /// 季節性期間：前 8 年同月 1 日到今年同月 1 日的前一天；1 月跨年、閏日也正確。
 #[test]
 fn seasonality_range_covers_the_previous_eight_years() {
-    let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("合法日期");
+    let date = |y, m, d| ymd(y, m, d).expect("合法日期");
     assert_eq!(
         market::seasonality_range(date(2026, 10, 16)),
         (date(2018, 10, 1), date(2026, 9, 30))
@@ -301,4 +300,104 @@ fn number_formats() {
     assert_eq!(signed(-2.24), "-2.2");
     assert_eq!(hundred_million(1.234e9), "+12.3 億");
     assert_eq!(hundred_million(-5e7), "-0.5 億");
+}
+
+/// 持股段的假倉儲：不檢查代號、不回任何資料，只記錄被呼叫的次數。
+#[derive(Default)]
+struct CountingPortfolio {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl HoldingBrokerQuery for CountingPortfolio {
+    async fn fetch_broker_dates(&self, _until: Date, _limit: usize) -> Result<Vec<Date>> {
+        unreachable!("週摘要沿用法人一段的期間，不查主力交易日")
+    }
+
+    async fn fetch_broker_period(
+        &self,
+        _from: Date,
+        _to: Date,
+        _symbols: &[String],
+    ) -> Result<Vec<BrokerPeriodNet>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Vec::new())
+    }
+}
+
+#[async_trait]
+impl HoldingFundamentalsQuery for CountingPortfolio {
+    async fn fetch_holding_fundamentals(
+        &self,
+        _symbols: &[String],
+    ) -> Result<Vec<HoldingFundamentals>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Vec::new())
+    }
+}
+
+/// 防漏（會員系統計畫 7.3）：市場段的產生過程沒有呼叫任何持股查詢，訊息不含持股段落；
+/// 持股段依範圍各自產生，兩個範圍的內容不同。
+#[tokio::test]
+async fn market_section_never_queries_holdings_and_views_differ() {
+    use std::sync::atomic::Ordering;
+
+    let quote = quote();
+    let portfolio = CountingPortfolio::default();
+    let week = market_week(
+        &quote,
+        &chip(),
+        &index(),
+        &FakeValuation::default(),
+        day(17),
+    )
+    .await;
+    let market = market_message(&week, None, None).expect("有市場段");
+    assert_eq!(
+        quote.holding_queries.load(Ordering::SeqCst),
+        0,
+        "市場段不查持股"
+    );
+    assert_eq!(portfolio.calls.load(Ordering::SeqCst), 0, "市場段不查持股");
+    assert!(
+        market.starts_with(&esc("每週市場摘要︰2026-10-16")),
+        "{market}"
+    );
+    for holding_line in ["持股相對強度", "持股基本面警示", "持股法人", "持有 ETF"]
+    {
+        assert!(
+            !market.contains(&esc(holding_line)),
+            "市場段不應有 {holding_line}：{market}"
+        );
+    }
+
+    let sources = HoldingSources {
+        quote: &quote,
+        portfolio: &portfolio,
+    };
+    let scope = |symbol: &str| HoldingData {
+        symbols: BTreeSet::from([symbol.to_owned()]),
+        ..HoldingData::default()
+    };
+    let data_date = week.data_date(None);
+    let first = holdings_message(&sources, &week, data_date, day(17), &scope("2317"))
+        .await
+        .expect("2317 有 RS 變化");
+    let second = holdings_message(&sources, &week, data_date, day(17), &scope("2330"))
+        .await
+        .expect("2330 有 RS 變化");
+    assert!(
+        first.starts_with(&esc("每週持股摘要︰2026-10-16")),
+        "{first}"
+    );
+    assert!(first.contains("2317") && !first.contains("2330"), "{first}");
+    assert!(
+        second.contains("2330") && !second.contains("2317"),
+        "{second}"
+    );
+    assert_eq!(
+        quote.holding_queries.load(Ordering::SeqCst),
+        2,
+        "每個範圍查一次"
+    );
 }

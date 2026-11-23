@@ -4,13 +4,14 @@
 //! 估計金額＝每日淨股數 × 當日收盤價加總，依金額排名；另附占期間成交量比例與截至資料日的
 //! 連續買賣超天數（入庫時預先算好，不限回看長度）。
 
+use crate::core::util::datetime::today;
 use axum::{
     Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
+use jiff::civil::Date;
 
 use super::relative_strength::market_label;
 use super::{
@@ -30,7 +31,7 @@ pub(super) use crate::domain::chip::flow::{
 
 /// `until`（含）之前最近 [`MAX_FLOW_DAYS`] 個有籌碼資料的交易日，由新到舊；查詢失敗時回已組好的
 /// 安全 500 回應。
-pub(super) async fn chip_dates(until: NaiveDate) -> Result<Vec<NaiveDate>, Box<Response>> {
+pub(super) async fn chip_dates(until: Date) -> Result<Vec<Date>, Box<Response>> {
     PgChipRepository::new()
         .fetch_chip_dates(until)
         .await
@@ -41,7 +42,7 @@ pub(super) async fn chip_dates(until: NaiveDate) -> Result<Vec<NaiveDate>, Box<R
 ///
 /// 沒有任何籌碼資料回 `Ok(None)`；查詢失敗時回已組好的安全 500 回應，呼叫端直接回傳即可。
 pub(super) async fn load_flows(
-    until: NaiveDate,
+    until: Date,
     days: usize,
     investor: &str,
 ) -> Result<Option<(FlowPeriod, Vec<FlowRow>)>, Box<Response>> {
@@ -54,8 +55,8 @@ pub(super) async fn load_flows(
 ///
 /// 沒有任何籌碼資料回 `Ok(None)`；查詢失敗時回已組好的安全 500 回應。
 pub(super) async fn load_streaks(
-    until: NaiveDate,
-) -> Result<Option<(NaiveDate, Vec<StreakRow>)>, Box<Response>> {
+    until: Date,
+) -> Result<Option<(Date, Vec<StreakRow>)>, Box<Response>> {
     flow::load_streaks(&PgChipRepository::new(), until)
         .await
         .map_err(|error| Box::new(repository_error(error)))
@@ -106,7 +107,7 @@ pub(crate) async fn institutional_flow(Query(params): Query<InstitutionalFlowPar
         return response;
     }
 
-    let until = date.unwrap_or_else(|| Local::now().date_naive());
+    let until = date.unwrap_or_else(today);
     match load_flows(until, usize::from(days), investor).await {
         Ok(Some((period, rows))) => Json(build_response(
             period,

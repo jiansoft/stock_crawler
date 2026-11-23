@@ -1,8 +1,8 @@
 use std::{future::Future, time::Duration};
 
 use anyhow::{Context, Result};
-use chrono::NaiveDate;
 use futures::{StreamExt, stream};
+use jiff::civil::Date;
 
 use crate::{
     app::backfill::acl::QuoteAclMapper,
@@ -25,7 +25,7 @@ use crate::{
 ///
 /// 這個順序修正了舊版「先刪除、再抓取」的缺陷：舊版若在抓取或寫入階段失敗，
 /// 已刪除的資料無法復原，該交易日的行情會永久遺失。
-pub async fn execute(date: NaiveDate) -> Result<usize> {
+pub async fn execute(date: Date) -> Result<usize> {
     // 步驟 1：並行抓取上市與上櫃報價（tokio::join! 讓兩個請求同時進行以節省時間）。
     // 注意：此時尚未動到資料庫任何一筆資料。
     let twse = get_quotes_from_source(twse::quote::visit(date), "上市");
@@ -69,7 +69,7 @@ pub async fn execute(date: NaiveDate) -> Result<usize> {
     if should_save {
         let new_config = SystemConfig::new(
             "last-closing-day".to_string(),
-            date.format("%Y-%m-%d").to_string(),
+            date.strftime("%Y-%m-%d").to_string(),
         );
         config_repo.save(&new_config).await?;
     }
@@ -115,7 +115,7 @@ pub async fn get_quotes_from_source(
 /// 寫入採用 [`QuoteRepository::replace_quotes_by_date`]：在同一個 transaction 內
 /// 先刪除 `date` 當日既有報價、再以 COPY 批次寫入新報價，兩步同生共死。
 /// 只有寫入成功後才會更新記憶體快取，避免快取與資料庫內容不一致。
-pub async fn process_quotes(date: NaiveDate, quotes: Vec<DailyQuoteDto>) -> Result<usize> {
+pub async fn process_quotes(date: Date, quotes: Vec<DailyQuoteDto>) -> Result<usize> {
     // 將 DTO 轉換為指令對象
     let cmds: Vec<_> = quotes.iter().map(QuoteAclMapper::from_dto).collect();
     // 直接將指令對象轉換為領域層的每日報價實體

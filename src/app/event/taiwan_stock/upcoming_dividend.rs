@@ -49,7 +49,7 @@ pub(super) fn item_lines(items: &[UpcomingLine]) -> Vec<String> {
             .map_or_else(String::new, |text| format!("；{text}"));
         lines.push(format!(
             "• {} {} {}（{} 股）{}{fill}",
-            dividend.ex_date.format("%m-%d"),
+            dividend.ex_date.strftime("%m-%d"),
             dividend.stock_symbol,
             dividend.name,
             format_decimal_with_commas(Decimal::from(dividend.shares)),

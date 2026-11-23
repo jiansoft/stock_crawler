@@ -3,13 +3,13 @@
 //! 由 [`super::layer::FileLogLayer`] 呼叫 [`forward_to_seq`]；背景 worker 使用專屬 thread 與
 //! runtime，Seq 不可用時只丟棄事件，不影響檔案日誌。
 
+use jiff::Timestamp;
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicBool, Ordering},
     thread,
 };
 
-use chrono::{SecondsFormat, Utc};
 use once_cell::sync::OnceCell;
 use reqwest::Client;
 use serde::Serialize;
@@ -332,7 +332,10 @@ pub(super) fn forward_to_seq(
 
     if let Some(sender) = SEQ_SENDER.get() {
         let event = SeqEvent {
-            timestamp: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
+            // 與 chrono 的 to_rfc3339_opts(Micros, true) 相同：UTC、固定 6 位小數、Z 結尾
+            timestamp: Timestamp::now()
+                .strftime("%Y-%m-%dT%H:%M:%S%.6fZ")
+                .to_string(),
             message_template: message.to_string(),
             level: level.as_seq_level(),
             service: SEQ_SERVICE_NAME,

@@ -1,3 +1,4 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use crate::domain::market_index::breadth::{BreadthDay, BreadthQuery};
 use crate::domain::market_index::entity::MarketIndex;
 use crate::domain::market_index::regime::IndexCloseQuery;
@@ -5,7 +6,8 @@ use crate::domain::market_index::repository::MarketIndexRepository;
 use crate::infra::database;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Local, NaiveDate};
+use jiff::civil::Date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal::Decimal;
 use sqlx::FromRow;
 
@@ -31,14 +33,15 @@ impl Default for PgMarketIndexRepository {
 #[derive(FromRow)]
 struct IndexDbRow {
     category: String,
-    date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    date: Date,
     index: Decimal,
     change: Decimal,
     trade_value: Decimal,
     transaction: Decimal,
     trading_volume: Decimal,
-    create_time: DateTime<Local>,
-    update_time: DateTime<Local>,
+    create_time: TaipeiDateTime,
+    update_time: TaipeiDateTime,
 }
 
 impl From<IndexDbRow> for MarketIndex {
@@ -119,7 +122,7 @@ impl MarketIndexRepository for PgMarketIndexRepository {
 
         sqlx::query(sql)
             .bind(&market_index.category)
-            .bind(market_index.date)
+            .bind(market_index.date.to_sqlx())
             .bind(market_index.trading_volume)
             .bind(market_index.transaction)
             .bind(market_index.trade_value)
@@ -141,9 +144,9 @@ impl IndexCloseQuery for PgMarketIndexRepository {
     async fn fetch_index_closes(
         &self,
         category: &str,
-        until: Option<NaiveDate>,
+        until: Option<Date>,
         limit: usize,
-    ) -> Result<Vec<(NaiveDate, f64)>> {
+    ) -> Result<Vec<(Date, f64)>> {
         let sql = r#"
             SELECT "date", "index"::float8
             FROM "index"
@@ -151,12 +154,17 @@ impl IndexCloseQuery for PgMarketIndexRepository {
             ORDER BY "date" DESC
             LIMIT $3
         "#;
-        sqlx::query_as(sql)
+        sqlx::query_as::<_, (jiff_sqlx::Date, f64)>(sql)
             .bind(category)
-            .bind(until)
+            .bind(until.map(ToSqlx::to_sqlx))
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .fetch_all(database::get_connection())
             .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|(c0, c1)| (crate::infra::database::jiff_types::from_wire(c0), c1))
+                    .collect::<Vec<_>>()
+            })
             .context("Failed to fetch index closes from PG")
     }
 }
@@ -164,11 +172,7 @@ impl IndexCloseQuery for PgMarketIndexRepository {
 #[async_trait]
 impl BreadthQuery for PgMarketIndexRepository {
     /// 上市櫃合併（市場 id 0）在 `until`（含）之前最近 `limit` 個交易日的市場廣度，由新到舊。
-    async fn fetch_breadth(
-        &self,
-        until: Option<NaiveDate>,
-        limit: usize,
-    ) -> Result<Vec<BreadthDay>> {
+    async fn fetch_breadth(&self, until: Option<Date>, limit: usize) -> Result<Vec<BreadthDay>> {
         let sql = r#"
             SELECT date,
                    above_20_day_moving_average, below_20_day_moving_average,
@@ -180,12 +184,30 @@ impl BreadthQuery for PgMarketIndexRepository {
             ORDER BY date DESC
             LIMIT $2
         "#;
-        let rows: Vec<(NaiveDate, i32, i32, i32, i32, i32, i32, i32, i32)> = sqlx::query_as(sql)
-            .bind(until)
-            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
-            .fetch_all(database::get_connection())
-            .await
-            .context("Failed to fetch market breadth from PG")?;
+        let rows: Vec<(Date, i32, i32, i32, i32, i32, i32, i32, i32)> =
+            sqlx::query_as::<_, (jiff_sqlx::Date, i32, i32, i32, i32, i32, i32, i32, i32)>(sql)
+                .bind(until.map(ToSqlx::to_sqlx))
+                .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+                .fetch_all(database::get_connection())
+                .await
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|(c0, c1, c2, c3, c4, c5, c6, c7, c8)| {
+                            (
+                                crate::infra::database::jiff_types::from_wire(c0),
+                                c1,
+                                c2,
+                                c3,
+                                c4,
+                                c5,
+                                c6,
+                                c7,
+                                c8,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .context("Failed to fetch market breadth from PG")?;
         Ok(rows
             .into_iter()
             .map(

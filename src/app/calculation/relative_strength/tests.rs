@@ -1,5 +1,7 @@
 //! 收盤後寫入每日相對強度的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
 use std::sync::Mutex;
 
 use anyhow::anyhow;
@@ -9,8 +11,8 @@ use super::*;
 use crate::domain::quote::relative_strength::{RelativeStrengthDay, ScoredStock, UniverseRow};
 use crate::domain::quote::technical::StockTechnicalSignal;
 
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期")
+fn day(d: u32) -> Date {
+    ymd(2026, 10, d).expect("合法日期")
 }
 
 fn scored(symbol: &str) -> ScoredStock {
@@ -35,18 +37,18 @@ fn scored(symbol: &str) -> ScoredStock {
 /// 回傳固定全體分數與前一天分數、記錄寫入的假倉儲。
 #[derive(Default)]
 struct FakeRepo {
-    universe: Option<(NaiveDate, Vec<ScoredStock>)>,
+    universe: Option<(Date, Vec<ScoredStock>)>,
     previous: Vec<RelativeStrengthDay>,
     fail: bool,
-    written: Mutex<Vec<(NaiveDate, usize, Vec<String>)>>,
-    asked: Mutex<Vec<NaiveDate>>,
+    written: Mutex<Vec<(Date, usize, Vec<String>)>>,
+    asked: Mutex<Vec<Date>>,
 }
 
 #[async_trait]
 impl RelativeStrengthQuery for FakeRepo {
     async fn fetch_relative_strength(
         &self,
-        until: NaiveDate,
+        until: Date,
         days: u16,
         _stock_symbols: &[String],
     ) -> Result<Vec<RelativeStrengthDay>> {
@@ -60,8 +62,8 @@ impl RelativeStrengthQuery for FakeRepo {
 impl ScoredUniverseQuery for FakeRepo {
     async fn fetch_scored_universe(
         &self,
-        _until: NaiveDate,
-    ) -> Result<Option<(NaiveDate, Vec<ScoredStock>)>> {
+        _until: Date,
+    ) -> Result<Option<(Date, Vec<ScoredStock>)>> {
         Ok(self.universe.clone())
     }
 }
@@ -70,7 +72,7 @@ impl ScoredUniverseQuery for FakeRepo {
 impl RelativeStrengthRepository for FakeRepo {
     async fn replace_relative_strength(
         &self,
-        date: NaiveDate,
+        date: Date,
         scored: &[ScoredStock],
         signals: &[StockTechnicalSignal],
     ) -> Result<u64> {

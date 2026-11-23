@@ -3,6 +3,7 @@
 //! 同一個 endpoint 依即時快取狀態切換資料來源：盤中走記憶體即時報價快照，
 //! 非交易時段走 `"DailyQuotes"` 最新交易日（movers 計畫 §3）。
 
+use crate::core::util::datetime::today;
 use std::collections::HashMap;
 
 use axum::{
@@ -11,7 +12,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::{analytical_decimal_to_f64, database_error, error_response, market_id_for_stocks};
@@ -248,12 +248,12 @@ fn rank_realtime_candidates(
         .iter()
         .map(|candidate| candidate.snapshot.updated_at)
         .max()
-        .map(|updated_at| updated_at.to_rfc3339());
+        .map(crate::core::util::datetime::rfc3339_utc::to_rfc3339);
     candidates.truncate(usize::from(limit));
 
     MarketMoversResponse {
         // 盤中即時資料的日期就是台北時區的今天（容器時區為 Asia/Taipei）。
-        data_as_of: Local::now().date_naive().format("%Y-%m-%d").to_string(),
+        data_as_of: today().strftime("%Y-%m-%d").to_string(),
         source: "realtime".to_owned(),
         is_realtime: true,
         rank_by: rank_by.as_str().to_owned(),

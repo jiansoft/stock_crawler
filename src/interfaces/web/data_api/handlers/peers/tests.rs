@@ -1,5 +1,7 @@
 //! `/stocks/{symbol}/peers` handler：同產業個股的估值、殖利率、財務體質與營收成長比較的測試。
 
+use crate::core::util::datetime::ymd;
+use jiff::civil::date;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -9,7 +11,7 @@ fn row(symbol: &str, market_cap: Option<Decimal>, pe: Decimal, yoy: Option<Decim
         stock_symbol: symbol.to_owned(),
         name: format!("{symbol} 名稱"),
         market_id: 2,
-        quote_date: NaiveDate::from_ymd_opt(2026, 10, 12).expect("有效日期"),
+        quote_date: date(2026, 10, 12),
         closing_price: dec!(100),
         market_cap,
         price_earning_ratio: pe,
@@ -116,7 +118,7 @@ fn build_response_without_target_quote() {
 /// 營收最舊可接受月份為今天往前 3 個月（跨年）。
 #[test]
 fn revenue_month_floor_goes_back_three_months() {
-    let day = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("有效日期");
+    let day = |y, m, d| ymd(y, m, d).expect("有效日期");
     assert_eq!(revenue_month_floor(day(2026, 10, 12)), 202607);
     assert_eq!(revenue_month_floor(day(2026, 2, 28)), 202511);
 }

@@ -1,7 +1,8 @@
 //! revenue的測試；連外的測試標 #[ignore]。
 
-use chrono::prelude::*;
-use chrono::{Local, TimeDelta};
+use crate::core::util::datetime::TaipeiDateTime;
+use jiff::SignedDuration;
+use jiff::civil::date;
 use std::time::Duration;
 
 use super::*;
@@ -60,17 +61,11 @@ fn test_parse_revenue_html_skips_short_rows() {
 async fn test_visit() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
-    let _now = Local::now();
+    let _now = TaipeiDateTime::now();
 
-    let naive_datetime = NaiveDate::from_ymd_opt(2026, 2, 1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap();
-
-    let last_month = naive_datetime - TimeDelta::try_minutes(1).unwrap();
-
-    let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-    let last_month_timezone = timezone.from_local_datetime(&last_month).unwrap();
+    let last_month_timezone = TaipeiDateTime::from_datetime(date(2026, 2, 1).at(0, 0, 0, 0))
+        .expect("合法時間")
+        - SignedDuration::from_mins(1);
     println!("last_month_timezone:{:?}", last_month_timezone);
     match visit(last_month_timezone).await {
         Err(why) => {
@@ -99,9 +94,8 @@ async fn visit_merges_pages_and_skips_failed_ones() {
         .respond_with(ResponseTemplate::new(200).set_body_raw(big5.into_owned(), "text/html"))
         .mount(&server)
         .await;
-    let date_time = FixedOffset::east_opt(8 * 3600)
-        .and_then(|offset| offset.with_ymd_and_hms(2026, 5, 10, 12, 0, 0).single())
-        .expect("有效時間");
+    let date_time =
+        TaipeiDateTime::from_datetime(date(2026, 5, 10).at(12, 0, 0, 0)).expect("有效時間");
 
     let revenues = with_origins(
         &[("https://mopsov.twse.com.tw", &server.uri())],

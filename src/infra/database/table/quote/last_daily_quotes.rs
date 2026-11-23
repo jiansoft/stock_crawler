@@ -1,5 +1,7 @@
+use crate::core::util::datetime::TaipeiDateTime;
 use anyhow::{Context, Result, anyhow};
-use chrono::{Local, NaiveDate, TimeDelta};
+use jiff::ToSpan;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
 
@@ -9,7 +11,8 @@ use crate::infra::database;
 #[derive(sqlx::FromRow, Debug)]
 pub struct LastDailyQuotes {
     /// 報價日期。
-    pub date: NaiveDate,
+    #[sqlx(try_from = "jiff_sqlx::Date")]
+    pub date: Date,
     /// 收盤價
     pub closing_price: Decimal,
     /// 股票代號。
@@ -101,7 +104,7 @@ WHERE "Serial" IN
 )
 ORDER BY "stock_symbol"
 "#;
-        let month_ago = Local::now() - TimeDelta::try_days(30).unwrap();
+        let month_ago = TaipeiDateTime::now() - 30.days();
         match sqlx::query(sql)
             .bind(month_ago)
             .execute(&mut *tx)

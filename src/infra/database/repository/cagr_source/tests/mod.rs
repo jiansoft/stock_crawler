@@ -1,6 +1,10 @@
 //! CAGR 資料來源倉儲的測試：共用的假資料與交易日、價格、除權息查詢；異常偵測在 `anomaly`。
 
 use super::*;
+use crate::core::util::datetime::ymd;
+use jiff::civil::Date;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use rust_decimal_macros::dec;
 
 mod anomaly;
@@ -14,8 +18,8 @@ const FAKE_C: &str = "79979S3";
 
 /// 測試資料一律落在 1990 年初 —— 遠早於 `DailyQuotes` 實際涵蓋的 2012 年，
 /// 既不會與正式資料互相干擾，也仍在哨兵值 `1990-01-01` 之後。
-fn day(d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(1990, 1, d).expect("測試日期應合法")
+fn day(d: u32) -> Date {
+    ymd(1990, 1, d).expect("測試日期應合法")
 }
 
 async fn cleanup() {
@@ -41,35 +45,30 @@ async fn cleanup() {
 /// 在 1989 年底補 5 筆前置報價，讓 1990 年初的跳動不落在上市初期。
 async fn insert_listing_history(symbol: &str) {
     for d in 18..=22 {
-        insert_quote(
-            symbol,
-            NaiveDate::from_ymd_opt(1989, 12, d).unwrap(),
-            dec!(100),
-        )
-        .await;
+        insert_quote(symbol, ymd(1989, 12, d).unwrap(), dec!(100)).await;
     }
 }
 
-async fn insert_corporate_action(symbol: &str, date: NaiveDate, ratio: Decimal) {
+async fn insert_corporate_action(symbol: &str, date: Date, ratio: Decimal) {
     sqlx::query(
         r#"INSERT INTO corporate_action (stock_symbol, effective_date, action_type, share_ratio, note)
            VALUES ($1, $2, 'split', $3, '測試用')
            ON CONFLICT (stock_symbol, effective_date) DO UPDATE SET share_ratio = excluded.share_ratio"#,
     )
     .bind(symbol)
-    .bind(date)
+    .bind(date.to_sqlx())
     .bind(ratio)
     .execute(database::get_connection())
     .await
     .expect("插入公司行動");
 }
 
-async fn insert_quote(symbol: &str, date: NaiveDate, close: Decimal) {
+async fn insert_quote(symbol: &str, date: Date, close: Decimal) {
     sqlx::query(
         r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
            VALUES ($1, $2, $3, 1000)"#,
     )
-    .bind(date)
+    .bind(date.to_sqlx())
     .bind(symbol)
     .bind(close)
     .execute(database::get_connection())
@@ -130,12 +129,7 @@ async fn seed() {
     insert_stock(FAKE_B, true).await;
 
     // 1970-01-01 是資料庫中實際存在的預設哨兵值，必須被所有查詢排除。
-    insert_quote(
-        FAKE_A,
-        NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
-        dec!(1),
-    )
-    .await;
+    insert_quote(FAKE_A, date(1970, 1, 1), dec!(1)).await;
     insert_quote(FAKE_A, day(2), dec!(100)).await;
     insert_quote(FAKE_A, day(3), dec!(160)).await;
     // 收盤價為零者視同無報價。
@@ -191,7 +185,7 @@ async fn test_trading_day_and_symbol_queries() {
     );
     // 哨兵值 1970-01-01 不得被當成交易日。
     assert_eq!(
-        repo.fetch_trading_day_on_or_before(NaiveDate::from_ymd_opt(1989, 12, 31).unwrap())
+        repo.fetch_trading_day_on_or_before(date(1989, 12, 31))
             .await
             .expect("fetch_trading_day_on_or_before"),
         None
@@ -336,10 +330,7 @@ async fn test_dividend_events_deduplicate_and_tolerate_dirty_dates() {
         .find(|event| event.ex_dividend_date_stock.is_some())
         .expect("應取得只有除權日的事件");
     assert_eq!(dirty.ex_dividend_date_cash, None);
-    assert_eq!(
-        dirty.ex_dividend_date_stock,
-        NaiveDate::from_ymd_opt(1991, 3, 1)
-    );
+    assert_eq!(dirty.ex_dividend_date_stock, ymd(1991, 3, 1));
 
     // 兩個日期都是髒值的事件無法定位，整筆略過。
     assert!(
@@ -349,7 +340,7 @@ async fn test_dividend_events_deduplicate_and_tolerate_dirty_dates() {
 
     // since 之後才生效：1991 的事件仍在，1990 的已被濾掉。
     let later = repo
-        .fetch_dividend_events_since(NaiveDate::from_ymd_opt(1991, 1, 1).unwrap())
+        .fetch_dividend_events_since(date(1991, 1, 1))
         .await
         .expect("fetch_dividend_events_since later");
     let later_mine: Vec<&DividendEvent> = later
@@ -365,14 +356,8 @@ async fn test_dividend_events_deduplicate_and_tolerate_dirty_dates() {
 /// 驗證髒值一律回傳 `None`，合法日期正常解析。
 #[test]
 fn test_parse_ex_dividend_date() {
-    assert_eq!(
-        parse_ex_dividend_date("2024-07-11"),
-        NaiveDate::from_ymd_opt(2024, 7, 11)
-    );
-    assert_eq!(
-        parse_ex_dividend_date(" 2024-07-11 "),
-        NaiveDate::from_ymd_opt(2024, 7, 11)
-    );
+    assert_eq!(parse_ex_dividend_date("2024-07-11"), ymd(2024, 7, 11));
+    assert_eq!(parse_ex_dividend_date(" 2024-07-11 "), ymd(2024, 7, 11));
 
     // 以下皆為資料庫中實際出現過的髒值。
     assert_eq!(parse_ex_dividend_date("-"), None);

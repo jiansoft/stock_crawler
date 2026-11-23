@@ -5,7 +5,7 @@
 //! 以及以「固定欄位順序」對應欄位（TPEx 收盤行情等）。
 //! 實際的欄位數值解析規則集中在 [`super::quote_field`]。
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use rust_decimal::Decimal;
 
 use super::quote_field::{QuoteParseError, parse_quote_decimal, parse_soft_quote_decimal};
@@ -17,7 +17,7 @@ pub struct DailyQuoteDto {
     /// 股票代號
     pub symbol: String,
     /// 交易日期
-    pub date: NaiveDate,
+    pub date: Date,
     /// 開盤價
     pub opening_price: Decimal,
     /// 最高價
@@ -52,7 +52,7 @@ pub struct DailyQuoteDto {
 
 impl DailyQuoteDto {
     /// 建立 `DailyQuoteDto` 預設實例，並同步初始化代碼與日期。
-    pub fn new<S: Into<String>>(symbol: S, date: NaiveDate) -> Self {
+    pub fn new<S: Into<String>>(symbol: S, date: Date) -> Self {
         Self {
             symbol: symbol.into(),
             date,
@@ -91,7 +91,7 @@ impl DailyQuoteDto {
     pub fn from_with_map(
         item: &[String],
         map: &std::collections::HashMap<&str, usize>,
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Self, QuoteParseError> {
         // 依欄位名稱取出原始字串；欄位不存在或索引超界都視為結構性錯誤。
         let get_field = |field: &'static str| -> Result<&String, QuoteParseError> {
@@ -144,7 +144,7 @@ impl DailyQuoteDto {
     pub fn from_with_exchange(
         exchange: StockExchange,
         item: &[String],
-        date: NaiveDate,
+        date: Date,
     ) -> Result<Self, QuoteParseError> {
         // 第 0 欄固定是證券代號；整列為空時直接視為缺欄位。
         let symbol = item.first().ok_or(QuoteParseError::MissingField {

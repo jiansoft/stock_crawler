@@ -6,10 +6,11 @@
 //! [`PortfolioRepository::fetch_payout_allocations`]（已領明細，沒有時以目前持股推算），與
 //! `/portfolio/upcoming-payouts`、`/portfolio/dividend-income` 相同。各段沒有資料就不列。
 
+use jiff::ToSpan;
+use jiff::civil::Date;
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use chrono::{Datelike, Days, Months, NaiveDate};
 use rust_decimal::Decimal;
 
 pub(super) use super::super::upcoming_dividend::UpcomingLine;
@@ -19,6 +20,7 @@ use crate::app::calculation::{
     dividend_fill_hints::FillHints,
     upcoming_dividends::{ExDividendDayQuery, UpcomingDividend, upcoming_dividends},
 };
+use crate::domain::portfolio::view::HoldingView;
 use crate::domain::portfolio::{
     payout::{self, DividendPayout},
     repository::PortfolioRepository,
@@ -28,9 +30,9 @@ use crate::domain::portfolio::{
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct UpcomingSection {
     /// 下週一。
-    pub(super) from: NaiveDate,
+    pub(super) from: Date,
     /// 下週五。
-    pub(super) to: NaiveDate,
+    pub(super) to: Date,
     /// 除權息，依除權息日、代號排序。
     pub(super) items: Vec<UpcomingLine>,
     /// 股利入帳（全部會員合併），依發放日、代號排序。
@@ -53,18 +55,19 @@ pub(super) struct MonthIncome {
 }
 
 /// 下週一到週五；週六執行時是後天到下下週一的前一天。
-pub(super) fn next_week(today: NaiveDate) -> (NaiveDate, NaiveDate) {
-    let days_to_monday = 7 - u64::from(today.weekday().num_days_from_monday());
-    let monday = today + Days::new(days_to_monday);
-    (monday, monday + Days::new(4))
+pub(super) fn next_week(today: Date) -> (Date, Date) {
+    let days_to_monday = 7 - today.weekday().to_monday_zero_offset();
+    let monday = today + days_to_monday.days();
+    (monday, monday + 4.days())
 }
 
 /// 載入下週一段：持股除權息（附近 5 年填息）與股利入帳；入帳查詢失敗只少入帳那段。
 pub(super) async fn load_upcoming(
     dividends_query: &impl ExDividendDayQuery,
     portfolio: &impl PortfolioRepository,
+    view: &HoldingView,
     shares: &BTreeMap<String, i64>,
-    today: NaiveDate,
+    today: Date,
 ) -> Option<UpcomingSection> {
     let (from, to) = next_week(today);
     let dividends = upcoming_dividends(dividends_query, shares, from, to).await;
@@ -77,16 +80,18 @@ pub(super) async fn load_upcoming(
             .collect();
         FillHints::load(&symbols, today).await
     };
-    let payouts = next_week_payouts(portfolio, today)
+    let payouts = next_week_payouts(portfolio, view, today)
         .await
         .unwrap_or_else(|why| {
             tracing::warn!("每週市場摘要：讀取下週持股股利入帳失敗: {why:#}");
             Vec::new()
         });
-    let month = month_income(portfolio, today).await.unwrap_or_else(|why| {
-        tracing::warn!("每週市場摘要：讀取本月持股股利入帳失敗: {why:#}");
-        None
-    });
+    let month = month_income(portfolio, view, today)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("每週市場摘要：讀取本月持股股利入帳失敗: {why:#}");
+            None
+        });
     upcoming_section(dividends, &hints, today, payouts, month)
 }
 
@@ -97,16 +102,17 @@ pub(super) async fn load_upcoming(
 /// 任一查詢失敗時回傳錯誤。
 pub(super) async fn month_income(
     repo: &impl PortfolioRepository,
-    today: NaiveDate,
+    view: &HoldingView,
+    today: Date,
 ) -> Result<Option<MonthIncome>> {
-    let first = today - Days::new(u64::from(today.day0()));
-    let this_month = payouts_between(repo, first, today).await?;
-    let last_year = payouts_between(repo, first - Months::new(12), today).await?;
+    let first = today.first_of_month();
+    let this_month = payouts_between(repo, view, first, today).await?;
+    let last_year = payouts_between(repo, view, first - 12.months(), today).await?;
     let (received, pending): (Vec<_>, Vec<_>) = this_month
         .into_iter()
         .partition(|payout| payout.payable_date <= today);
     let income = MonthIncome {
-        month: today.month(),
+        month: u32::from(today.month().unsigned_abs()),
         received: payout::total_cash(&received),
         pending: payout::total_cash(&pending),
         last_year: payout::total_cash(&last_year),
@@ -118,11 +124,14 @@ pub(super) async fn month_income(
 /// `first`（某月 1 日）整個月的入帳，全部會員合併。
 async fn payouts_between(
     repo: &impl PortfolioRepository,
-    first: NaiveDate,
-    today: NaiveDate,
+    view: &HoldingView,
+    first: Date,
+    today: Date,
 ) -> Result<Vec<DividendPayout>> {
-    let last = first + Months::new(1) - Days::new(1);
-    let allocations = repo.fetch_payout_allocations(0, first, last, today).await?;
+    let last = first + 1.months() - 1.days();
+    let allocations = repo
+        .fetch_payout_allocations(view, first, last, today)
+        .await?;
     Ok(payout::merge_members(payout::split_by_payable_date(
         &allocations,
         first,
@@ -137,10 +146,11 @@ async fn payouts_between(
 /// 查詢失敗時回傳錯誤。
 pub(super) async fn next_week_payouts(
     repo: &impl PortfolioRepository,
-    today: NaiveDate,
+    view: &HoldingView,
+    today: Date,
 ) -> Result<Vec<DividendPayout>> {
     let (from, to) = next_week(today);
-    let allocations = repo.fetch_payout_allocations(0, from, to, today).await?;
+    let allocations = repo.fetch_payout_allocations(view, from, to, today).await?;
     Ok(payout::merge_members(payout::split_by_payable_date(
         &allocations,
         from,
@@ -152,7 +162,7 @@ pub(super) async fn next_week_payouts(
 pub(super) fn upcoming_section(
     dividends: Vec<UpcomingDividend>,
     hints: &FillHints,
-    today: NaiveDate,
+    today: Date,
     payouts: Vec<DividendPayout>,
     month: Option<MonthIncome>,
 ) -> Option<UpcomingSection> {
@@ -173,8 +183,8 @@ pub(super) fn upcoming_section(
 pub(super) fn lines(section: &UpcomingSection) -> Vec<String> {
     let period = format!(
         "{}～{}",
-        section.from.format("%m-%d"),
-        section.to.format("%m-%d")
+        section.from.strftime("%m-%d"),
+        section.to.strftime("%m-%d")
     );
     let mut lines = Vec::new();
     if !section.items.is_empty() {
@@ -226,7 +236,7 @@ fn payout_line(item: &DividendPayout) -> String {
     };
     format!(
         "• {} {} {}（{} 股）{}{estimated}",
-        item.payable_date.format("%m-%d"),
+        item.payable_date.strftime("%m-%d"),
         item.stock_symbol,
         item.name,
         format_share_quantity(item.shares),

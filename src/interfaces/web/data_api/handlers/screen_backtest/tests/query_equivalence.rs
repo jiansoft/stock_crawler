@@ -1,5 +1,8 @@
 //! 在臨時庫比對成交金額物化、次日開盤價依日期物化前後的候選股、續抱與逐期報酬。
 
+use jiff::ToSpan;
+use jiff::civil::date;
+use jiff_sqlx::ToSqlx;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -110,14 +113,14 @@ async fn hold_trade_values_are_filled_from_daily_quotes() {
     use super::super::engine::fill_hold_trade_values;
     let pool = database::get_connection();
     let symbol = "79979P2A";
-    let first = NaiveDate::from_ymd_opt(1992, 3, 2).expect("有效日期");
+    let first = date(1992, 3, 2);
     sqlx::query(r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradeValue") SELECT $2::date + n, $1, 10, 100 * (n + 1) FROM generate_series(0, 4) AS n"#)
         .bind(symbol)
-        .bind(first)
+        .bind(first.to_sqlx())
         .execute(pool)
         .await
         .unwrap();
-    let date = first + chrono::Days::new(4);
+    let date = first + 4.days();
     let mut rows = vec![PeriodRow {
         date,
         symbols: vec![
@@ -128,7 +131,7 @@ async fn hold_trade_values_are_filled_from_daily_quotes() {
         trade_values: vec![None, None, Some(1.0)],
         ..Default::default()
     }];
-    let starts = std::collections::HashMap::from([(date, first + chrono::Days::new(2))]);
+    let starts = std::collections::HashMap::from([(date, first + 2.days())]);
 
     let filled = fill_hold_trade_values(&mut rows, &starts).await;
 
