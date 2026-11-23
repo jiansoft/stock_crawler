@@ -6,7 +6,7 @@
 //!   `value.map(ToSqlx::to_sqlx)`。
 //! * `FromRow` 欄位：非 `Option` 的 `jiff::civil::Date` 標 `#[sqlx(try_from = "jiff_sqlx::Date")]`；
 //!   `Option<Date>` 標 `#[sqlx(try_from = "Nullable<jiff_sqlx::Date>")]`。
-//! * [`TaipeiDateTime`]（`timestamptz`）本身就實作了 sqlx 的型別特徵，直接綁定與讀取即可，
+//! * [`TaipeiDateTime`](crate::core::util::datetime::TaipeiDateTime)（`timestamptz`）本身就實作了 sqlx 的型別特徵，直接綁定與讀取即可，
 //!   `Option<TaipeiDateTime>` 也一樣。
 
 use jiff::Timestamp;

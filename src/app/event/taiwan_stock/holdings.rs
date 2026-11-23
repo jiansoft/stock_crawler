@@ -3,7 +3,7 @@
 //! 持股法說會、主力進出、董監質押等通知都只看「目前持股中的普通股」，
 //! 這裡集中取代號與股名，避免各通知各寫一份篩選規則。
 //!
-//! 持股一律依收件者的可見範圍（[`HoldingView`]）查詢（會員系統計畫 7.6）。
+//! 持股一律依收件者的可見範圍（[`HoldingView`](crate::domain::portfolio::view::HoldingView)）查詢（會員系統計畫 7.6）。
 
 use std::collections::BTreeSet;
 
