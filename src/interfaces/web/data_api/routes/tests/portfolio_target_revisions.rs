@@ -1,11 +1,11 @@
 //! 目標配置歷史版本端點的隔離資料庫語意：列出、還原、參數驗證與跨會員隔離。
-use super::support::{get, pool_or_skip};
+use super::support::{api_key, get, pool_or_skip};
 use super::*;
 use serde_json::{Value, json};
 
 /// 帶同一組測試 Bearer 金鑰送出 JSON 請求（PUT 目標配置或 POST 還原）。
 async fn send(method: &str, path: &str, body: Value) -> (StatusCode, Value) {
-    let key = std::env::var("DATA_API_KEY").expect("先以 get 建立測試金鑰");
+    let key = api_key();
     let response = router()
         .oneshot(
             Request::builder()
